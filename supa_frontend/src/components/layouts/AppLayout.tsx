@@ -1,0 +1,29 @@
+
+import { SiteHeader } from "@/components/layouts/Header"
+import AdminSidebar from "@/components/layouts/AdminSidebar"
+
+export default function AppLayout({
+    children,
+    adminNav = false,
+    hideAdminLinks = false,
+}: Readonly<{
+    children: React.ReactNode;
+    adminNav?: boolean;
+    hideAdminLinks?: boolean;
+}>) {
+    return (
+        <div className="relative flex min-h-screen flex-col bg-slate-50">
+            <SiteHeader hideAdminLinks={hideAdminLinks} />
+            <div className="mx-auto w-full max-w-7xl flex-1 px-3 pb-6 pt-4 sm:px-4 md:px-6 md:pt-6">
+                {adminNav ? (
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+                        <AdminSidebar />
+                        <main className="min-w-0 flex-1">{children}</main>
+                    </div>
+                ) : (
+                    children
+                )}
+            </div>
+        </div>
+    );
+}

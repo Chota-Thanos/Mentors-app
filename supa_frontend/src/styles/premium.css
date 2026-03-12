@@ -1,0 +1,82 @@
+:root {
+  --premium-bg: #f8fafc;
+  --premium-surface: #ffffff;
+  --premium-surface-muted: #f8fafc;
+  --premium-border: #dbe3ee;
+  --premium-border-strong: #c7d2e3;
+  --premium-text: #0f172a;
+  --premium-text-muted: #475569;
+  --premium-accent: #0f172a;
+  --premium-accent-contrast: #ffffff;
+  --premium-focus: rgba(15, 23, 42, 0.18);
+  --premium-radius: 12px;
+  --premium-radius-sm: 8px;
+  --premium-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+}
+
+.premium-shell {
+  color: var(--premium-text);
+}
+
+.premium-surface {
+  background: var(--premium-surface);
+  border: 1px solid var(--premium-border);
+  border-radius: var(--premium-radius);
+  box-shadow: var(--premium-shadow);
+}
+
+.premium-subpanel {
+  background: var(--premium-surface-muted);
+  border: 1px solid var(--premium-border);
+  border-radius: var(--premium-radius-sm);
+}
+
+.premium-title {
+  color: var(--premium-text);
+}
+
+.premium-muted {
+  color: var(--premium-text-muted);
+}
+
+.premium-control {
+  border: 1px solid var(--premium-border);
+  background: var(--premium-surface);
+  color: var(--premium-text);
+  border-radius: var(--premium-radius-sm);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.premium-control:focus {
+  border-color: var(--premium-border-strong);
+  box-shadow: 0 0 0 3px var(--premium-focus);
+  outline: none;
+}
+
+.premium-shell :where(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  border: 1px solid var(--premium-border);
+  background: var(--premium-surface);
+  color: var(--premium-text);
+  border-radius: var(--premium-radius-sm);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.premium-shell :where(input:not([type="checkbox"]):not([type="radio"]), select, textarea):focus {
+  border-color: var(--premium-border-strong);
+  box-shadow: 0 0 0 3px var(--premium-focus);
+  outline: none;
+}
+
+.premium-btn-primary {
+  background: var(--premium-accent);
+  color: var(--premium-accent-contrast);
+  border: 1px solid var(--premium-accent);
+  border-radius: var(--premium-radius-sm);
+}
+
+.premium-btn-outline {
+  background: var(--premium-surface);
+  color: var(--premium-text);
+  border: 1px solid var(--premium-border-strong);
+  border-radius: var(--premium-radius-sm);
+}
