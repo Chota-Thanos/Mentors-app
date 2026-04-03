@@ -20,7 +20,7 @@ export function UserNav() {
   };
 
   if (loading) {
-    return <div className="h-8 w-28 rounded bg-slate-100" />;
+    return <div className="h-8 w-28 rounded-full bg-[var(--app-surface-soft)]" />;
   }
 
   if (!user) {
@@ -28,13 +28,13 @@ export function UserNav() {
       <div className="flex items-center gap-2">
         <Link
           href="/login"
-          className="hidden rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 sm:inline-flex"
+          className="app-btn-secondary hidden px-3 py-1.5 text-xs font-semibold sm:inline-flex"
         >
           Login
         </Link>
         <Link
           href="/signup"
-          className="inline-flex rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
+          className="app-btn-primary inline-flex px-3 py-1.5 text-xs font-semibold"
         >
           Get Started
         </Link>
@@ -44,16 +44,16 @@ export function UserNav() {
 
   return (
     <div className="flex items-center gap-2">
-      <span className="inline-flex max-w-[170px] truncate rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-semibold text-indigo-700 sm:max-w-[220px]">
+      <span className="inline-flex max-w-[170px] truncate rounded-full border border-[var(--app-border-strong)] bg-[var(--app-secondary-soft)] px-2 py-1 text-[10px] font-semibold text-[var(--app-secondary)] sm:max-w-[220px]">
         {roleText}
       </span>
-      <span className="hidden max-w-[180px] truncate text-xs text-slate-500 xl:inline-block">
+      <span className="hidden max-w-[180px] truncate text-xs text-[var(--app-text-muted)] xl:inline-block">
         {user.email}
       </span>
       <button
         type="button"
         onClick={() => void handleSignOut()}
-        className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-rose-300 hover:text-rose-700"
+        className="app-btn-secondary px-3 py-1.5 text-xs font-semibold"
       >
         Sign out
       </button>

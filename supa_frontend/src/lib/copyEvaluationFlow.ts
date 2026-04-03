@@ -3,9 +3,10 @@ import type {
   MentorshipRequest,
   MentorshipSession,
   MentorshipSlot,
+  MentorshipWorkflowStage,
 } from "@/types/premium";
 
-export type CopyFlowStepStatus = "pending" | "completed";
+export type CopyFlowStepStatus = "pending" | "completed" | "current";
 
 export interface CopyFlowStep {
   key: string;
@@ -65,55 +66,79 @@ export const buildCopyEvaluationFlowSteps = (
   session?: MentorshipSession | null,
 ): CopyFlowStep[] => {
   const slotOffers = requestOfferedSlotIds(request);
-  const scheduled =
-    request?.status === "scheduled" ||
-    session?.status === "scheduled" ||
-    session?.status === "live" ||
-    session?.status === "completed";
-  const completed = request?.status === "completed" || session?.status === "completed";
+  const requestedStage = request?.workflow_stage;
+  let stage: MentorshipWorkflowStage = "submitted";
+  if (requestedStage) {
+    stage = requestedStage;
+  } else if (request?.status === "cancelled" || request?.status === "rejected") {
+    stage = "cancelled";
+  } else if (request?.status === "completed" || session?.status === "completed") {
+    stage = "completed";
+  } else if (session?.status === "live") {
+    stage = "live";
+  } else if (request?.status === "scheduled" || session?.status === "scheduled") {
+    stage = "scheduled";
+  } else if (submission?.status === "checked") {
+    stage = request?.booking_open || slotOffers.length > 0 ? "booking_open" : "feedback_ready";
+  } else if (submission?.status === "under_review" || submission?.status === "eta_declared" || submission?.eta_set_at) {
+    stage = "evaluating";
+  }
+
+  const stepOrder: MentorshipWorkflowStage[] = [
+    "submitted",
+    "evaluating",
+    "feedback_ready",
+    "booking_open",
+    "scheduled",
+    "live",
+    "completed",
+  ];
+  const currentStage = stage === "cancelled" ? "submitted" : stage;
+  const currentIndex = Math.max(stepOrder.indexOf(currentStage), 0);
 
   return [
     {
       key: "submitted",
-      label: "Copy Submitted",
-      status: submission ? "completed" : "pending",
+      label: "Submitted",
+      status: stage === "completed" || currentIndex > 0 ? "completed" : currentIndex === 0 ? "current" : "pending",
     },
     {
-      key: "eta",
-      label: "Checking ETA",
-      status:
-        submission &&
-        (Boolean(submission.provider_eta_hours) ||
-          Boolean(submission.provider_eta_text) ||
-          submission.status === "eta_declared" ||
-          submission.status === "under_review" ||
-          submission.status === "checked")
-          ? "completed"
-          : "pending",
-    },
-    {
-      key: "checked",
-      label: "Copy Checked",
-      status: submission?.status === "checked" ? "completed" : "pending",
-    },
-    {
-      key: "slots",
-      label: "Mentor Slots",
-      status: slotOffers.length > 0 || scheduled ? "completed" : "pending",
+      key: "evaluating",
+      label: "Under Review",
+      status: stage === "completed" || currentIndex > 1 ? "completed" : currentIndex === 1 ? "current" : "pending",
       detail:
-        slotOffers.length > 0 && !scheduled
-          ? `${slotOffers.length} option${slotOffers.length === 1 ? "" : "s"} shared`
+        submission?.provider_eta_text ||
+        (submission?.provider_eta_hours ? `${submission.provider_eta_hours} hour ETA` : null),
+    },
+    {
+      key: "feedback_ready",
+      label: "Feedback Ready",
+      status: stage === "completed" || currentIndex > 2 ? "completed" : currentIndex === 2 ? "current" : "pending",
+      detail:
+        submission?.total_marks !== null && submission?.total_marks !== undefined
+          ? `Marks: ${submission.total_marks}`
           : null,
     },
     {
+      key: "booking_open",
+      label: "Book Session",
+      status: stage === "completed" || currentIndex > 3 ? "completed" : currentIndex === 3 ? "current" : "pending",
+      detail: request?.booking_open ? "Choose a published mentor slot." : "Waiting for mentor availability.",
+    },
+    {
       key: "scheduled",
-      label: "Call Scheduled",
-      status: scheduled ? "completed" : "pending",
+      label: "Scheduled",
+      status: stage === "completed" || currentIndex > 4 ? "completed" : currentIndex === 4 ? "current" : "pending",
+    },
+    {
+      key: "live",
+      label: "Live",
+      status: stage === "completed" || currentIndex > 5 ? "completed" : currentIndex === 5 ? "current" : "pending",
     },
     {
       key: "completed",
-      label: "Call Completed",
-      status: completed ? "completed" : "pending",
+      label: "Completed",
+      status: stage === "completed" ? "completed" : currentIndex === 6 ? "current" : "pending",
     },
   ];
 };

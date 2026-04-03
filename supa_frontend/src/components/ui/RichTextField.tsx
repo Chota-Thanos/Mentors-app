@@ -22,12 +22,12 @@ export default function RichTextField({
   return (
     <div className={`space-y-2 ${className}`.trim()}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label className="text-sm font-semibold text-slate-900">{label}</label>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+        <label className="text-sm font-semibold text-[var(--app-text)]">{label}</label>
+        <span className="rounded-full border border-[var(--app-border)] bg-[var(--app-secondary-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--app-secondary)]">
           Rich text
         </span>
       </div>
-      {helperText ? <p className="text-xs leading-5 text-slate-500">{helperText}</p> : null}
+      {helperText ? <p className="text-xs leading-5 text-[var(--app-text-muted)]">{helperText}</p> : null}
       <MiniRichTextInput
         value={value}
         onChange={onChange}

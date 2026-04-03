@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 
+import { useAuth } from "@/context/AuthContext";
+import { isSeriesOperatorLike } from "@/lib/accessControl";
 import { premiumApi } from "@/lib/premiumApi";
 import type { ChallengeLinkResponse } from "@/types/premium";
 
@@ -22,8 +24,10 @@ function toError(error: unknown): string {
 }
 
 export default function ChallengeCreatorCard({ collectionId, collectionTitle }: ChallengeCreatorCardProps) {
+  const { user } = useAuth();
   const [isCreating, setIsCreating] = useState(false);
   const [latestChallenge, setLatestChallenge] = useState<ChallengeLinkResponse | null>(null);
+  const hideForOperatorRole = isSeriesOperatorLike(user);
 
   const shareUrl = useMemo(() => {
     if (!latestChallenge) return "";
@@ -33,6 +37,10 @@ export default function ChallengeCreatorCard({ collectionId, collectionTitle }: 
     }
     return "";
   }, [latestChallenge]);
+
+  if (hideForOperatorRole) {
+    return null;
+  }
 
   const createChallenge = async () => {
     setIsCreating(true);
@@ -67,9 +75,9 @@ export default function ChallengeCreatorCard({ collectionId, collectionTitle }: 
   return (
     <section className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Challenge Mode</p>
-      <h3 className="mt-1 text-lg font-semibold text-slate-900">Turn This Test Into a Challenge</h3>
+      <h3 className="mt-1 text-lg font-semibold text-slate-900">Turn This Test Into a Public Challenge</h3>
       <p className="mt-1 text-sm text-slate-600">
-        Subscribed owners can create a public challenge link. Friends attempt it, get instant score, and see rank.
+        This creates the live public challenge link and prepares the test for public attempts.
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -78,7 +86,7 @@ export default function ChallengeCreatorCard({ collectionId, collectionTitle }: 
           disabled={isCreating}
           className="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
         >
-          {isCreating ? "Creating..." : "Create Challenge Link"}
+          {isCreating ? "Creating..." : "Create Public Challenge"}
         </button>
         {shareUrl ? (
           <>

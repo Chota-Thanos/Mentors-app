@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import DiscussionConfigEditor from "@/components/premium/DiscussionConfigEditor";
 import RichTextContent from "@/components/ui/RichTextContent";
 import RichTextField from "@/components/ui/RichTextField";
 import { useAuth } from "@/context/AuthContext";
@@ -28,6 +29,7 @@ import {
 } from "@/lib/accessControl";
 import { premiumApi } from "@/lib/premiumApi";
 import { richTextToPlainText, toNullableRichText } from "@/lib/richText";
+import { getDiscussionDraftFromMeta, getDiscussionFromMeta, mergeDiscussionIntoMeta } from "@/lib/testSeriesDiscussion";
 import type {
   MainsCopySubmission,
   MentorshipEntitlement,
@@ -141,6 +143,14 @@ export default function TestSeriesConsole() {
   const selectedSeries = useMemo(
     () => seriesRows.find((item) => item.id === selectedSeriesId) || null,
     [selectedSeriesId, seriesRows],
+  );
+  const finalDiscussion = useMemo(
+    () => getDiscussionDraftFromMeta(seriesForm.meta, "final_discussion"),
+    [seriesForm.meta],
+  );
+  const activeTestDiscussion = useMemo(
+    () => getDiscussionDraftFromMeta(testForm.meta, "test_discussion"),
+    [testForm.meta],
   );
 
   const selectedSeriesTests = useMemo(
@@ -538,8 +548,15 @@ export default function TestSeriesConsole() {
     }
   };
 
-  const enrollInSeries = async (seriesId: number) => {
+  const enrollInSeries = async (seriesId: number, price?: number, accessType?: string) => {
     try {
+      const requiresOnlinePayment = String(accessType || "").toLowerCase() !== "free" && Number(price || 0) > 0;
+      if (requiresOnlinePayment) {
+        if (typeof window !== "undefined") {
+          window.location.assign(`/test-series/${seriesId}?autobuy=1`);
+          return;
+        }
+      }
       await premiumApi.post(`/test-series/${seriesId}/enroll`, { access_source: "self_service" });
       toast.success("Enrolled in test series");
       await loadSeries();
@@ -690,6 +707,19 @@ export default function TestSeriesConsole() {
                           placeholder="Describe the series structure, learner outcome, and how the series is intended to be used."
                           helperText="This becomes the public description across the series experience."
                         />
+                        {String(seriesForm.series_kind || "").trim().toLowerCase() === "quiz" ? (
+                          <DiscussionConfigEditor
+                            heading="End-of-series discussion"
+                            hint="Publish a final discussion for the whole prelims series. You can attach a recorded explanation or schedule a live Agora class."
+                            value={finalDiscussion}
+                            onChange={(discussion) =>
+                              setSeriesForm((prev) => ({
+                                ...prev,
+                                meta: mergeDiscussionIntoMeta(prev.meta || {}, "final_discussion", discussion),
+                              }))
+                            }
+                          />
+                        ) : null}
                         <input
                           value={seriesForm.cover_image_url || ""}
                           onChange={(event) => setSeriesForm((prev) => ({ ...prev, cover_image_url: event.target.value }))}
@@ -843,6 +873,21 @@ export default function TestSeriesConsole() {
                             helperText="Used on learner-facing test cards and detail pages."
                           />
                         </div>
+                        {(testForm.test_kind || scopedTestKindOptions[0]?.value || "prelims") === "prelims" ? (
+                          <div className="md:col-span-2">
+                            <DiscussionConfigEditor
+                              heading="Post-test discussion"
+                              hint="Attach a discussion directly after this prelims test."
+                              value={activeTestDiscussion}
+                              onChange={(discussion) =>
+                                setTestForm((prev) => ({
+                                  ...prev,
+                                  meta: mergeDiscussionIntoMeta(prev.meta || {}, "test_discussion", discussion),
+                                }))
+                              }
+                            />
+                          </div>
+                        ) : null}
                         <select
                           value={testForm.test_kind || scopedTestKindOptions[0]?.value || "prelims"}
                           onChange={(event) =>
@@ -883,6 +928,11 @@ export default function TestSeriesConsole() {
                             <div>
                               <p className="text-base font-semibold text-slate-900">{test.title}</p>
                               <p className="text-xs text-slate-500">{richTextToPlainText(test.description || "") || "No description"}</p>
+                              {getDiscussionFromMeta(test.meta, "test_discussion") ? (
+                                <span className="mt-1 inline-flex rounded bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold text-violet-700">
+                                  Class Ready
+                                </span>
+                              ) : null}
                             </div>
                             <div className="flex flex-wrap gap-2">
                               <Link href={`/collections/${test.id}`} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs">Open</Link>
@@ -915,8 +965,8 @@ export default function TestSeriesConsole() {
                                     ) : null}
                                   </div>
                                   <div className="mt-2">
-                                    <Link href={`/collections/${test.id}/mains-test`} className="rounded border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-emerald-700">
-                                      Open Mentor Desk
+                                    <Link href={`/collections/${test.id}`} className="rounded border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-emerald-700">
+                                      Open Test
                                     </Link>
                                   </div>
                                 </div>
@@ -1005,7 +1055,7 @@ export default function TestSeriesConsole() {
                       Open Detail
                     </Link>
                     {isAuthenticated ? (
-                      <button type="button" onClick={() => void enrollInSeries(series.id)} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs">Enroll</button>
+                      <button type="button" onClick={() => void enrollInSeries(series.id, Number(series.price || 0), String(series.access_type || ""))} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs">Enroll</button>
                     ) : null}
                   </div>
                   <div className="mt-3 space-y-2">
@@ -1020,12 +1070,12 @@ export default function TestSeriesConsole() {
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                               <Link href={`/collections/${test.id}`} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs">Open</Link>
-                              <Link href={test.test_kind === "mains" ? `/collections/${test.id}/mains-test` : `/collections/${test.id}/test`} className="rounded border border-indigo-300 bg-white px-2 py-1 text-xs text-indigo-700">{test.test_kind === "mains" ? "Open Writing Desk" : "Start"}</Link>
+                              <Link href={test.test_kind === "mains" ? `/collections/${test.id}` : `/collections/${test.id}/test`} className="rounded border border-indigo-300 bg-white px-2 py-1 text-xs text-indigo-700">{test.test_kind === "mains" ? "Open Test" : "Start"}</Link>
                             </div>
                           </div>
                           {test.test_kind === "mains" && isAuthenticated ? (
                             <div className="mt-2 space-y-2">
-                              <p className="text-xs text-slate-600">Use the writing desk to submit a full answer PDF or question-wise answer photos. That same desk now runs the full evaluation and mentorship flow.</p>
+                              <p className="text-xs text-slate-600">Use the main test page to submit a full answer PDF or question-wise answer photos. That same page now runs the full evaluation and mentorship flow.</p>
                               <div className="flex flex-wrap gap-2">
                                 <button type="button" onClick={() => void loadCopySubmissions(test.id)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs">Refresh Submissions</button>
                               </div>

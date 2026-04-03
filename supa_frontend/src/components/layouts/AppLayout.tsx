@@ -12,7 +12,7 @@ export default function AppLayout({
     hideAdminLinks?: boolean;
 }>) {
     return (
-        <div className="relative flex min-h-screen flex-col bg-slate-50">
+        <div className="app-shell relative flex min-h-screen flex-col">
             <SiteHeader hideAdminLinks={hideAdminLinks} />
             <div className="mx-auto w-full max-w-7xl flex-1 px-3 pb-6 pt-4 sm:px-4 md:px-6 md:pt-6">
                 {adminNav ? (

@@ -73,7 +73,7 @@ export default function MentorshipAvailabilityManager({
   const [displayName, setDisplayName] = useState("");
   const [availabilityMode, setAvailabilityMode] = useState<"open" | "series_only">("series_only");
   const [openScopeNote, setOpenScopeNote] = useState("");
-  const [defaultCallProvider, setDefaultCallProvider] = useState<MentorshipCallProvider>("custom");
+  const [defaultCallProvider, setDefaultCallProvider] = useState<MentorshipCallProvider>("zoom_video_sdk");
   const [zoomMeetingLink, setZoomMeetingLink] = useState("");
   const [callSetupNote, setCallSetupNote] = useState("");
   const [copyEvaluationEnabled, setCopyEvaluationEnabled] = useState(false);
@@ -90,7 +90,7 @@ export default function MentorshipAvailabilityManager({
   const [startTime, setStartTime] = useState("18:00");
   const [endTime, setEndTime] = useState("19:00");
   const [slotMode, setSlotMode] = useState<MentorshipMode>("video");
-  const [slotCallProvider, setSlotCallProvider] = useState<MentorshipCallProvider>("custom");
+  const [slotCallProvider, setSlotCallProvider] = useState<MentorshipCallProvider>("zoom_video_sdk");
   const [title, setTitle] = useState("Mentorship session");
   const [description, setDescription] = useState("");
   const [meetingLink, setMeetingLink] = useState("");
@@ -118,11 +118,13 @@ export default function MentorshipAvailabilityManager({
         setAvailabilityMode(String(meta.mentorship_availability_mode || "").toLowerCase() === "open" ? "open" : "series_only");
         setOpenScopeNote(String(meta.mentorship_open_scope_note || ""));
         const resolvedDefaultCallProvider =
-          String(meta.mentorship_default_call_provider || "").trim().toLowerCase() === "zoom"
+          String(meta.mentorship_default_call_provider || "").trim().toLowerCase() === "zoom_video_sdk"
+            ? "zoom_video_sdk"
+            : String(meta.mentorship_default_call_provider || "").trim().toLowerCase() === "zoom"
             ? "zoom"
             : typeof meta.mentorship_zoom_meeting_link === "string" && meta.mentorship_zoom_meeting_link.trim()
               ? "zoom"
-              : "custom";
+              : "zoom_video_sdk";
         setDefaultCallProvider(resolvedDefaultCallProvider);
         setSlotCallProvider(resolvedDefaultCallProvider);
         setZoomMeetingLink(String(meta.mentorship_zoom_meeting_link || ""));
@@ -366,7 +368,7 @@ export default function MentorshipAvailabilityManager({
               >
                 <option value="custom">Custom link / manual setup</option>
                 <option value="zoom">Zoom Meeting (Auto Generated)</option>
-                <option value="zoom_video_sdk">True In-App Call (Zoom SDK)</option>
+                <option value="zoom_video_sdk">Agora In-App Room</option>
               </select>
             </FormFieldShell>
             {defaultCallProvider === "custom" && (
@@ -386,7 +388,7 @@ export default function MentorshipAvailabilityManager({
             )}
             {defaultCallProvider === "zoom_video_sdk" && (
               <FormFieldShell label="In-App Mode">
-                <p className="text-xs text-slate-500 mb-2">Sessions take place entirely inside the browser. No external links are generated.</p>
+                <p className="text-xs text-slate-500 mb-2">Sessions take place entirely inside the browser using Agora. No external links are required.</p>
               </FormFieldShell>
             )}
             <RichTextField
@@ -483,7 +485,7 @@ export default function MentorshipAvailabilityManager({
             >
               <option value="custom">Custom link / manual setup</option>
               <option value="zoom">Zoom Meeting (Auto Generated)</option>
-              <option value="zoom_video_sdk">True In-App Call (Zoom SDK)</option>
+              <option value="zoom_video_sdk">Agora In-App Room</option>
             </select>
           </FormFieldShell>
           <FormFieldShell label="Daily start time">

@@ -1,13 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { premiumApi } from "@/lib/premiumApi";
 import { toast } from "sonner";
-import { Loader2, Plus, Unplug } from "lucide-react";
+import { Plus, Unplug } from "lucide-react";
 
 export function ZoomConnectionStatusCard() {
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
 
     const fetchStatus = async () => {
         try {
@@ -28,7 +31,12 @@ export function ZoomConnectionStatusCard() {
 
     const handleConnect = async () => {
         try {
-            const res = await premiumApi.post("/mentorship/integrations/zoom/connect", {});
+            const currentUrl = `${pathname || "/"}${searchParams?.toString() ? `?${searchParams.toString()}` : ""}`;
+            sessionStorage.setItem("zoom-connect-return-to", currentUrl);
+            const redirectOverride = `${window.location.origin}/zoom/connect/callback`;
+            const res = await premiumApi.post("/mentorship/integrations/zoom/connect", {
+                redirect_override: redirectOverride,
+            });
             if (res.data?.authorize_url) {
                 window.location.href = res.data.authorize_url;
             }
@@ -66,7 +74,7 @@ export function ZoomConnectionStatusCard() {
                         </p>
                     ) : (
                         <p className="mt-1 text-xs text-slate-500">
-                            Connect your Zoom account to let the system automatically generate meeting links for mentorship sessions.
+                            Connect your Zoom account to let the system automatically generate meeting links for live discussion classes and mentorship sessions.
                         </p>
                     )}
                 </div>

@@ -12,7 +12,8 @@ from urllib.request import Request as UrlRequest, urlopen
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-from supabase import Client
+from supabase import Client, create_client
+from agora_token_builder import RtcTokenBuilder
 
 from ..models import (
     CollectionTestKind,
@@ -33,14 +34,27 @@ from ..models import (
     MentorshipTrackingCycleResponse,
     MentorshipTrackingEventResponse,
     MentorshipCallProvider,
+    MentorshipMessageCreate,
+    MentorshipMessageResponse,
+    MentorshipPaymentStatus,
+    MentorshipWorkflowStage,
+    DiscussionSpeakerRequestCreate,
+    DiscussionSpeakerRequestResponse,
+    DiscussionSpeakerRequestStatus,
     MentorshipEntitlementGrantCreate,
     MentorshipEntitlementResponse,
     MentorshipMode,
     MentorshipCallContextResponse,
+    DiscussionCallContextResponse,
     MentorshipRequestCreate,
     MentorshipRequestOfferSlots,
+    MentorshipRequestPaymentCreate,
+    MentorshipRequestPaymentVerify,
     MentorshipRequestResponse,
+    MentorshipRazorpayOrderResponse,
     MentorshipRequestSchedule,
+    MentorshipSessionComplete,
+    MentorshipServiceType,
     MentorshipRequestStartNow,
     MentorshipRequestStatus,
     MentorshipRequestStatusUpdate,
@@ -56,6 +70,13 @@ from ..models import (
     TestSeriesDiscoverySeriesResponse,
     TestSeriesDiscoveryTestResponse,
     TestSeriesEnrollmentResponse,
+    TestSeriesEnrollmentPaymentCreate,
+    TestSeriesEnrollmentPaymentVerify,
+    TestSeriesProgramItemCreate,
+    TestSeriesProgramItemResponse,
+    TestSeriesProgramItemType,
+    TestSeriesProgramItemUpdate,
+    TestSeriesRazorpayOrderResponse,
     TestSeriesKind,
     TestSeriesResponse,
     TestSeriesTestCreate,
@@ -84,12 +105,15 @@ from ..supabase_client import get_supabase_client
 router = APIRouter(prefix="/api/v1/premium", tags=["Premium Test Series"])
 
 TEST_SERIES_TABLE = "test_series"
+TEST_SERIES_PROGRAM_ITEMS_TABLE = "test_series_program_items"
 TEST_SERIES_ENROLLMENTS_TABLE = "test_series_enrollments"
 COPY_SUBMISSIONS_TABLE = "mains_test_copy_submissions"
 COPY_MARKS_TABLE = "mains_test_copy_marks"
 MENTORSHIP_SLOTS_TABLE = "mentorship_slots"
 MENTORSHIP_REQUESTS_TABLE = "mentorship_requests"
 MENTORSHIP_SESSIONS_TABLE = "mentorship_sessions"
+MENTORSHIP_MESSAGES_TABLE = "mentorship_messages"
+DISCUSSION_SPEAKER_REQUESTS_TABLE = "discussion_speaker_requests"
 MENTORSHIP_ENTITLEMENTS_TABLE = "mentorship_entitlements"
 MENTOR_ZOOM_CONNECTIONS_TABLE = "mentor_zoom_connections"
 PROFILES_TABLE = "creator_mentor_profiles"
@@ -97,6 +121,7 @@ PROFILE_REVIEWS_TABLE = "professional_profile_reviews"
 ONBOARDING_REQUESTS_TABLE = "professional_onboarding_requests"
 SUBSCRIPTION_PLANS_TABLE = "subscription_plans"
 USER_SUBSCRIPTIONS_TABLE = "user_subscriptions"
+RAZORPAY_ORDERS_URL = "https://api.razorpay.com/v1/orders"
 TEST_SERIES_MIGRATION_HINT = (
     "Missing Test Series tables. "
     "Run supa_back/migrations/2026-02-22_test_series_and_mentorship.sql in Supabase SQL Editor."
@@ -109,6 +134,11 @@ PROFILE_REVIEWS_MIGRATION_HINT = (
     "Missing professional_profile_reviews table. "
     "Run supa_back/migrations/2026-02-25_professional_profile_reviews.sql in Supabase SQL Editor."
 )
+DISCUSSION_SPEAKER_REQUESTS_MIGRATION_HINT = (
+    "Missing discussion speaker request table. "
+    "Run supa_back/migrations/2026-04-02_discussion_speaker_requests.sql in Supabase SQL Editor."
+)
+_AUTH_ADMIN_CLIENT: Optional[Client] = None
 
 DEFAULT_TEST_SUBSCRIBER_EMAILS: Set[str] = {"abrarsaifi00@gmail.com"}
 MENTORSHIP_SLOT_DURATION_MINUTES = 20
@@ -147,6 +177,11 @@ ZOOM_USERINFO_URL = f"{ZOOM_API_ROOT}/users/me"
 class CollectionItemUpdateRequest(BaseModel):
     order: Optional[int] = None
     section_title: Optional[str] = None
+
+
+class TestItemContentUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
 
 
 class EnrollRequest(BaseModel):
@@ -208,6 +243,12 @@ def _raise_profile_reviews_migration_required(exc: Exception) -> None:
         or "not found" in text
     ):
         raise HTTPException(status_code=503, detail=PROFILE_REVIEWS_MIGRATION_HINT)
+    raise exc
+
+
+def _raise_discussion_speaker_requests_migration_required(exc: Exception) -> None:
+    if _is_missing_table_error(exc, DISCUSSION_SPEAKER_REQUESTS_TABLE):
+        raise HTTPException(status_code=503, detail=DISCUSSION_SPEAKER_REQUESTS_MIGRATION_HINT)
     raise exc
 
 
@@ -487,6 +528,98 @@ def require_authenticated_user(
     return user_ctx
 
 
+def _get_auth_admin_client(default_client: Client) -> Client:
+    global _AUTH_ADMIN_CLIENT
+    if _AUTH_ADMIN_CLIENT:
+        return _AUTH_ADMIN_CLIENT
+
+    supabase_url = str(os.getenv("SUPABASE_URL", "")).strip()
+    service_role_key = str(os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")).strip()
+    if supabase_url and service_role_key:
+        try:
+            _AUTH_ADMIN_CLIENT = create_client(supabase_url, service_role_key)
+            return _AUTH_ADMIN_CLIENT
+        except Exception:
+            pass
+    return default_client
+
+
+def _user_metadata_display_name(user_meta: Any) -> str:
+    if not isinstance(user_meta, dict):
+        return ""
+    for key in ("full_name", "name", "display_name"):
+        value = str(user_meta.get(key) or "").strip()
+        if value:
+            return value
+    first_name = str(user_meta.get("first_name") or "").strip()
+    last_name = str(user_meta.get("last_name") or "").strip()
+    return f"{first_name} {last_name}".strip()
+
+
+def _user_ctx_display_name(user_ctx: Dict[str, Any]) -> str:
+    return _user_metadata_display_name(user_ctx.get("user_metadata") or {})
+
+
+def _auth_user_brief_map(
+    user_ids: List[str],
+    *,
+    supabase: Client,
+) -> Dict[str, Dict[str, str]]:
+    output: Dict[str, Dict[str, str]] = {}
+    unique_user_ids = sorted({str(user_id or "").strip() for user_id in user_ids if str(user_id or "").strip()})
+    if not unique_user_ids:
+        return output
+
+    admin_client = _get_auth_admin_client(supabase)
+    for target_user_id in unique_user_ids:
+        try:
+            response = admin_client.auth.admin.get_user_by_id(target_user_id)
+        except Exception:
+            continue
+        user_obj = getattr(response, "user", None)
+        if not user_obj:
+            continue
+        user_meta = getattr(user_obj, "user_metadata", None) or {}
+        if not isinstance(user_meta, dict):
+            user_meta = {}
+        display_name = _user_metadata_display_name(user_meta)
+        email = str(getattr(user_obj, "email", None) or user_meta.get("email") or "").strip().lower()
+        brief: Dict[str, str] = {}
+        if display_name:
+            brief["name"] = display_name
+        if email:
+            brief["email"] = email
+        if brief:
+            output[target_user_id] = brief
+    return output
+
+
+def _enrich_mentorship_request_row(
+    row: Dict[str, Any],
+    *,
+    learner_briefs: Optional[Dict[str, Dict[str, str]]] = None,
+    viewer_unread_count: Optional[int] = None,
+) -> Dict[str, Any]:
+    updated = dict(row)
+    meta = _meta_dict(row.get("meta"))
+    learner_brief = (learner_briefs or {}).get(str(row.get("user_id") or "").strip())
+    if learner_brief:
+        if not str(meta.get("learner_name") or "").strip():
+            learner_name = str(learner_brief.get("name") or "").strip()
+            if learner_name:
+                meta["learner_name"] = learner_name
+        if not str(meta.get("learner_email") or "").strip():
+            learner_email = str(learner_brief.get("email") or "").strip().lower()
+            if learner_email:
+                meta["learner_email"] = learner_email
+    if viewer_unread_count is not None:
+        normalized_unread_count = max(int(viewer_unread_count), 0)
+        meta["viewer_unread_message_count"] = normalized_unread_count
+        meta["viewer_has_unread_messages"] = normalized_unread_count > 0
+    updated["meta"] = meta
+    return updated
+
+
 def _is_admin(user_ctx: Dict[str, Any]) -> bool:
     return bool(user_ctx.get("is_admin"))
 
@@ -639,6 +772,81 @@ def _safe_float(value: Any, fallback: float = 0.0) -> float:
         return fallback
 
 
+def _normalize_program_item_type(value: Any) -> TestSeriesProgramItemType:
+    normalized = _as_role(value)
+    for item_type in TestSeriesProgramItemType:
+        if normalized == item_type.value:
+            return item_type
+    return TestSeriesProgramItemType.PDF
+
+
+def _program_item_row_to_response(row: Dict[str, Any]) -> TestSeriesProgramItemResponse:
+    return TestSeriesProgramItemResponse(
+        id=int(row.get("id") or 0),
+        series_id=int(row.get("series_id") or 0),
+        item_type=_normalize_program_item_type(row.get("item_type")),
+        title=str(row.get("title") or "").strip(),
+        description=row.get("description"),
+        resource_url=_as_optional_text(row.get("resource_url"), max_length=2000),
+        scheduled_for=str(row.get("scheduled_for")) if row.get("scheduled_for") else None,
+        duration_minutes=_parse_optional_non_negative_int(row.get("duration_minutes"), max_value=1440),
+        cover_image_url=_as_optional_text(row.get("cover_image_url"), max_length=2000),
+        series_order=_safe_int(row.get("series_order"), 0),
+        is_active=bool(row.get("is_active", True)),
+        meta=_meta_dict(row.get("meta")),
+        created_at=str(row.get("created_at") or ""),
+        updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
+    )
+
+
+def _build_program_item_payload(
+    *,
+    item_type: TestSeriesProgramItemType,
+    title: Any,
+    description: Any,
+    resource_url: Any,
+    scheduled_for: Any,
+    duration_minutes: Any,
+    cover_image_url: Any,
+    series_order: Any,
+    is_active: Any,
+    meta: Any,
+) -> Dict[str, Any]:
+    normalized_title = _as_optional_text(title, max_length=180)
+    if not normalized_title:
+        raise HTTPException(status_code=400, detail="Program item title is required.")
+
+    normalized_resource_url = _as_optional_text(resource_url, max_length=2000)
+    normalized_scheduled_for = _as_optional_text(scheduled_for, max_length=120)
+    normalized_duration = _parse_optional_non_negative_int(duration_minutes, max_value=1440)
+
+    if item_type == TestSeriesProgramItemType.PDF and not normalized_resource_url:
+        raise HTTPException(status_code=400, detail="PDF items require a resource URL.")
+    if item_type == TestSeriesProgramItemType.LECTURE and not normalized_scheduled_for:
+        raise HTTPException(status_code=400, detail="Lecture items require a scheduled time.")
+
+    parsed_scheduled_for = _parse_datetime(normalized_scheduled_for) if normalized_scheduled_for else None
+    if normalized_scheduled_for and parsed_scheduled_for is None:
+        raise HTTPException(status_code=400, detail="Invalid datetime format for 'scheduled_for'.")
+
+    normalized_order = _safe_int(series_order, 0)
+    if normalized_order < 0:
+        normalized_order = 0
+
+    return {
+        "item_type": item_type.value,
+        "title": normalized_title,
+        "description": description,
+        "resource_url": normalized_resource_url,
+        "scheduled_for": parsed_scheduled_for.isoformat() if parsed_scheduled_for else None,
+        "duration_minutes": normalized_duration,
+        "cover_image_url": _as_optional_text(cover_image_url, max_length=2000),
+        "series_order": normalized_order,
+        "is_active": bool(is_active),
+        "meta": _meta_dict(meta),
+    }
+
+
 def _normalize_copy_submission_mode(value: Any) -> CopySubmissionMode:
     normalized = _as_role(value)
     for mode in CopySubmissionMode:
@@ -772,11 +980,16 @@ def _normalize_profile_meta(raw_meta: Any) -> Dict[str, Any]:
     if default_call_provider not in {
         MentorshipCallProvider.CUSTOM.value,
         MentorshipCallProvider.ZOOM.value,
+        MentorshipCallProvider.ZOOM_VIDEO_SDK.value,
     }:
         default_call_provider = (
-            MentorshipCallProvider.ZOOM.value
-            if zoom_meeting_link
-            else MentorshipCallProvider.CUSTOM.value
+            MentorshipCallProvider.ZOOM_VIDEO_SDK.value
+            if _agora_ready()
+            else (
+                MentorshipCallProvider.ZOOM.value
+                if zoom_meeting_link
+                else MentorshipCallProvider.CUSTOM.value
+            )
         )
     normalized["mentorship_default_call_provider"] = default_call_provider
 
@@ -806,7 +1019,419 @@ def _normalize_profile_meta(raw_meta: Any) -> Dict[str, Any]:
     else:
         normalized.pop("copy_evaluation_note", None)
 
+    mentorship_price = round(max(_safe_float(normalized.get("mentorship_price"), 0.0), 0.0), 2)
+    copy_evaluation_price = round(max(_safe_float(normalized.get("copy_evaluation_price"), 0.0), 0.0), 2)
+    normalized["mentorship_price"] = mentorship_price
+    normalized["copy_evaluation_price"] = copy_evaluation_price
+
+    currency = str(normalized.get("currency") or "INR").strip().upper()
+    normalized["currency"] = currency[:8] or "INR"
+
+    response_time_text = _as_optional_text(normalized.get("response_time_text"), max_length=120)
+    if response_time_text:
+        normalized["response_time_text"] = response_time_text
+    else:
+        normalized.pop("response_time_text", None)
+
+    exam_focus = _as_optional_text(normalized.get("exam_focus"), max_length=180)
+    if exam_focus:
+        normalized["exam_focus"] = exam_focus
+    else:
+        normalized.pop("exam_focus", None)
+
+    students_mentored = _parse_optional_non_negative_int(normalized.get("students_mentored"))
+    if students_mentored is not None:
+        normalized["students_mentored"] = students_mentored
+    else:
+        normalized.pop("students_mentored", None)
+
+    sessions_completed = _parse_optional_non_negative_int(normalized.get("sessions_completed"))
+    if sessions_completed is not None:
+        normalized["sessions_completed"] = sessions_completed
+    else:
+        normalized.pop("sessions_completed", None)
+
     return normalized
+
+
+def _normalize_service_type(value: Any, *, has_submission: bool = False) -> MentorshipServiceType:
+    normalized = str(value or "").strip().lower()
+    for service_type in MentorshipServiceType:
+        if normalized == service_type.value:
+            return service_type
+    if normalized in {"copy_evaluation", "copy_review", "evaluation"}:
+        return MentorshipServiceType.COPY_EVALUATION_AND_MENTORSHIP
+    return MentorshipServiceType.COPY_EVALUATION_AND_MENTORSHIP if has_submission else MentorshipServiceType.MENTORSHIP_ONLY
+
+
+def _normalize_payment_status(value: Any) -> MentorshipPaymentStatus:
+    normalized = str(value or "").strip().lower()
+    for payment_status in MentorshipPaymentStatus:
+        if normalized == payment_status.value:
+            return payment_status
+    return MentorshipPaymentStatus.NOT_INITIATED
+
+
+def _request_service_type(request_row: Dict[str, Any], *, submission_row: Optional[Dict[str, Any]] = None) -> MentorshipServiceType:
+    request_meta = _meta_dict(request_row.get("meta"))
+    has_submission = bool(submission_row) or int(request_row.get("submission_id") or 0) > 0
+    return _normalize_service_type(request_meta.get("service_type"), has_submission=has_submission)
+
+
+def _request_payment_status(request_row: Dict[str, Any]) -> MentorshipPaymentStatus:
+    request_meta = _meta_dict(request_row.get("meta"))
+    return _normalize_payment_status(request_meta.get("payment_status"))
+
+
+def _request_payment_amount(
+    request_row: Dict[str, Any],
+    *,
+    submission_row: Optional[Dict[str, Any]] = None,
+    supabase: Optional[Client] = None,
+) -> float:
+    request_meta = _meta_dict(request_row.get("meta"))
+    explicit_amount = _safe_float(request_meta.get("payment_amount"), -1.0)
+    if explicit_amount >= 0:
+        return round(explicit_amount, 2)
+
+    provider_user_id = str(request_row.get("provider_user_id") or "").strip()
+    if not provider_user_id or supabase is None:
+        return 0.0
+
+    profile_row = _safe_first(
+        supabase.table(PROFILES_TABLE)
+        .select("meta")
+        .eq("user_id", provider_user_id)
+        .limit(1)
+    )
+    profile_meta = _normalize_profile_meta((profile_row or {}).get("meta"))
+    service_type = _request_service_type(request_row, submission_row=submission_row)
+    if service_type == MentorshipServiceType.COPY_EVALUATION_AND_MENTORSHIP:
+        return round(max(_safe_float(profile_meta.get("copy_evaluation_price"), 0.0), 0.0), 2)
+    return round(max(_safe_float(profile_meta.get("mentorship_price"), 0.0), 0.0), 2)
+
+
+def _request_payment_currency(request_row: Dict[str, Any], *, supabase: Optional[Client] = None) -> str:
+    request_meta = _meta_dict(request_row.get("meta"))
+    currency = str(request_meta.get("payment_currency") or "").strip().upper()
+    if currency:
+        return currency[:8]
+    provider_user_id = str(request_row.get("provider_user_id") or "").strip()
+    if provider_user_id and supabase is not None:
+        profile_row = _safe_first(
+            supabase.table(PROFILES_TABLE)
+            .select("meta")
+            .eq("user_id", provider_user_id)
+            .limit(1)
+        )
+        profile_meta = _normalize_profile_meta((profile_row or {}).get("meta"))
+        profile_currency = str(profile_meta.get("currency") or "").strip().upper()
+        if profile_currency:
+            return profile_currency[:8]
+    return "INR"
+
+
+def _get_razorpay_credentials() -> tuple[str, str]:
+    key_id = str(os.getenv("RAZORPAY_KEY_ID") or "").strip()
+    key_secret = str(os.getenv("RAZORPAY_KEY_SECRET") or "").strip()
+    if not key_id or not key_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Razorpay is not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET on the backend.",
+        )
+    return key_id, key_secret
+
+
+def _mentorship_payment_description(request_row: Dict[str, Any], *, supabase: Optional[Client] = None) -> str:
+    service_type = _request_service_type(request_row)
+    request_meta = _meta_dict(request_row.get("meta"))
+    provider_name = _as_optional_text(request_meta.get("provider_name"), max_length=120)
+    if not provider_name and supabase is not None:
+        profile_row = _safe_first(
+            supabase.table(PROFILES_TABLE)
+            .select("display_name")
+            .eq("user_id", str(request_row.get("provider_user_id") or "").strip())
+            .limit(1)
+        )
+        provider_name = _as_optional_text((profile_row or {}).get("display_name"), max_length=120)
+    service_label = (
+        "Copy Evaluation + Mentorship"
+        if service_type == MentorshipServiceType.COPY_EVALUATION_AND_MENTORSHIP
+        else "Mentorship Session"
+    )
+    if provider_name:
+        return f"{service_label} with {provider_name}"
+    return service_label
+
+
+def _payment_amount_minor_units(amount: float, currency: str) -> int:
+    normalized_currency = str(currency or "INR").strip().upper() or "INR"
+    multiplier = 100
+    if normalized_currency in {"JPY", "KRW"}:
+        multiplier = 1
+    return max(int(round(max(amount, 0.0) * multiplier)), 0)
+
+
+def _persist_payment_meta(
+    request_row: Dict[str, Any],
+    *,
+    supabase: Client,
+    meta_updates: Dict[str, Any],
+    updated_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    request_id = int(request_row.get("id") or 0)
+    if request_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid mentorship request.")
+
+    next_meta = _meta_dict(request_row.get("meta"))
+    for key, value in meta_updates.items():
+        if value is None:
+            continue
+        next_meta[key] = value
+
+    updated_row = _first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .update({"meta": next_meta, "updated_at": updated_at or _utc_now_iso()})
+        .eq("id", request_id)
+        .execute()
+    )
+    if not updated_row:
+        raise HTTPException(status_code=404, detail="Mentorship request not found.")
+    return updated_row
+
+
+def _mark_mentorship_request_paid(
+    request_row: Dict[str, Any],
+    *,
+    supabase: Client,
+    payment_method: str,
+    coupon_code: Optional[str] = None,
+    payment_gateway: Optional[str] = None,
+    payment_gateway_meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if _request_payment_status(request_row) == MentorshipPaymentStatus.PAID:
+        return request_row
+
+    now_iso = _utc_now_iso()
+    meta_updates: Dict[str, Any] = {
+        "payment_status": MentorshipPaymentStatus.PAID.value,
+        "payment_method": str(payment_method or "razorpay").strip().lower()[:60] or "razorpay",
+        "payment_paid_at": now_iso,
+        "payment_attempted_at": now_iso,
+        "workflow_stage": MentorshipWorkflowStage.PAID.value,
+    }
+    if payment_gateway:
+        meta_updates["payment_gateway"] = str(payment_gateway).strip().lower()[:40]
+    if coupon_code:
+        meta_updates["coupon_code"] = str(coupon_code).strip()[:60]
+    if payment_gateway_meta:
+        meta_updates.update(payment_gateway_meta)
+
+    updated_row = _persist_payment_meta(
+        request_row,
+        supabase=supabase,
+        meta_updates=meta_updates,
+        updated_at=now_iso,
+    )
+    _append_system_request_message(
+        updated_row,
+        body="Payment completed successfully. The workflow can now move to evaluation or slot booking.",
+        supabase=supabase,
+    )
+    return updated_row
+
+
+def _create_razorpay_order(
+    *,
+    amount_minor: int,
+    currency: str,
+    receipt: str,
+    notes: Dict[str, str],
+) -> Dict[str, Any]:
+    key_id, key_secret = _get_razorpay_credentials()
+    auth_token = base64.b64encode(f"{key_id}:{key_secret}".encode("utf-8")).decode("ascii")
+    payload = {
+        "amount": amount_minor,
+        "currency": currency,
+        "receipt": receipt[:40],
+        "notes": notes,
+    }
+    request = UrlRequest(
+        RAZORPAY_ORDERS_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Basic {auth_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            raw_body = response.read().decode("utf-8")
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        logger.warning("Razorpay order creation failed: %s %s", exc.code, detail)
+        raise HTTPException(status_code=502, detail="Failed to create Razorpay order.")
+    except URLError as exc:
+        logger.warning("Razorpay order creation network error: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to reach Razorpay.")
+
+    try:
+        parsed = json.loads(raw_body)
+    except json.JSONDecodeError as exc:
+        logger.warning("Razorpay order response parse failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Invalid Razorpay response.")
+
+    order_id = str(parsed.get("id") or "").strip()
+    if not order_id:
+        raise HTTPException(status_code=502, detail="Razorpay order response did not include an order id.")
+    return parsed
+
+
+def _verify_razorpay_signature(*, order_id: str, payment_id: str, signature: str) -> bool:
+    _key_id, key_secret = _get_razorpay_credentials()
+    payload = f"{order_id}|{payment_id}".encode("utf-8")
+    digest = hmac.new(key_secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(digest, str(signature or "").strip())
+
+
+def _normalize_discussion_config(
+    raw_value: Any,
+    *,
+    field_label: str,
+    strict: bool = False,
+) -> Optional[Dict[str, Any]]:
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, dict):
+        if strict:
+            raise HTTPException(status_code=400, detail=f"{field_label} must be a valid object.")
+        return None
+
+    delivery_mode = _as_role(raw_value.get("delivery_mode"))
+    if delivery_mode not in {"video", "live_zoom"}:
+        if strict and any(str(value or "").strip() for value in raw_value.values()):
+            raise HTTPException(status_code=400, detail=f"{field_label} delivery mode must be video or live_zoom.")
+        return None
+
+    title = _as_optional_text(raw_value.get("title"), max_length=180)
+    description = _as_optional_text(raw_value.get("description"), max_length=12000)
+
+    normalized: Dict[str, Any] = {
+        "delivery_mode": delivery_mode,
+        "starts_when_creator_joins": delivery_mode == "live_zoom",
+    }
+    if title:
+        normalized["title"] = title
+    if description:
+        normalized["description"] = description
+
+    if delivery_mode == "video":
+        video_url = _as_optional_text(raw_value.get("video_url"), max_length=2000)
+        if not video_url:
+            if strict:
+                raise HTTPException(status_code=400, detail=f"{field_label} video URL is required.")
+            return None
+        normalized["video_url"] = video_url
+        return normalized
+
+    zoom_schedule_mode = _as_role(raw_value.get("zoom_schedule_mode"))
+    if zoom_schedule_mode not in {"auto", "manual"}:
+        zoom_schedule_mode = "auto"
+    meeting_link = _as_optional_text(raw_value.get("meeting_link"), max_length=2000)
+    scheduled_for_raw = _as_optional_text(raw_value.get("scheduled_for"), max_length=120)
+    parsed_scheduled_for = _parse_datetime(scheduled_for_raw) if scheduled_for_raw else None
+    duration_minutes = _parse_optional_non_negative_int(raw_value.get("duration_minutes"), max_value=24 * 60) or 60
+    provider_session_id = _as_optional_text(raw_value.get("provider_session_id"), max_length=120)
+    provider_host_url = _as_optional_text(raw_value.get("provider_host_url"), max_length=2000)
+    provider_join_url = _as_optional_text(raw_value.get("provider_join_url"), max_length=2000)
+    provider_payload = _meta_dict(raw_value.get("provider_payload"))
+
+    if duration_minutes < 15 or duration_minutes > 240:
+        if strict:
+            raise HTTPException(status_code=400, detail=f"{field_label} duration must be between 15 and 240 minutes.")
+        duration_minutes = 60
+
+    if parsed_scheduled_for is None:
+        if strict:
+            raise HTTPException(status_code=400, detail=f"{field_label} scheduled time is required and must be valid.")
+        return None
+
+    normalized["zoom_schedule_mode"] = "auto"
+    normalized["scheduled_for"] = parsed_scheduled_for.isoformat()
+    normalized["duration_minutes"] = duration_minutes
+    normalized["session_style"] = "creator_led_class"
+    normalized["participant_role"] = "audience"
+    normalized["speaker_access"] = "host_controlled"
+    normalized["call_provider"] = MentorshipCallProvider.ZOOM_VIDEO_SDK.value
+    if provider_session_id:
+        normalized["provider_session_id"] = provider_session_id
+    if provider_host_url:
+        normalized["provider_host_url"] = provider_host_url
+    if provider_join_url:
+        normalized["provider_join_url"] = provider_join_url
+    if meeting_link:
+        normalized["meeting_link"] = meeting_link
+    if provider_payload:
+        normalized["provider_payload"] = provider_payload
+    return normalized
+
+
+def _finalize_discussion_config(
+    discussion: Optional[Dict[str, Any]],
+    *,
+    provider_user_id: str,
+    supabase: Client,
+    field_label: str,
+) -> Optional[Dict[str, Any]]:
+    if not discussion:
+        return None
+    if str(discussion.get("delivery_mode") or "").strip().lower() != "live_zoom":
+        return discussion
+    updated = dict(discussion)
+    updated["zoom_schedule_mode"] = "auto"
+    updated["starts_when_creator_joins"] = True
+    updated["session_style"] = "creator_led_class"
+    updated["participant_role"] = "audience"
+    updated["speaker_access"] = "host_controlled"
+    updated["call_provider"] = MentorshipCallProvider.ZOOM_VIDEO_SDK.value
+    return updated
+
+
+def _normalize_series_meta(raw_meta: Any, *, strict: bool = False) -> Dict[str, Any]:
+    meta = _meta_dict(raw_meta)
+    normalized = dict(meta)
+
+    if "final_discussion" in normalized:
+        discussion = _normalize_discussion_config(
+            normalized.get("final_discussion"),
+            field_label="Final discussion",
+            strict=strict,
+        )
+        if discussion:
+            normalized["final_discussion"] = discussion
+        else:
+            normalized.pop("final_discussion", None)
+
+    return normalized
+
+
+def _normalize_test_meta(raw_meta: Any, *, strict: bool = False) -> Dict[str, Any]:
+    meta = _normalize_series_meta(raw_meta, strict=strict)
+
+    if "test_discussion" in meta:
+        discussion = _normalize_discussion_config(
+            meta.get("test_discussion"),
+            field_label="Test discussion",
+            strict=strict,
+        )
+        if discussion:
+            meta["test_discussion"] = discussion
+        else:
+            meta.pop("test_discussion", None)
+
+    return meta
 
 
 def _copy_evaluation_enabled_for_role(role_value: str, meta: Dict[str, Any]) -> bool:
@@ -1381,7 +2006,7 @@ def _enforce_test_kind_authoring_access(*, user_ctx: Dict[str, Any], test_kind: 
 
 
 def _series_row_to_response(row: Dict[str, Any], test_count: int = 0) -> TestSeriesResponse:
-    meta = _meta_dict(row.get("meta"))
+    meta = _normalize_series_meta(row.get("meta"), strict=False)
     series_kind_raw = _as_role(row.get("series_kind")) or TestSeriesKind.MAINS.value
     access_type_raw = _as_role(row.get("access_type")) or TestSeriesAccessType.SUBSCRIPTION.value
     try:
@@ -1438,7 +2063,7 @@ def _resolve_series_id_from_collection(collection_row: Dict[str, Any]) -> Option
 
 
 def _collection_row_to_test_response(collection_row: Dict[str, Any], series_id: int) -> TestSeriesTestResponse:
-    meta = _meta_dict(collection_row.get("meta"))
+    meta = _normalize_test_meta(collection_row.get("meta"), strict=False)
     kind = _resolve_collection_test_kind(meta)
     price_raw = collection_row.get("price")
     try:
@@ -1711,6 +2336,22 @@ def _fetch_series_tests(
     return rows
 
 
+def _fetch_series_program_items(
+    *,
+    series_id: int,
+    supabase: Client,
+    include_inactive: bool = False,
+) -> List[Dict[str, Any]]:
+    try:
+        query = supabase.table(TEST_SERIES_PROGRAM_ITEMS_TABLE).select("*").eq("series_id", series_id)
+        if not include_inactive:
+            query = query.eq("is_active", True)
+        return _rows(query.order("series_order").order("created_at").execute())
+    except Exception as exc:
+        _raise_test_series_migration_required(exc)
+    return []
+
+
 def _fetch_public_series_tests(
     *,
     series_ids: List[int],
@@ -1756,6 +2397,22 @@ def _fetch_series_for_test_or_404(test_id: int, supabase: Client) -> tuple[Dict[
         raise HTTPException(status_code=404, detail="Test is not mapped to a test series.")
     series = _fetch_series_or_404(series_id, supabase)
     return series, collection, series_id
+
+
+def _fetch_program_item_or_404(item_id: int, supabase: Client) -> Dict[str, Any]:
+    try:
+        row = _first(
+            supabase.table(TEST_SERIES_PROGRAM_ITEMS_TABLE)
+            .select("*")
+            .eq("id", item_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        _raise_test_series_migration_required(exc)
+    if not row:
+        raise HTTPException(status_code=404, detail="Program item not found.")
+    return row
 
 
 def _ensure_series_owner_or_admin(series_row: Dict[str, Any], user_ctx: Dict[str, Any]) -> str:
@@ -1910,6 +2567,51 @@ def _series_enrollment_row(
     )
 
 
+def _series_enrollment_any_status_row(
+    *,
+    series_id: int,
+    user_id: str,
+    supabase: Client,
+) -> Optional[Dict[str, Any]]:
+    return _safe_first(
+        supabase.table(TEST_SERIES_ENROLLMENTS_TABLE)
+        .select("*")
+        .eq("series_id", series_id)
+        .eq("user_id", user_id)
+        .limit(1)
+    )
+
+
+def _series_enrollment_response(row: Dict[str, Any], *, series_id: int, user_id: str) -> TestSeriesEnrollmentResponse:
+    return TestSeriesEnrollmentResponse(
+        id=int(row.get("id") or 0),
+        series_id=int(row.get("series_id") or series_id),
+        user_id=str(row.get("user_id") or user_id),
+        status=str(row.get("status") or "active"),
+        access_source=str(row.get("access_source") or "manual"),
+        subscribed_until=str(row.get("subscribed_until")) if row.get("subscribed_until") else None,
+        created_at=str(row.get("created_at") or ""),
+        updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
+        meta=_meta_dict(row.get("meta")),
+    )
+
+
+def _series_payment_description(series_row: Dict[str, Any]) -> str:
+    title = _as_optional_text(series_row.get("title"), max_length=140) or "Test Series"
+    kind = _as_role(series_row.get("series_kind"))
+    if kind == TestSeriesKind.MAINS.value:
+        return f"Mains Test Series Access: {title}"
+    if kind == TestSeriesKind.QUIZ.value:
+        return f"Prelims Test Series Access: {title}"
+    return f"Test Series Access: {title}"
+
+
+def _series_payment_currency(series_row: Dict[str, Any]) -> str:
+    meta = _meta_dict(series_row.get("meta"))
+    currency = str(meta.get("currency") or meta.get("payment_currency") or "INR").strip().upper()
+    return currency[:8] or "INR"
+
+
 def _has_active_mentorship_entitlement(user_id: str, supabase: Client) -> bool:
     now_iso = _utc_now_iso()
     rows = _safe_rows(
@@ -1975,6 +2677,15 @@ def _can_view_series(
     return _series_enrollment_row(series_id=series_id, user_id=user_id, supabase=supabase) is not None
 
 
+def _is_series_open_access(series_row: Dict[str, Any]) -> bool:
+    if not bool(series_row.get("is_public")) or not bool(series_row.get("is_active", True)):
+        return False
+    access_type = _as_role(series_row.get("access_type")) or ""
+    if access_type == TestSeriesAccessType.FREE.value:
+        return True
+    return _safe_float(series_row.get("price")) <= 0
+
+
 def _can_access_series_content(
     *,
     user_ctx: Optional[Dict[str, Any]],
@@ -1983,8 +2694,10 @@ def _can_access_series_content(
 ) -> bool:
     if not _can_view_series(user_ctx=user_ctx, series_row=series_row, supabase=supabase):
         return False
+    if _is_series_open_access(series_row):
+        return True
     if not user_ctx:
-        return bool(series_row.get("access_type") == TestSeriesAccessType.FREE.value)
+        return False
 
     if _is_admin_or_moderator(user_ctx):
         return True
@@ -1994,19 +2707,10 @@ def _can_access_series_content(
     if str(series_row.get("provider_user_id") or "").strip() == user_id:
         return True
 
-    access_type = _as_role(series_row.get("access_type")) or TestSeriesAccessType.SUBSCRIPTION.value
-    if access_type == TestSeriesAccessType.FREE.value:
-        return True
-
     series_id = int(series_row.get("id") or 0)
-    if series_id > 0:
-        enrollment = _series_enrollment_row(series_id=series_id, user_id=user_id, supabase=supabase)
-        if enrollment:
-            return True
-
-    if access_type == TestSeriesAccessType.SUBSCRIPTION.value:
-        return _is_active_subscription(user_ctx)
-    return False
+    if series_id <= 0:
+        return False
+    return _series_enrollment_row(series_id=series_id, user_id=user_id, supabase=supabase) is not None
 
 
 def _normalize_copy_status(value: Any) -> CopySubmissionStatus:
@@ -2043,6 +2747,8 @@ def _normalize_mentorship_call_provider(
     meeting_link: Any = None,
 ) -> MentorshipCallProvider:
     normalized = _as_role(value)
+    if normalized == MentorshipCallProvider.ZOOM_VIDEO_SDK.value:
+        return MentorshipCallProvider.ZOOM_VIDEO_SDK
     if normalized == MentorshipCallProvider.ZOOM.value:
         return MentorshipCallProvider.ZOOM
     if normalized == MentorshipCallProvider.CUSTOM.value:
@@ -2068,6 +2774,236 @@ def _normalize_mentorship_session_status(value: Any) -> MentorshipSessionStatus:
     return MentorshipSessionStatus.SCHEDULED
 
 
+def _normalize_legacy_workflow_stage(value: Any) -> Optional[MentorshipWorkflowStage]:
+    normalized = _as_role(value)
+    if not normalized:
+        return None
+
+    for stage in MentorshipWorkflowStage:
+        if normalized == stage.value:
+            return stage
+
+    legacy_map = {
+        "copy_submitted": MentorshipWorkflowStage.SUBMITTED,
+        "admin_scheduling": MentorshipWorkflowStage.SUBMITTED,
+        "accepted": MentorshipWorkflowStage.ACCEPTED,
+        "payment_pending": MentorshipWorkflowStage.PAYMENT_PENDING,
+        "paid": MentorshipWorkflowStage.PAID,
+        "eta_declared": MentorshipWorkflowStage.EVALUATING,
+        "under_review": MentorshipWorkflowStage.EVALUATING,
+        "copy_checked": MentorshipWorkflowStage.FEEDBACK_READY,
+        "slots_offered": MentorshipWorkflowStage.BOOKING_OPEN,
+        "booked_by_user": MentorshipWorkflowStage.SCHEDULED,
+        "slot_accepted_by_user": MentorshipWorkflowStage.SCHEDULED,
+        "scheduled_by_admin": MentorshipWorkflowStage.SCHEDULED,
+        "session_live": MentorshipWorkflowStage.LIVE,
+        "rejected": MentorshipWorkflowStage.CANCELLED,
+        "expired": MentorshipWorkflowStage.EXPIRED,
+    }
+    return legacy_map.get(normalized)
+
+
+def _workflow_stage_rank(stage: MentorshipWorkflowStage) -> int:
+    ordered = [
+        MentorshipWorkflowStage.SUBMITTED,
+        MentorshipWorkflowStage.ACCEPTED,
+        MentorshipWorkflowStage.PAYMENT_PENDING,
+        MentorshipWorkflowStage.PAID,
+        MentorshipWorkflowStage.EVALUATING,
+        MentorshipWorkflowStage.FEEDBACK_READY,
+        MentorshipWorkflowStage.BOOKING_OPEN,
+        MentorshipWorkflowStage.SCHEDULED,
+        MentorshipWorkflowStage.LIVE,
+        MentorshipWorkflowStage.COMPLETED,
+        MentorshipWorkflowStage.CANCELLED,
+        MentorshipWorkflowStage.EXPIRED,
+    ]
+    try:
+        return ordered.index(stage)
+    except ValueError:
+        return 0
+
+
+def _provider_open_slot_index(
+    provider_user_ids: List[str],
+    *,
+    supabase: Client,
+    now_iso: Optional[str] = None,
+) -> Dict[str, str]:
+    normalized_ids = [str(value or "").strip() for value in provider_user_ids if str(value or "").strip()]
+    if not normalized_ids:
+        return {}
+
+    effective_now_iso = str(now_iso or _utc_now_iso())
+    query = (
+        supabase.table(MENTORSHIP_SLOTS_TABLE)
+        .select("provider_user_id,starts_at,ends_at,max_bookings,booked_count,is_active")
+        .eq("is_active", True)
+        .gte("ends_at", effective_now_iso)
+        .order("starts_at")
+        .limit(min(max(len(normalized_ids) * 80, 80), 5000))
+    )
+    if len(normalized_ids) == 1:
+        query = query.eq("provider_user_id", normalized_ids[0])
+    else:
+        query = query.in_("provider_user_id", normalized_ids)
+
+    rows = _safe_rows(query)
+    output: Dict[str, str] = {}
+    for row in rows:
+        provider_user_id = str(row.get("provider_user_id") or "").strip()
+        if not provider_user_id:
+            continue
+        max_bookings = max(int(row.get("max_bookings") or 1), 1)
+        booked_count = max(int(row.get("booked_count") or 0), 0)
+        if booked_count >= max_bookings:
+            continue
+        starts_at = str(row.get("starts_at") or "").strip()
+        if not starts_at:
+            continue
+        previous = output.get(provider_user_id)
+        if previous is None or starts_at < previous:
+            output[provider_user_id] = starts_at
+    return output
+
+
+def _session_join_available(session_row: Optional[Dict[str, Any]]) -> bool:
+    if not session_row:
+        return False
+
+    session_status = _normalize_mentorship_session_status(session_row.get("status"))
+    if session_status not in {MentorshipSessionStatus.SCHEDULED, MentorshipSessionStatus.LIVE}:
+        return False
+
+    call_provider = _normalize_mentorship_call_provider(
+        session_row.get("call_provider"),
+        meeting_link=session_row.get("meeting_link"),
+    )
+    if call_provider == MentorshipCallProvider.ZOOM_VIDEO_SDK:
+        return True
+
+    join_url = str(session_row.get("provider_join_url") or session_row.get("meeting_link") or "").strip()
+    if not join_url and _agora_ready():
+        return True
+    return bool(join_url)
+
+
+def _request_workflow_snapshot(
+    request_row: Dict[str, Any],
+    *,
+    submission_row: Optional[Dict[str, Any]] = None,
+    session_row: Optional[Dict[str, Any]] = None,
+    provider_next_slot_at: Optional[str] = None,
+    supabase: Optional[Client] = None,
+) -> Dict[str, Any]:
+    request_meta = _meta_dict(request_row.get("meta"))
+    request_status = _normalize_mentorship_request_status(request_row.get("status"))
+    payment_status = _request_payment_status(request_row)
+    session_status = _normalize_mentorship_session_status(session_row.get("status")) if session_row else None
+    submission_status = _normalize_copy_status(submission_row.get("status")) if submission_row else None
+    legacy_stage = _normalize_legacy_workflow_stage(request_meta.get("workflow_stage"))
+    provider_user_id = str(request_row.get("provider_user_id") or "").strip()
+
+    if provider_next_slot_at is None and supabase and provider_user_id:
+        provider_next_slot_at = _provider_open_slot_index([provider_user_id], supabase=supabase).get(provider_user_id)
+
+    offered_slot_ids = [
+        int(slot_id)
+        for slot_id in request_meta.get("offered_slot_ids", [])
+        if isinstance(slot_id, int) and int(slot_id) > 0
+    ]
+    is_copy_flow = (
+        _request_service_type(request_row, submission_row=submission_row)
+        == MentorshipServiceType.COPY_EVALUATION_AND_MENTORSHIP
+    )
+    accepted_at = str(request_meta.get("accepted_at") or "").strip() or None
+    paid_at = str(request_meta.get("payment_paid_at") or "").strip() or None
+    feedback_ready_at = (
+        str(request_meta.get("feedback_ready_at") or "").strip()
+        or str(request_meta.get("copy_checked_at") or "").strip()
+        or str((submission_row or {}).get("checked_at") or "").strip()
+        or None
+    )
+    booking_opened_at = (
+        str(request_meta.get("booking_opened_at") or "").strip()
+        or str(request_meta.get("slot_options_offered_at") or "").strip()
+        or None
+    )
+    booking_available = bool(provider_next_slot_at) or bool(offered_slot_ids)
+
+    if request_status in {MentorshipRequestStatus.CANCELLED, MentorshipRequestStatus.REJECTED}:
+        workflow_stage = MentorshipWorkflowStage.CANCELLED
+    elif request_status == MentorshipRequestStatus.EXPIRED:
+        workflow_stage = MentorshipWorkflowStage.EXPIRED
+    elif request_status == MentorshipRequestStatus.COMPLETED or session_status == MentorshipSessionStatus.COMPLETED:
+        workflow_stage = MentorshipWorkflowStage.COMPLETED
+    elif session_status == MentorshipSessionStatus.LIVE:
+        workflow_stage = MentorshipWorkflowStage.LIVE
+    elif request_status == MentorshipRequestStatus.SCHEDULED or session_status == MentorshipSessionStatus.SCHEDULED:
+        workflow_stage = MentorshipWorkflowStage.SCHEDULED
+    elif request_status == MentorshipRequestStatus.ACCEPTED or accepted_at:
+        if payment_status == MentorshipPaymentStatus.PAID:
+            if is_copy_flow:
+                if submission_status == CopySubmissionStatus.CHECKED or feedback_ready_at:
+                    workflow_stage = (
+                        MentorshipWorkflowStage.BOOKING_OPEN if booking_available else MentorshipWorkflowStage.FEEDBACK_READY
+                    )
+                elif submission_status in {CopySubmissionStatus.ETA_DECLARED, CopySubmissionStatus.UNDER_REVIEW} or str(
+                    request_meta.get("copy_eta_set_at") or ""
+                ).strip():
+                    workflow_stage = MentorshipWorkflowStage.EVALUATING
+                else:
+                    workflow_stage = MentorshipWorkflowStage.PAID
+            else:
+                workflow_stage = MentorshipWorkflowStage.BOOKING_OPEN if booking_available else MentorshipWorkflowStage.PAID
+        elif payment_status in {MentorshipPaymentStatus.NOT_INITIATED, MentorshipPaymentStatus.PENDING, MentorshipPaymentStatus.FAILED}:
+            workflow_stage = MentorshipWorkflowStage.PAYMENT_PENDING
+        else:
+            workflow_stage = MentorshipWorkflowStage.ACCEPTED
+    elif is_copy_flow:
+        workflow_stage = MentorshipWorkflowStage.SUBMITTED
+    else:
+        workflow_stage = legacy_stage or MentorshipWorkflowStage.SUBMITTED
+        if workflow_stage in {
+            MentorshipWorkflowStage.ACCEPTED,
+            MentorshipWorkflowStage.PAYMENT_PENDING,
+            MentorshipWorkflowStage.PAID,
+            MentorshipWorkflowStage.EVALUATING,
+        }:
+            workflow_stage = MentorshipWorkflowStage.SUBMITTED
+        if workflow_stage == MentorshipWorkflowStage.FEEDBACK_READY:
+            workflow_stage = MentorshipWorkflowStage.SUBMITTED
+
+    if not feedback_ready_at and is_copy_flow and _workflow_stage_rank(workflow_stage) >= _workflow_stage_rank(MentorshipWorkflowStage.FEEDBACK_READY):
+        feedback_ready_at = str(request_meta.get("copy_checked_at") or "").strip() or None
+
+    if (
+        not booking_opened_at
+        and _workflow_stage_rank(workflow_stage) >= _workflow_stage_rank(MentorshipWorkflowStage.BOOKING_OPEN)
+        and (booking_available or workflow_stage in {
+            MentorshipWorkflowStage.SCHEDULED,
+            MentorshipWorkflowStage.LIVE,
+            MentorshipWorkflowStage.COMPLETED,
+        })
+    ):
+        booking_opened_at = (
+            str(request_meta.get("booking_opened_at") or "").strip()
+            or str(request_meta.get("slot_options_offered_at") or "").strip()
+            or feedback_ready_at
+            or paid_at
+            or str(request_meta.get("accepted_at") or "").strip()
+            or None
+        )
+
+    return {
+        "workflow_stage": workflow_stage,
+        "booking_open": workflow_stage == MentorshipWorkflowStage.BOOKING_OPEN,
+        "feedback_ready_at": feedback_ready_at,
+        "booking_opened_at": booking_opened_at,
+        "join_available": _session_join_available(session_row),
+    }
+
+
 def _mentor_call_profile_defaults(
     provider_user_id: str,
     *,
@@ -2086,10 +3022,13 @@ def _mentor_call_profile_defaults(
     profile_meta = _normalize_profile_meta((profile_row or {}).get("meta"))
     zoom_meeting_link = _as_optional_text(profile_meta.get("mentorship_zoom_meeting_link"), max_length=1200)
     call_setup_note = _as_optional_text(profile_meta.get("mentorship_call_setup_note"), max_length=1200)
+    raw_default_provider = _as_role(profile_meta.get("mentorship_default_call_provider"))
     default_call_provider = _normalize_mentorship_call_provider(
-        profile_meta.get("mentorship_default_call_provider"),
+        raw_default_provider,
         meeting_link=zoom_meeting_link,
     )
+    if not raw_default_provider and not zoom_meeting_link and _agora_ready():
+        default_call_provider = MentorshipCallProvider.ZOOM_VIDEO_SDK
     return default_call_provider, zoom_meeting_link, call_setup_note
 
 
@@ -2281,10 +3220,63 @@ def _create_copy_evaluation_request(
     if existing_request:
         return existing_request
 
+    learner_user_id = str(submission_row.get("user_id") or "").strip()
+    existing_open_request = _safe_first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .select("id,status")
+        .eq("user_id", learner_user_id)
+        .eq("provider_user_id", provider_user_id)
+        .in_(
+            "status",
+            [
+                MentorshipRequestStatus.REQUESTED.value,
+                MentorshipRequestStatus.ACCEPTED.value,
+                MentorshipRequestStatus.SCHEDULED.value,
+            ],
+        )
+        .order("requested_at", desc=True)
+        .limit(1)
+    )
+    if existing_open_request:
+        raise HTTPException(
+            status_code=409,
+            detail="You already have an active mentorship request with this mentor.",
+        )
+
     requested_at_iso = _utc_now_iso()
     copy_status = _normalize_copy_status(submission_row.get("status")).value
+    profile_row = _safe_first(
+        supabase.table(PROFILES_TABLE)
+        .select("meta")
+        .eq("user_id", provider_user_id)
+        .limit(1)
+    )
+    profile_meta = _normalize_profile_meta((profile_row or {}).get("meta"))
+    learner_brief = _auth_user_brief_map([learner_user_id], supabase=supabase).get(learner_user_id, {})
+    request_meta: Dict[str, Any] = {
+        "standalone": standalone,
+        "requires_entitlement": False,
+        "service_type": MentorshipServiceType.COPY_EVALUATION_AND_MENTORSHIP.value,
+        "payment_status": MentorshipPaymentStatus.NOT_INITIATED.value,
+        "payment_amount": round(max(_safe_float(profile_meta.get("copy_evaluation_price"), 0.0), 0.0), 2),
+        "payment_currency": str(profile_meta.get("currency") or "INR").strip().upper()[:8] or "INR",
+        "flow_kind": "copy_evaluation",
+        "workflow_stage": MentorshipWorkflowStage.SUBMITTED.value,
+        "copy_status": copy_status,
+        "copy_submitted_at": str(submission_row.get("submitted_at") or requested_at_iso),
+        "copy_request_source": "direct_mentor_submission" if standalone else "series_submission",
+        "slot_offer_status": "pending",
+        "offered_slot_ids": [],
+    }
+    learner_name = str(learner_brief.get("name") or "").strip()
+    learner_email = str(learner_brief.get("email") or "").strip().lower()
+    if learner_name:
+        request_meta["learner_name"] = learner_name
+    if learner_email:
+        request_meta["learner_email"] = learner_email
+
     insert_payload = {
-        "user_id": str(submission_row.get("user_id") or "").strip(),
+        "user_id": learner_user_id,
         "provider_user_id": provider_user_id,
         "series_id": int(submission_row.get("series_id") or 0) or None,
         "test_collection_id": int(submission_row.get("test_collection_id") or 0) or None,
@@ -2294,21 +3286,16 @@ def _create_copy_evaluation_request(
         "status": MentorshipRequestStatus.REQUESTED.value,
         "requested_at": requested_at_iso,
         "updated_at": requested_at_iso,
-        "meta": {
-            "standalone": standalone,
-            "requires_entitlement": False,
-            "flow_kind": "copy_evaluation",
-            "workflow_stage": "copy_submitted",
-            "copy_status": copy_status,
-            "copy_submitted_at": str(submission_row.get("submitted_at") or requested_at_iso),
-            "copy_request_source": "direct_mentor_submission" if standalone else "series_submission",
-            "slot_offer_status": "pending",
-            "offered_slot_ids": [],
-        },
+        "meta": request_meta,
     }
     row = _first(supabase.table(MENTORSHIP_REQUESTS_TABLE).insert(insert_payload).execute())
     if not row:
         raise HTTPException(status_code=400, detail="Failed to create copy evaluation workflow.")
+    _append_system_request_message(
+        row,
+        body="Request sent to mentor. The mentor will review it before payment is unlocked.",
+        supabase=supabase,
+    )
     return row
 
 
@@ -2382,21 +3369,187 @@ def _slot_response(row: Dict[str, Any]) -> MentorshipSlotResponse:
     )
 
 
-def _request_response(row: Dict[str, Any]) -> MentorshipRequestResponse:
+def _request_response(
+    row: Dict[str, Any],
+    *,
+    supabase: Client,
+    submission_row: Optional[Dict[str, Any]] = None,
+    session_row: Optional[Dict[str, Any]] = None,
+    provider_next_slot_at: Optional[str] = None,
+) -> MentorshipRequestResponse:
+    request_id = int(row.get("id") or 0)
+    submission_id = int(row.get("submission_id") or 0)
+    if submission_row is None and submission_id > 0:
+        submission_row = _safe_first(
+            supabase.table(COPY_SUBMISSIONS_TABLE)
+            .select("*")
+            .eq("id", submission_id)
+            .limit(1)
+        )
+    if session_row is None and request_id > 0:
+        session_row = _safe_first(
+            supabase.table(MENTORSHIP_SESSIONS_TABLE)
+            .select("*")
+            .eq("request_id", request_id)
+            .order("starts_at", desc=True)
+            .limit(1)
+        )
+
+    snapshot = _request_workflow_snapshot(
+        row,
+        submission_row=submission_row,
+        session_row=session_row,
+        provider_next_slot_at=provider_next_slot_at,
+        supabase=supabase,
+    )
+    request_meta = _meta_dict(row.get("meta"))
+    service_type = _request_service_type(row, submission_row=submission_row)
+    payment_amount = _request_payment_amount(row, submission_row=submission_row, supabase=supabase)
+    payment_currency = _request_payment_currency(row, supabase=supabase)
     return MentorshipRequestResponse(
-        id=int(row.get("id") or 0),
+        id=request_id,
         user_id=str(row.get("user_id") or ""),
         provider_user_id=str(row.get("provider_user_id") or ""),
         series_id=int(row["series_id"]) if row.get("series_id") is not None else None,
         test_collection_id=int(row["test_collection_id"]) if row.get("test_collection_id") is not None else None,
-        submission_id=int(row["submission_id"]) if row.get("submission_id") is not None else None,
+        submission_id=submission_id if submission_id > 0 else None,
         preferred_mode=_normalize_mentorship_mode(row.get("preferred_mode")),
         note=row.get("note"),
+        preferred_timing=_as_optional_text(request_meta.get("preferred_timing"), max_length=280),
+        service_type=service_type,
         status=_normalize_mentorship_request_status(row.get("status")),
+        payment_status=_request_payment_status(row),
+        payment_amount=payment_amount,
+        payment_currency=payment_currency,
+        accepted_at=_as_optional_text(request_meta.get("accepted_at"), max_length=40),
         scheduled_slot_id=int(row["scheduled_slot_id"]) if row.get("scheduled_slot_id") is not None else None,
+        workflow_stage=snapshot["workflow_stage"],
+        booking_open=bool(snapshot["booking_open"]),
+        feedback_ready_at=snapshot["feedback_ready_at"],
+        booking_opened_at=snapshot["booking_opened_at"],
+        join_available=bool(snapshot["join_available"]),
         requested_at=str(row.get("requested_at") or ""),
         updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
         meta=_meta_dict(row.get("meta")),
+    )
+
+
+def _message_response(row: Dict[str, Any], *, request_id: int) -> MentorshipMessageResponse:
+    return MentorshipMessageResponse(
+        id=int(row.get("id") or 0),
+        request_id=request_id,
+        sender_user_id=str(row.get("sender_user_id") or ""),
+        body=str(row.get("body") or ""),
+        is_read=bool(row.get("is_read", False)),
+        created_at=str(row.get("created_at") or _utc_now_iso()),
+    )
+
+
+def _list_request_messages(
+    request_row: Dict[str, Any],
+    *,
+    supabase: Client,
+) -> List[MentorshipMessageResponse]:
+    request_id = int(request_row.get("id") or 0)
+    if request_id <= 0:
+        return []
+    try:
+        rows = _rows(
+            supabase.table(MENTORSHIP_MESSAGES_TABLE)
+            .select("*")
+            .eq("request_id", request_id)
+            .order("created_at")
+            .execute()
+        )
+        return [_message_response(row, request_id=request_id) for row in rows]
+    except Exception as exc:
+        if not _is_missing_table_error(exc, MENTORSHIP_MESSAGES_TABLE):
+            raise
+
+    request_meta = _meta_dict(request_row.get("meta"))
+    raw_messages = request_meta.get("thread_messages")
+    if not isinstance(raw_messages, list):
+        return []
+    output: List[MentorshipMessageResponse] = []
+    for row in raw_messages:
+        if not isinstance(row, dict):
+            continue
+        output.append(_message_response(row, request_id=request_id))
+    output.sort(key=lambda row: row.created_at)
+    return output
+
+
+def _append_request_message(
+    request_row: Dict[str, Any],
+    *,
+    sender_user_id: str,
+    body: str,
+    supabase: Client,
+    is_read: bool = False,
+) -> MentorshipMessageResponse:
+    request_id = int(request_row.get("id") or 0)
+    if request_id <= 0:
+        raise HTTPException(status_code=400, detail="Mentorship request not found.")
+
+    message_body = str(body or "").strip()
+    if not message_body:
+        raise HTTPException(status_code=400, detail="Message body is required.")
+
+    created_at = _utc_now_iso()
+    insert_payload = {
+        "request_id": request_id,
+        "sender_user_id": sender_user_id,
+        "body": message_body,
+        "is_read": is_read,
+        "created_at": created_at,
+    }
+    try:
+        inserted = _first(supabase.table(MENTORSHIP_MESSAGES_TABLE).insert(insert_payload).execute())
+        if inserted:
+            return _message_response(inserted, request_id=request_id)
+    except Exception as exc:
+        if not _is_missing_table_error(exc, MENTORSHIP_MESSAGES_TABLE):
+            raise
+
+    request_meta = _meta_dict(request_row.get("meta"))
+    raw_messages = request_meta.get("thread_messages")
+    thread_messages = raw_messages if isinstance(raw_messages, list) else []
+    next_id = 1
+    for item in thread_messages:
+        if isinstance(item, dict):
+            next_id = max(next_id, int(item.get("id") or 0) + 1)
+    message_row = {
+        "id": next_id,
+        "sender_user_id": sender_user_id,
+        "body": message_body,
+        "is_read": is_read,
+        "created_at": created_at,
+    }
+    thread_messages.append(message_row)
+    request_meta["thread_messages"] = thread_messages
+    updated_request = _first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .update({"meta": request_meta, "updated_at": created_at})
+        .eq("id", request_id)
+        .execute()
+    )
+    if updated_request:
+        request_row.update(updated_request)
+    return _message_response(message_row, request_id=request_id)
+
+
+def _append_system_request_message(
+    request_row: Dict[str, Any],
+    *,
+    body: str,
+    supabase: Client,
+) -> MentorshipMessageResponse:
+    return _append_request_message(
+        request_row,
+        sender_user_id="system",
+        body=body,
+        supabase=supabase,
+        is_read=True,
     )
 
 
@@ -2405,6 +3558,9 @@ def _session_response(row: Dict[str, Any]) -> MentorshipSessionResponse:
         row.get("call_provider"),
         meeting_link=row.get("meeting_link"),
     )
+    join_url = str(row.get("provider_join_url") or row.get("meeting_link") or "").strip()
+    if not join_url and _agora_ready():
+        resolved_call_provider = MentorshipCallProvider.ZOOM_VIDEO_SDK
     return MentorshipSessionResponse(
         id=int(row.get("id") or 0),
         request_id=int(row.get("request_id") or 0),
@@ -2416,9 +3572,17 @@ def _session_response(row: Dict[str, Any]) -> MentorshipSessionResponse:
         starts_at=str(row.get("starts_at") or ""),
         ends_at=str(row.get("ends_at") or ""),
         meeting_link=row.get("meeting_link"),
+        provider_session_id=str(row.get("provider_session_id")) if row.get("provider_session_id") else None,
+        provider_host_url=row.get("provider_host_url"),
+        provider_join_url=row.get("provider_join_url"),
+        provider_payload=_meta_dict(row.get("provider_payload")),
+        provider_error=row.get("provider_error"),
+        live_started_at=str(row.get("live_started_at")) if row.get("live_started_at") else None,
+        live_ended_at=str(row.get("live_ended_at")) if row.get("live_ended_at") else None,
         copy_attachment_url=row.get("copy_attachment_url"),
         summary=row.get("summary"),
         status=_normalize_mentorship_session_status(row.get("status")),
+        join_available=_session_join_available(row),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
     )
@@ -2647,6 +3811,13 @@ def _schedule_mentorship_request_with_slot(
     request_meta["workflow_stage"] = workflow_stage
     request_meta["call_status"] = "scheduled"
     request_meta["call_provider"] = resolved_call_provider.value
+    request_meta["booking_opened_at"] = (
+        request_meta.get("booking_opened_at")
+        or request_meta.get("slot_options_offered_at")
+        or request_meta.get("feedback_ready_at")
+        or request_meta.get("copy_checked_at")
+        or now_iso
+    )
     request_meta["status_updated_by"] = actor_user_id
     request_meta["status_updated_by_role"] = actor_role
     request_meta["status_updated_at"] = now_iso
@@ -2818,9 +3989,19 @@ def create_test_series(
         "price": payload.price,
         "is_public": payload.is_public,
         "is_active": payload.is_active,
-        "meta": payload.meta or {},
         "updated_at": _utc_now_iso(),
     }
+    insert_payload["meta"] = _normalize_series_meta(payload.meta or {}, strict=True)
+    finalized_final_discussion = _finalize_discussion_config(
+        insert_payload["meta"].get("final_discussion"),
+        provider_user_id=provider_user_id,
+        supabase=supabase,
+        field_label="Final discussion",
+    )
+    if finalized_final_discussion:
+        insert_payload["meta"]["final_discussion"] = finalized_final_discussion
+    else:
+        insert_payload["meta"].pop("final_discussion", None)
     try:
         row = _first(supabase.table(TEST_SERIES_TABLE).insert(insert_payload).execute())
     except Exception as exc:
@@ -2873,7 +4054,18 @@ def update_test_series(
     if "meta" in updates and updates["meta"] is not None:
         merged_meta = _meta_dict(row.get("meta"))
         merged_meta.update(updates["meta"])
-        updates["meta"] = merged_meta
+        normalized_meta = _normalize_series_meta(merged_meta, strict=True)
+        finalized_final_discussion = _finalize_discussion_config(
+            normalized_meta.get("final_discussion"),
+            provider_user_id=str(row.get("provider_user_id") or "").strip(),
+            supabase=supabase,
+            field_label="Final discussion",
+        )
+        if finalized_final_discussion:
+            normalized_meta["final_discussion"] = finalized_final_discussion
+        else:
+            normalized_meta.pop("final_discussion", None)
+        updates["meta"] = normalized_meta
     updates["updated_at"] = _utc_now_iso()
 
     updated = _first(supabase.table(TEST_SERIES_TABLE).update(updates).eq("id", series_id).execute())
@@ -2933,6 +4125,23 @@ def list_series_tests(
         shaped_row["question_count"] = question_counts.get(int(row.get("id") or 0), 0)
         output.append(_collection_row_to_test_response(shaped_row, series_id=series_id))
     return output
+
+
+@router.get("/test-series/{series_id}/program-items", response_model=List[TestSeriesProgramItemResponse])
+def list_series_program_items(
+    series_id: int,
+    include_inactive: bool = False,
+    user_ctx: Optional[Dict[str, Any]] = Depends(get_user_context),
+    supabase: Client = Depends(get_supabase_client),
+):
+    series_row = _fetch_series_or_404(series_id, supabase)
+    if not _can_view_series(user_ctx=user_ctx, series_row=series_row, supabase=supabase):
+        raise HTTPException(status_code=403, detail="Access denied for this program.")
+    if include_inactive and (not user_ctx or not _can_monitor_or_review_series(user_ctx, series_row)):
+        include_inactive = False
+
+    rows = _fetch_series_program_items(series_id=series_id, supabase=supabase, include_inactive=include_inactive)
+    return [_program_item_row_to_response(row) for row in rows]
 
 
 @router.get("/test-series-discovery/tests", response_model=List[TestSeriesDiscoveryTestResponse])
@@ -3175,6 +4384,17 @@ def create_series_test(
     merged_meta["series_id"] = series_id
     merged_meta["series_order"] = payload.series_order
     merged_meta = _apply_collection_test_kind_meta(merged_meta, payload.test_kind)
+    merged_meta = _normalize_test_meta(merged_meta, strict=True)
+    finalized_test_discussion = _finalize_discussion_config(
+        merged_meta.get("test_discussion"),
+        provider_user_id=str(series_row.get("provider_user_id") or "").strip(),
+        supabase=supabase,
+        field_label="Test discussion",
+    )
+    if finalized_test_discussion:
+        merged_meta["test_discussion"] = finalized_test_discussion
+    else:
+        merged_meta.pop("test_discussion", None)
 
     insert_payload = {
         "title": title,
@@ -3208,6 +4428,43 @@ def create_series_test(
     return _collection_row_to_test_response(shaped_row, series_id=resolved_series_id)
 
 
+@router.post("/test-series/{series_id}/program-items", response_model=TestSeriesProgramItemResponse)
+def create_series_program_item(
+    series_id: int,
+    payload: TestSeriesProgramItemCreate,
+    user_ctx: Dict[str, Any] = Depends(require_series_author_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    series_row = _fetch_series_or_404(series_id, supabase)
+    _ensure_series_owner_or_admin(series_row, user_ctx)
+
+    insert_payload = _build_program_item_payload(
+        item_type=payload.item_type,
+        title=payload.title,
+        description=payload.description,
+        resource_url=payload.resource_url,
+        scheduled_for=payload.scheduled_for,
+        duration_minutes=payload.duration_minutes,
+        cover_image_url=payload.cover_image_url,
+        series_order=payload.series_order,
+        is_active=payload.is_active,
+        meta=payload.meta,
+    )
+    now_iso = _utc_now_iso()
+    insert_payload.update({
+        "series_id": series_id,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+    try:
+        row = _first(supabase.table(TEST_SERIES_PROGRAM_ITEMS_TABLE).insert(insert_payload).execute())
+    except Exception as exc:
+        _raise_test_series_migration_required(exc)
+    if not row:
+        raise HTTPException(status_code=400, detail="Failed to create program item.")
+    return _program_item_row_to_response(row)
+
+
 @router.get("/tests/{test_id}", response_model=TestSeriesTestResponse)
 def get_series_test(
     test_id: int,
@@ -3220,6 +4477,395 @@ def get_series_test(
     shaped_row = dict(collection_row)
     shaped_row["question_count"] = _fetch_test_question_counts([test_id], supabase).get(test_id, 0)
     return _collection_row_to_test_response(shaped_row, series_id=series_id)
+
+
+def _build_discussion_call_context(
+    *,
+    scope_type: str,
+    scope_id: int,
+    discussion_key: str,
+    series_row: Dict[str, Any],
+    discussion: Dict[str, Any],
+    user_ctx: Dict[str, Any],
+    supabase: Client,
+) -> DiscussionCallContextResponse:
+    if not _agora_ready():
+        raise HTTPException(
+            status_code=400,
+            detail="Agora is not configured on the server. Add AGORA_APP_ID and AGORA_APP_CERTIFICATE first.",
+        )
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    is_host = _series_discussion_host_allowed(user_ctx=user_ctx, series_row=series_row)
+    active_speaker_request = None if is_host else _discussion_active_speaker_request_for_user(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        discussion_key=discussion_key,
+        user_id=user_id,
+        supabase=supabase,
+    )
+    can_publish = bool(is_host or active_speaker_request)
+    role_type = 1 if can_publish else 2
+    participant_role = "host" if is_host else "speaker" if active_speaker_request else "listener"
+    discussion_channel = _discussion_room_channel(scope_type, scope_id, discussion_key)
+    resource_key = f"{scope_type}:{scope_id}:{discussion_key}"
+    uid_value = _agora_uid_for_resource(resource_key, user_id)
+    privilege_expired_ts = int(time.time()) + 3600 * 6
+    token = RtcTokenBuilder.buildTokenWithUid(
+        str(AGORA_APP_ID),
+        str(AGORA_APP_CERTIFICATE),
+        discussion_channel,
+        uid_value,
+        1 if can_publish else 2,
+        privilege_expired_ts,
+        privilege_expired_ts,
+    )
+    available_from, available_until = _discussion_available_window(discussion)
+    display_name = _user_ctx_display_name(user_ctx) or str(user_ctx.get("email") or "").split("@")[0].strip() or (
+        "Host" if is_host else "Learner"
+    )
+    return DiscussionCallContextResponse(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        discussion_key=discussion_key,
+        discussion_channel=discussion_channel,
+        title=str(discussion.get("title") or "").strip() or None,
+        description=str(discussion.get("description") or "").strip() or None,
+        scheduled_for=str(discussion.get("scheduled_for") or "").strip() or None,
+        duration_minutes=_parse_optional_non_negative_int(discussion.get("duration_minutes"), max_value=480) or 60,
+        call_provider=MentorshipCallProvider.ZOOM_VIDEO_SDK,
+        mode=MentorshipMode.VIDEO,
+        participant_role=participant_role,
+        host_controls_enabled=bool(is_host),
+        sdk_user_name=display_name,
+        sdk_role_type=role_type,
+        agora_app_id=str(AGORA_APP_ID),
+        agora_channel=discussion_channel,
+        agora_token=token,
+        agora_uid=uid_value,
+        provider_payload=_meta_dict(discussion.get("provider_payload")),
+        available_from=available_from,
+        available_until=available_until,
+    )
+
+
+@router.post("/test-series/{series_id}/discussion-context", response_model=DiscussionCallContextResponse)
+def get_series_discussion_context(
+    series_id: int,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    resource = _resolve_discussion_resource(
+        scope_type="series",
+        scope_id=series_id,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+    return _build_discussion_call_context(
+        scope_type=str(resource["scope_type"]),
+        scope_id=int(resource["scope_id"]),
+        discussion_key=str(resource["discussion_key"]),
+        series_row=resource["series_row"],
+        discussion=resource["discussion"],
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
+
+@router.post("/tests/{test_id}/discussion-context", response_model=DiscussionCallContextResponse)
+def get_test_discussion_context(
+    test_id: int,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    resource = _resolve_discussion_resource(
+        scope_type="test",
+        scope_id=test_id,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+    return _build_discussion_call_context(
+        scope_type=str(resource["scope_type"]),
+        scope_id=int(resource["scope_id"]),
+        discussion_key=str(resource["discussion_key"]),
+        series_row=resource["series_row"],
+        discussion=resource["discussion"],
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
+
+def _discussion_speaker_request_or_404(request_id: int, supabase: Client) -> Dict[str, Any]:
+    row = _safe_first(
+        supabase.table(DISCUSSION_SPEAKER_REQUESTS_TABLE)
+        .select("*")
+        .eq("id", request_id)
+        .limit(1)
+    )
+    if row:
+        return row
+    raise HTTPException(status_code=404, detail="Speaker request not found.")
+
+
+def _discussion_speaker_requests_for_viewer(
+    *,
+    scope_type: str,
+    scope_id: int,
+    discussion_key: str,
+    user_ctx: Dict[str, Any],
+    supabase: Client,
+) -> List[DiscussionSpeakerRequestResponse]:
+    resource = _resolve_discussion_resource(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+    try:
+        query = (
+            supabase.table(DISCUSSION_SPEAKER_REQUESTS_TABLE)
+            .select("*")
+            .eq("scope_type", str(resource["scope_type"]))
+            .eq("scope_id", int(resource["scope_id"]))
+            .eq("discussion_key", str(resource["discussion_key"]))
+            .order("requested_at", desc=True)
+        )
+        if _series_discussion_host_allowed(user_ctx=user_ctx, series_row=resource["series_row"]):
+            rows = _safe_rows(
+                query.in_(
+                    "status",
+                    [
+                        DiscussionSpeakerRequestStatus.PENDING.value,
+                        DiscussionSpeakerRequestStatus.APPROVED.value,
+                    ],
+                )
+            )
+        else:
+            user_id = str(user_ctx.get("user_id") or "").strip()
+            rows = _safe_rows(query.eq("user_id", user_id).limit(10))
+        return [_discussion_speaker_request_response(row) for row in rows]
+    except Exception as exc:
+        _raise_discussion_speaker_requests_migration_required(exc)
+
+
+@router.get("/discussion/speaker-requests", response_model=List[DiscussionSpeakerRequestResponse])
+def list_discussion_speaker_requests(
+    scope_type: str = Query(pattern="^(series|test)$"),
+    scope_id: int = Query(gt=0),
+    discussion_key: str = Query(pattern="^(final_discussion|test_discussion)$"),
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    return _discussion_speaker_requests_for_viewer(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        discussion_key=discussion_key,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
+
+def _create_discussion_speaker_request(
+    *,
+    scope_type: str,
+    scope_id: int,
+    payload: DiscussionSpeakerRequestCreate,
+    user_ctx: Dict[str, Any],
+    supabase: Client,
+) -> DiscussionSpeakerRequestResponse:
+    resource = _resolve_discussion_resource(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+    if _series_discussion_host_allowed(user_ctx=user_ctx, series_row=resource["series_row"]):
+        raise HTTPException(status_code=400, detail="Hosts already have speaking access in this class.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sign in before requesting speaker access.")
+    try:
+        existing = _safe_first(
+            supabase.table(DISCUSSION_SPEAKER_REQUESTS_TABLE)
+            .select("*")
+            .eq("scope_type", str(resource["scope_type"]))
+            .eq("scope_id", int(resource["scope_id"]))
+            .eq("discussion_key", str(resource["discussion_key"]))
+            .eq("user_id", user_id)
+            .in_(
+                "status",
+                [
+                    DiscussionSpeakerRequestStatus.PENDING.value,
+                    DiscussionSpeakerRequestStatus.APPROVED.value,
+                ],
+            )
+            .order("updated_at", desc=True)
+            .limit(1)
+        )
+        if existing:
+            return _discussion_speaker_request_response(existing)
+
+        now_iso = _utc_now_iso()
+        insert_payload = {
+            "scope_type": str(resource["scope_type"]),
+            "scope_id": int(resource["scope_id"]),
+            "series_id": int(resource["series_id"]),
+            "discussion_key": str(resource["discussion_key"]),
+            "discussion_channel": str(resource["discussion_channel"]),
+            "user_id": user_id,
+            "display_name": _user_ctx_display_name(user_ctx) or str(user_ctx.get("email") or "").split("@")[0].strip() or "Learner",
+            "status": DiscussionSpeakerRequestStatus.PENDING.value,
+            "note": _as_optional_text(payload.note, max_length=500),
+            "requested_at": now_iso,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "meta": {},
+        }
+        inserted = _first(supabase.table(DISCUSSION_SPEAKER_REQUESTS_TABLE).insert(insert_payload).execute())
+        if not inserted:
+            raise HTTPException(status_code=500, detail="Could not create speaker request.")
+        return _discussion_speaker_request_response(inserted)
+    except Exception as exc:
+        _raise_discussion_speaker_requests_migration_required(exc)
+
+
+@router.post("/test-series/{series_id}/discussion-request-to-speak", response_model=DiscussionSpeakerRequestResponse)
+def request_series_discussion_speaker_access(
+    series_id: int,
+    payload: DiscussionSpeakerRequestCreate,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    return _create_discussion_speaker_request(
+        scope_type="series",
+        scope_id=series_id,
+        payload=payload,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
+
+@router.post("/tests/{test_id}/discussion-request-to-speak", response_model=DiscussionSpeakerRequestResponse)
+def request_test_discussion_speaker_access(
+    test_id: int,
+    payload: DiscussionSpeakerRequestCreate,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    return _create_discussion_speaker_request(
+        scope_type="test",
+        scope_id=test_id,
+        payload=payload,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
+
+def _update_discussion_speaker_request_status(
+    *,
+    request_id: int,
+    next_status: DiscussionSpeakerRequestStatus,
+    user_ctx: Dict[str, Any],
+    supabase: Client,
+) -> DiscussionSpeakerRequestResponse:
+    row = _discussion_speaker_request_or_404(request_id, supabase)
+    current_status = _normalize_discussion_speaker_request_status(row.get("status"))
+    user_id = str(user_ctx.get("user_id") or "").strip()
+
+    if next_status in {DiscussionSpeakerRequestStatus.APPROVED, DiscussionSpeakerRequestStatus.REJECTED, DiscussionSpeakerRequestStatus.REMOVED}:
+        series_row = _fetch_series_or_404(int(row.get("series_id") or 0), supabase)
+        if not _series_discussion_host_allowed(user_ctx=user_ctx, series_row=series_row):
+            raise HTTPException(status_code=403, detail="Only the host can manage speaker requests.")
+        if next_status == DiscussionSpeakerRequestStatus.APPROVED and current_status not in {DiscussionSpeakerRequestStatus.PENDING, DiscussionSpeakerRequestStatus.APPROVED}:
+            raise HTTPException(status_code=400, detail="Only pending requests can be approved.")
+        if next_status == DiscussionSpeakerRequestStatus.REJECTED and current_status != DiscussionSpeakerRequestStatus.PENDING:
+            raise HTTPException(status_code=400, detail="Only pending requests can be rejected.")
+        if next_status == DiscussionSpeakerRequestStatus.REMOVED and current_status != DiscussionSpeakerRequestStatus.APPROVED:
+            raise HTTPException(status_code=400, detail="Only approved speakers can be removed.")
+    elif next_status == DiscussionSpeakerRequestStatus.WITHDRAWN:
+        if str(row.get("user_id") or "").strip() != user_id:
+            raise HTTPException(status_code=403, detail="Only the learner can withdraw this speaker request.")
+        if current_status not in {DiscussionSpeakerRequestStatus.PENDING, DiscussionSpeakerRequestStatus.APPROVED}:
+            raise HTTPException(status_code=400, detail="This speaker request is already closed.")
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported status change.")
+
+    now_iso = _utc_now_iso()
+    update_payload = {
+        "status": next_status.value,
+        "updated_at": now_iso,
+        "resolved_at": now_iso if next_status != DiscussionSpeakerRequestStatus.PENDING else row.get("resolved_at"),
+        "resolved_by_user_id": user_id if next_status != DiscussionSpeakerRequestStatus.WITHDRAWN else None,
+    }
+    try:
+        updated = _first(
+            supabase.table(DISCUSSION_SPEAKER_REQUESTS_TABLE)
+            .update(update_payload)
+            .eq("id", request_id)
+            .execute()
+        )
+        if not updated:
+            raise HTTPException(status_code=500, detail="Could not update speaker request.")
+        return _discussion_speaker_request_response(updated)
+    except Exception as exc:
+        _raise_discussion_speaker_requests_migration_required(exc)
+
+
+@router.post("/discussion/speaker-requests/{request_id}/approve", response_model=DiscussionSpeakerRequestResponse)
+def approve_discussion_speaker_request(
+    request_id: int,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    return _update_discussion_speaker_request_status(
+        request_id=request_id,
+        next_status=DiscussionSpeakerRequestStatus.APPROVED,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
+
+@router.post("/discussion/speaker-requests/{request_id}/reject", response_model=DiscussionSpeakerRequestResponse)
+def reject_discussion_speaker_request(
+    request_id: int,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    return _update_discussion_speaker_request_status(
+        request_id=request_id,
+        next_status=DiscussionSpeakerRequestStatus.REJECTED,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
+
+@router.post("/discussion/speaker-requests/{request_id}/remove", response_model=DiscussionSpeakerRequestResponse)
+def remove_discussion_speaker(
+    request_id: int,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    return _update_discussion_speaker_request_status(
+        request_id=request_id,
+        next_status=DiscussionSpeakerRequestStatus.REMOVED,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
+
+@router.post("/discussion/speaker-requests/{request_id}/withdraw", response_model=DiscussionSpeakerRequestResponse)
+def withdraw_discussion_speaker_request(
+    request_id: int,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    return _update_discussion_speaker_request_status(
+        request_id=request_id,
+        next_status=DiscussionSpeakerRequestStatus.WITHDRAWN,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
 
 
 @router.put("/tests/{test_id}", response_model=TestSeriesTestResponse)
@@ -3258,7 +4904,18 @@ def update_series_test(
         updates["series_order"] = payload.series_order
     if payload.test_kind is not None:
         merged_meta = _apply_collection_test_kind_meta(merged_meta, payload.test_kind)
-    updates["meta"] = merged_meta
+    normalized_meta = _normalize_test_meta(merged_meta, strict=True)
+    finalized_test_discussion = _finalize_discussion_config(
+        normalized_meta.get("test_discussion"),
+        provider_user_id=str(series_row.get("provider_user_id") or "").strip(),
+        supabase=supabase,
+        field_label="Test discussion",
+    )
+    if finalized_test_discussion:
+        normalized_meta["test_discussion"] = finalized_test_discussion
+    else:
+        normalized_meta.pop("test_discussion", None)
+    updates["meta"] = normalized_meta
 
     if payload.price is not None and payload.is_premium is None:
         updates["is_premium"] = float(payload.price) > 0
@@ -3282,6 +4939,44 @@ def update_series_test(
     shaped_row = dict(updated)
     shaped_row["question_count"] = _fetch_test_question_counts([test_id], supabase).get(test_id, 0)
     return _collection_row_to_test_response(shaped_row, series_id=series_id)
+
+
+@router.put("/test-series/program-items/{item_id}", response_model=TestSeriesProgramItemResponse)
+def update_series_program_item(
+    item_id: int,
+    payload: TestSeriesProgramItemUpdate,
+    user_ctx: Dict[str, Any] = Depends(require_series_author_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    row = _fetch_program_item_or_404(item_id, supabase)
+    series_row = _fetch_series_or_404(int(row.get("series_id") or 0), supabase)
+    _ensure_series_owner_or_admin(series_row, user_ctx)
+
+    updates = _build_program_item_payload(
+        item_type=payload.item_type or _normalize_program_item_type(row.get("item_type")),
+        title=payload.title if payload.title is not None else row.get("title"),
+        description=payload.description if payload.description is not None else row.get("description"),
+        resource_url=payload.resource_url if payload.resource_url is not None else row.get("resource_url"),
+        scheduled_for=payload.scheduled_for if payload.scheduled_for is not None else row.get("scheduled_for"),
+        duration_minutes=payload.duration_minutes if payload.duration_minutes is not None else row.get("duration_minutes"),
+        cover_image_url=payload.cover_image_url if payload.cover_image_url is not None else row.get("cover_image_url"),
+        series_order=payload.series_order if payload.series_order is not None else row.get("series_order"),
+        is_active=payload.is_active if payload.is_active is not None else row.get("is_active"),
+        meta=payload.meta if payload.meta is not None else row.get("meta"),
+    )
+    updates["updated_at"] = _utc_now_iso()
+    try:
+        updated = _first(
+            supabase.table(TEST_SERIES_PROGRAM_ITEMS_TABLE)
+            .update(updates)
+            .eq("id", item_id)
+            .execute()
+        )
+    except Exception as exc:
+        _raise_test_series_migration_required(exc)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Program item not found.")
+    return _program_item_row_to_response(updated)
 
 
 @router.delete("/tests/{test_id}")
@@ -3312,6 +5007,34 @@ def delete_series_test(
     return {"message": "Test archived.", "id": test_id}
 
 
+@router.delete("/test-series/program-items/{item_id}")
+def delete_series_program_item(
+    item_id: int,
+    hard_delete: bool = Query(default=False),
+    user_ctx: Dict[str, Any] = Depends(require_series_author_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    row = _fetch_program_item_or_404(item_id, supabase)
+    series_row = _fetch_series_or_404(int(row.get("series_id") or 0), supabase)
+    _ensure_series_owner_or_admin(series_row, user_ctx)
+
+    if hard_delete:
+        deleted = _first(supabase.table(TEST_SERIES_PROGRAM_ITEMS_TABLE).delete().eq("id", item_id).execute())
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Program item not found.")
+        return {"message": "Program item deleted permanently.", "id": item_id}
+
+    updated = _first(
+        supabase.table(TEST_SERIES_PROGRAM_ITEMS_TABLE)
+        .update({"is_active": False, "updated_at": _utc_now_iso()})
+        .eq("id", item_id)
+        .execute()
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Program item not found.")
+    return {"message": "Program item archived.", "id": item_id}
+
+
 @router.put("/tests/{test_id}/items/{collection_item_id}")
 def update_test_item(
     test_id: int,
@@ -3337,6 +5060,53 @@ def update_test_item(
     if not row:
         raise HTTPException(status_code=404, detail="Collection item not found.")
     return row
+
+
+@router.put("/tests/{test_id}/items/{collection_item_id}/content")
+def update_test_item_content(
+    test_id: int,
+    collection_item_id: int,
+    payload: TestItemContentUpdateRequest,
+    user_ctx: Dict[str, Any] = Depends(require_series_author_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    series_row, _collection_row, _series_id = _fetch_series_for_test_or_404(test_id, supabase)
+    _ensure_series_owner_or_admin(series_row, user_ctx)
+    _enforce_series_kind_authoring_access(user_ctx=user_ctx, series_kind=_as_role(series_row.get("series_kind")))
+
+    collection_item = _first(
+        supabase.table("collection_items")
+        .select("id, content_item_id")
+        .eq("id", collection_item_id)
+        .eq("collection_id", test_id)
+        .limit(1)
+        .execute()
+    )
+    if not collection_item:
+        raise HTTPException(status_code=404, detail="Collection item not found.")
+
+    content_item_id = _safe_int(collection_item.get("content_item_id"), 0)
+    if content_item_id <= 0:
+        raise HTTPException(status_code=404, detail="Content item not found.")
+
+    updates: Dict[str, Any] = {}
+    if payload.title is not None:
+        updates["title"] = payload.title
+    if payload.data is not None:
+        updates["data"] = payload.data
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No content updates supplied.")
+
+    updated = _first(
+        supabase.table("content_items")
+        .update(updates)
+        .eq("id", content_item_id)
+        .execute()
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Content item not found.")
+    return updated
 
 
 @router.delete("/tests/{test_id}/items/{collection_item_id}")
@@ -3368,23 +5138,17 @@ def enroll_in_test_series(
     user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
     supabase: Client = Depends(get_supabase_client),
 ):
-    _fetch_series_or_404(series_id, supabase)
+    series_row = _fetch_series_or_404(series_id, supabase)
     user_id = str(user_ctx.get("user_id") or "").strip()
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required.")
 
+    if not _is_series_open_access(series_row):
+        raise HTTPException(status_code=400, detail="Online checkout is required for this series.")
+
     existing = _series_enrollment_row(series_id=series_id, user_id=user_id, supabase=supabase)
     if existing:
-        return TestSeriesEnrollmentResponse(
-            id=int(existing.get("id") or 0),
-            series_id=int(existing.get("series_id") or series_id),
-            user_id=str(existing.get("user_id") or user_id),
-            status=str(existing.get("status") or "active"),
-            access_source=str(existing.get("access_source") or payload.access_source or "manual"),
-            subscribed_until=str(existing.get("subscribed_until")) if existing.get("subscribed_until") else None,
-            created_at=str(existing.get("created_at") or ""),
-            updated_at=str(existing.get("updated_at")) if existing.get("updated_at") else None,
-        )
+        return _series_enrollment_response(existing, series_id=series_id, user_id=user_id)
 
     insert_payload = {
         "series_id": series_id,
@@ -3397,16 +5161,189 @@ def enroll_in_test_series(
     row = _first(supabase.table(TEST_SERIES_ENROLLMENTS_TABLE).insert(insert_payload).execute())
     if not row:
         raise HTTPException(status_code=400, detail="Could not enroll in test series.")
-    return TestSeriesEnrollmentResponse(
-        id=int(row.get("id") or 0),
-        series_id=int(row.get("series_id") or series_id),
-        user_id=str(row.get("user_id") or user_id),
-        status=str(row.get("status") or "active"),
-        access_source=str(row.get("access_source") or "manual"),
-        subscribed_until=str(row.get("subscribed_until")) if row.get("subscribed_until") else None,
-        created_at=str(row.get("created_at") or ""),
-        updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
+    return _series_enrollment_response(row, series_id=series_id, user_id=user_id)
+
+
+@router.post("/test-series/{series_id}/payment/order", response_model=TestSeriesRazorpayOrderResponse)
+def create_test_series_payment_order(
+    series_id: int,
+    payload: TestSeriesEnrollmentPaymentCreate,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    series_row = _fetch_series_or_404(series_id, supabase)
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    if str(series_row.get("provider_user_id") or "").strip() == user_id:
+        raise HTTPException(status_code=400, detail="You already own this series.")
+
+    existing_active = _series_enrollment_row(series_id=series_id, user_id=user_id, supabase=supabase)
+    if existing_active:
+        raise HTTPException(status_code=409, detail="You already have access to this series.")
+
+    amount_display = round(max(_safe_float(series_row.get("price"), 0.0), 0.0), 2)
+    if amount_display <= 0:
+        raise HTTPException(status_code=400, detail="This series does not require online payment.")
+
+    key_id, _key_secret = _get_razorpay_credentials()
+    currency = _series_payment_currency(series_row)
+    amount_minor = _payment_amount_minor_units(amount_display, currency)
+    if amount_minor <= 0:
+        raise HTTPException(status_code=400, detail="Payment amount must be greater than zero.")
+
+    user_email = str(user_ctx.get("email") or "").strip()
+    user_name = _user_ctx_display_name(user_ctx) or ""
+    receipt = f"series-{series_id}-{int(datetime.now(timezone.utc).timestamp())}"
+    notes = {
+        "series_id": str(series_id),
+        "learner_user_id": user_id,
+        "provider_user_id": str(series_row.get("provider_user_id") or "").strip(),
+        "series_kind": _as_role(series_row.get("series_kind")) or "series",
+    }
+    razorpay_order = _create_razorpay_order(
+        amount_minor=amount_minor,
+        currency=currency,
+        receipt=receipt,
+        notes=notes,
     )
+
+    pending_meta = {
+        "payment_gateway": "razorpay",
+        "payment_status": "pending",
+        "payment_method": str(payload.payment_method or "razorpay").strip().lower()[:60] or "razorpay",
+        "payment_attempted_at": _utc_now_iso(),
+        "payment_order_id": str(razorpay_order.get("id") or "").strip(),
+        "payment_order_receipt": str(razorpay_order.get("receipt") or receipt).strip()[:80],
+        "payment_order_status": str(razorpay_order.get("status") or "created").strip()[:40],
+        "payment_amount": amount_display,
+        "payment_currency": currency,
+    }
+
+    existing_any = _series_enrollment_any_status_row(series_id=series_id, user_id=user_id, supabase=supabase)
+    if existing_any:
+        _first(
+            supabase.table(TEST_SERIES_ENROLLMENTS_TABLE)
+            .update(
+                {
+                    "status": "pending",
+                    "access_source": payload.access_source or "self_service",
+                    "subscribed_until": payload.subscribed_until,
+                    "meta": pending_meta,
+                    "updated_at": _utc_now_iso(),
+                }
+            )
+            .eq("id", int(existing_any.get("id") or 0))
+            .execute()
+        )
+    else:
+        _first(
+            supabase.table(TEST_SERIES_ENROLLMENTS_TABLE)
+            .insert(
+                {
+                    "series_id": series_id,
+                    "user_id": user_id,
+                    "status": "pending",
+                    "access_source": payload.access_source or "self_service",
+                    "subscribed_until": payload.subscribed_until,
+                    "meta": pending_meta,
+                    "updated_at": _utc_now_iso(),
+                }
+            )
+            .execute()
+        )
+
+    return TestSeriesRazorpayOrderResponse(
+        series_id=series_id,
+        order_id=str(razorpay_order.get("id") or "").strip(),
+        key_id=key_id,
+        amount=int(razorpay_order.get("amount") or amount_minor),
+        currency=currency,
+        amount_display=amount_display,
+        name="Mentors App",
+        description=_series_payment_description(series_row),
+        prefill={"name": user_name, "email": user_email},
+        notes={"series_id": str(series_id), "series_title": str(series_row.get("title") or "").strip()},
+    )
+
+
+@router.post("/test-series/{series_id}/payment/verify", response_model=TestSeriesEnrollmentResponse)
+def verify_test_series_payment(
+    series_id: int,
+    payload: TestSeriesEnrollmentPaymentVerify,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    series_row = _fetch_series_or_404(series_id, supabase)
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    existing = _series_enrollment_any_status_row(series_id=series_id, user_id=user_id, supabase=supabase)
+    if not existing:
+        raise HTTPException(status_code=400, detail="Start checkout before verifying payment.")
+    if str(existing.get("status") or "").strip() == "active":
+        return _series_enrollment_response(existing, series_id=series_id, user_id=user_id)
+
+    enrollment_meta = _meta_dict(existing.get("meta"))
+    expected_order_id = str(enrollment_meta.get("payment_order_id") or "").strip()
+    if not expected_order_id or expected_order_id != payload.razorpay_order_id.strip():
+        raise HTTPException(status_code=400, detail="Payment order does not match the latest checkout attempt.")
+
+    if not _verify_razorpay_signature(
+        order_id=payload.razorpay_order_id.strip(),
+        payment_id=payload.razorpay_payment_id.strip(),
+        signature=payload.razorpay_signature.strip(),
+    ):
+        failed_meta = _meta_dict(existing.get("meta"))
+        failed_meta.update(
+            {
+                "payment_status": "failed",
+                "payment_failure_reason": "signature_verification_failed",
+                "payment_failed_at": _utc_now_iso(),
+            }
+        )
+        _first(
+            supabase.table(TEST_SERIES_ENROLLMENTS_TABLE)
+            .update({"meta": failed_meta, "updated_at": _utc_now_iso()})
+            .eq("id", int(existing.get("id") or 0))
+            .execute()
+        )
+        raise HTTPException(status_code=400, detail="Razorpay payment verification failed.")
+
+    success_meta = _meta_dict(existing.get("meta"))
+    success_meta.update(
+        {
+            "payment_status": "paid",
+            "payment_gateway": "razorpay",
+            "payment_method": str(payload.payment_method or "razorpay").strip().lower()[:60] or "razorpay",
+            "payment_paid_at": _utc_now_iso(),
+            "razorpay_payment_id": payload.razorpay_payment_id.strip(),
+            "razorpay_signature": payload.razorpay_signature.strip(),
+            "payment_order_id": payload.razorpay_order_id.strip(),
+            "payment_amount": round(max(_safe_float(series_row.get("price"), 0.0), 0.0), 2),
+            "payment_currency": _series_payment_currency(series_row),
+            "payment_failure_reason": "",
+            "payment_failed_at": "",
+        }
+    )
+    updated = _first(
+        supabase.table(TEST_SERIES_ENROLLMENTS_TABLE)
+        .update(
+            {
+                "status": "active",
+                "access_source": payload.access_source or str(existing.get("access_source") or "self_service"),
+                "subscribed_until": payload.subscribed_until or existing.get("subscribed_until"),
+                "meta": success_meta,
+                "updated_at": _utc_now_iso(),
+            }
+        )
+        .eq("id", int(existing.get("id") or 0))
+        .execute()
+    )
+    if not updated:
+        raise HTTPException(status_code=400, detail="Could not activate series enrollment.")
+    return _series_enrollment_response(updated, series_id=series_id, user_id=user_id)
 
 @router.get("/test-series/{series_id:int}/enrollments", response_model=List[TestSeriesEnrollmentResponse])
 def list_series_enrollments(
@@ -3425,21 +5362,7 @@ def list_series_enrollments(
         .order("created_at", desc=True)
         .execute()
     )
-    out: List[TestSeriesEnrollmentResponse] = []
-    for row in rows:
-        out.append(
-            TestSeriesEnrollmentResponse(
-                id=int(row.get("id") or 0),
-                series_id=int(row.get("series_id") or series_id),
-                user_id=str(row.get("user_id") or ""),
-                status=str(row.get("status") or "active"),
-                access_source=str(row.get("access_source") or "manual"),
-                subscribed_until=str(row.get("subscribed_until")) if row.get("subscribed_until") else None,
-                created_at=str(row.get("created_at") or ""),
-                updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
-            )
-        )
-    return out
+    return [_series_enrollment_response(row, series_id=series_id, user_id=str(row.get("user_id") or "")) for row in rows]
 
 
 @router.get("/test-series/my/enrollments", response_model=List[TestSeriesEnrollmentResponse])
@@ -3455,19 +5378,7 @@ def list_my_series_enrollments(
         .order("created_at", desc=True)
         .execute()
     )
-    return [
-        TestSeriesEnrollmentResponse(
-            id=int(row.get("id") or 0),
-            series_id=int(row.get("series_id") or 0),
-            user_id=str(row.get("user_id") or ""),
-            status=str(row.get("status") or "active"),
-            access_source=str(row.get("access_source") or "manual"),
-            subscribed_until=str(row.get("subscribed_until")) if row.get("subscribed_until") else None,
-            created_at=str(row.get("created_at") or ""),
-            updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
-        )
-        for row in rows
-    ]
+    return [_series_enrollment_response(row, series_id=int(row.get("series_id") or 0), user_id=user_id) for row in rows]
 
 
 @router.post("/tests/{test_id}/copy-submissions", response_model=MainsCopySubmissionResponse)
@@ -3514,20 +5425,6 @@ def submit_mains_copy(
     row = _first(supabase.table(COPY_SUBMISSIONS_TABLE).insert(insert_payload).execute())
     if not row:
         raise HTTPException(status_code=400, detail="Failed to submit copy.")
-    try:
-        _create_copy_evaluation_request(
-            submission_row=row,
-            provider_user_id=_resolve_series_handler_user_id(series_row),
-            preferred_mode=payload.preferred_mode,
-            supabase=supabase,
-            standalone=False,
-        )
-    except HTTPException:
-        try:
-            supabase.table(COPY_SUBMISSIONS_TABLE).delete().eq("id", int(row.get("id") or 0)).execute()
-        except Exception:
-            pass
-        raise
     return _copy_submission_response(row, supabase, question_context=question_context)
 
 
@@ -3695,6 +5592,9 @@ def set_copy_submission_eta(
         _ensure_series_mentor_or_admin(series_row, user_ctx)
     else:
         _ensure_direct_copy_submission_provider_or_admin(row, user_ctx)
+    request_row = _copy_submission_request_row(submission_id=submission_id, supabase=supabase)
+    if request_row and _request_payment_status(request_row) != MentorshipPaymentStatus.PAID:
+        raise HTTPException(status_code=400, detail="Evaluation can start only after payment is completed.")
 
     now_iso = _utc_now_iso()
     updates: Dict[str, Any] = {
@@ -3717,15 +5617,21 @@ def set_copy_submission_eta(
     if not updated:
         raise HTTPException(status_code=404, detail="Copy submission not found.")
     requested_status = payload.status.value if payload.status is not None else CopySubmissionStatus.ETA_DECLARED.value
-    _update_copy_flow_request_meta(
+    request_update_row = _update_copy_flow_request_meta(
         submission_id=submission_id,
         supabase=supabase,
         updates={
-            "workflow_stage": "under_review" if requested_status == CopySubmissionStatus.UNDER_REVIEW.value else "eta_declared",
+            "workflow_stage": MentorshipWorkflowStage.EVALUATING.value,
             "copy_status": requested_status,
             "copy_eta_set_at": now_iso,
         },
     )
+    if request_update_row:
+        _append_system_request_message(
+            request_update_row,
+            body="Mentor started the evaluation and shared an initial review ETA.",
+            supabase=supabase,
+        )
     return _copy_submission_response(updated, supabase)
 
 
@@ -3751,6 +5657,9 @@ def upload_checked_copy(
         _ensure_series_mentor_or_admin(series_row, user_ctx)
     else:
         _ensure_direct_copy_submission_provider_or_admin(row, user_ctx)
+    request_row = _copy_submission_request_row(submission_id=submission_id, supabase=supabase)
+    if request_row and _request_payment_status(request_row) != MentorshipPaymentStatus.PAID:
+        raise HTTPException(status_code=400, detail="Evaluation can be submitted only after payment is completed.")
 
     test_id = _safe_int(row.get("test_collection_id"), 0)
     question_context = _fetch_mains_test_question_context(test_id, supabase) if test_id > 0 else []
@@ -3827,15 +5736,36 @@ def upload_checked_copy(
             )
         supabase.table(COPY_MARKS_TABLE).insert(to_insert).execute()
 
-    _update_copy_flow_request_meta(
+    provider_next_slot_at = _provider_open_slot_index(
+        [str(updated.get("provider_user_id") or row.get("provider_user_id") or "").strip()],
+        supabase=supabase,
+        now_iso=str(updated.get("updated_at") or _utc_now_iso()),
+    ).get(str(updated.get("provider_user_id") or row.get("provider_user_id") or "").strip())
+    feedback_ready_at = str(updated.get("checked_at") or updated.get("updated_at") or _utc_now_iso())
+    copy_flow_updates: Dict[str, Any] = {
+        "workflow_stage": (
+            MentorshipWorkflowStage.BOOKING_OPEN.value
+            if provider_next_slot_at
+            else MentorshipWorkflowStage.FEEDBACK_READY.value
+        ),
+        "copy_status": CopySubmissionStatus.CHECKED.value,
+        "copy_checked_at": feedback_ready_at,
+        "feedback_ready_at": feedback_ready_at,
+    }
+    if provider_next_slot_at:
+        copy_flow_updates["booking_opened_at"] = feedback_ready_at
+
+    request_update_row = _update_copy_flow_request_meta(
         submission_id=submission_id,
         supabase=supabase,
-        updates={
-            "workflow_stage": "copy_checked",
-            "copy_status": CopySubmissionStatus.CHECKED.value,
-            "copy_checked_at": str(updated.get("checked_at") or updated.get("updated_at") or _utc_now_iso()),
-        },
+        updates=copy_flow_updates,
     )
+    if request_update_row:
+        _append_system_request_message(
+            request_update_row,
+            body="Evaluation completed. You can review the feedback and continue to session booking when available.",
+            supabase=supabase,
+        )
     return _copy_submission_response(updated, supabase, question_context=question_context)
 
 
@@ -4004,14 +5934,14 @@ def get_provider_dashboard_summary(
         mentorship_pending = _safe_rows(
             supabase.table(MENTORSHIP_REQUESTS_TABLE)
             .select("id")
-            .in_("status", [MentorshipRequestStatus.REQUESTED.value, MentorshipRequestStatus.SCHEDULED.value])
+            .in_("status", [MentorshipRequestStatus.REQUESTED.value, MentorshipRequestStatus.ACCEPTED.value, MentorshipRequestStatus.SCHEDULED.value])
         )
     else:
         mentorship_pending = _safe_rows(
             supabase.table(MENTORSHIP_REQUESTS_TABLE)
             .select("id")
             .eq("provider_user_id", user_id)
-            .in_("status", [MentorshipRequestStatus.REQUESTED.value, MentorshipRequestStatus.SCHEDULED.value])
+            .in_("status", [MentorshipRequestStatus.REQUESTED.value, MentorshipRequestStatus.ACCEPTED.value, MentorshipRequestStatus.SCHEDULED.value])
         )
     now_iso = _utc_now_iso()
     if _is_admin(user_ctx):
@@ -4377,6 +6307,16 @@ def get_lifecycle_tracking(
     user_issue_keys: Dict[str, Set[str]] = {}
     delay_issues_total = 0
     technical_issues_total = 0
+    provider_slot_index = _provider_open_slot_index(
+        sorted(
+            {
+                str(row.get("provider_user_id") or "").strip()
+                for row in request_rows
+                if str(row.get("provider_user_id") or "").strip()
+            }
+        ),
+        supabase=supabase,
+    )
 
     def build_issue(
         *,
@@ -4432,6 +6372,18 @@ def get_lifecycle_tracking(
 
         session_row = session_by_request_id.get(request_id)
         session_status = _normalize_mentorship_session_status(session_row.get("status")) if session_row else None
+        snapshot = _request_workflow_snapshot(
+            request_row,
+            submission_row=copy_row,
+            session_row=session_row,
+            provider_next_slot_at=provider_slot_index.get(request_provider_id),
+            supabase=supabase,
+        )
+        workflow_stage = snapshot["workflow_stage"]
+        feedback_ready_at = snapshot["feedback_ready_at"]
+        booking_opened_at = snapshot["booking_opened_at"]
+        join_available = bool(snapshot["join_available"])
+        booking_open = bool(snapshot["booking_open"])
 
         slot_id = int(request_row.get("scheduled_slot_id") or 0)
         if slot_id <= 0 and session_row:
@@ -4439,6 +6391,7 @@ def get_lifecycle_tracking(
         slot_row = slot_by_id.get(slot_id) if slot_id > 0 else None
 
         accepted_at = str(request_meta.get("accepted_at") or "").strip() or None
+        payment_paid_at = str(request_meta.get("payment_paid_at") or "").strip() or None
         if not accepted_at and session_row:
             accepted_at = str(session_row.get("created_at") or "").strip() or None
         if not accepted_at and request_status in {MentorshipRequestStatus.SCHEDULED, MentorshipRequestStatus.COMPLETED}:
@@ -4460,8 +6413,8 @@ def get_lifecycle_tracking(
 
         timeline: List[MentorshipTrackingEventResponse] = [
             MentorshipTrackingEventResponse(
-                key="requested",
-                label="Copy submitted" if copy_row else "Request raised",
+                key="submitted",
+                label="Submitted",
                 at=str(
                     (copy_row or {}).get("submitted_at")
                     or request_row.get("requested_at")
@@ -4470,66 +6423,87 @@ def get_lifecycle_tracking(
                 actor="user",
             )
         ]
-        if copy_row and str(copy_row.get("eta_set_at") or "").strip():
-            timeline.append(
-                MentorshipTrackingEventResponse(
-                    key="eta_declared",
-                    label="Checking ETA shared",
-                    at=str(copy_row.get("eta_set_at") or ""),
-                    actor="mentor",
-                    detail=str(copy_row.get("provider_eta_text") or "").strip() or None,
-                )
-            )
-        if copy_row and str(copy_row.get("checked_at") or "").strip():
-            timeline.append(
-                MentorshipTrackingEventResponse(
-                    key="copy_checked",
-                    label="Copy reviewed",
-                    at=str(copy_row.get("checked_at") or ""),
-                    actor="mentor",
-                )
-            )
-        offered_at = str(request_meta.get("slot_options_offered_at") or "").strip() or None
-        if offered_at:
-            offered_count = len(
-                [
-                    slot_id
-                    for slot_id in request_meta.get("offered_slot_ids", [])
-                    if isinstance(slot_id, int) and int(slot_id) > 0
-                ]
-            )
-            timeline.append(
-                MentorshipTrackingEventResponse(
-                    key="slots_offered",
-                    label="Mentor offered slots",
-                    at=offered_at,
-                    actor=str(request_meta.get("slot_options_offered_by_role") or "mentor"),
-                    detail=f"{offered_count} slot option{'s' if offered_count != 1 else ''} shared." if offered_count else None,
-                )
-            )
         if accepted_at:
             timeline.append(
                 MentorshipTrackingEventResponse(
                     key="accepted",
-                    label="Slot accepted" if offered_at else "Request accepted",
+                    label="Accepted",
                     at=accepted_at,
                     actor=str(request_meta.get("accepted_by_role") or "mentor"),
+                )
+            )
+        if payment_paid_at:
+            timeline.append(
+                MentorshipTrackingEventResponse(
+                    key="paid",
+                    label="Payment Completed",
+                    at=payment_paid_at,
+                    actor="user",
+                    detail=str(request_meta.get("payment_method") or "").strip() or None,
+                )
+            )
+        review_started_at = (
+            str((copy_row or {}).get("eta_set_at") or "").strip()
+            or str(request_meta.get("copy_eta_set_at") or "").strip()
+            or None
+        )
+        if workflow_stage in {
+            MentorshipWorkflowStage.PAID,
+            MentorshipWorkflowStage.EVALUATING,
+            MentorshipWorkflowStage.FEEDBACK_READY,
+            MentorshipWorkflowStage.BOOKING_OPEN,
+            MentorshipWorkflowStage.SCHEDULED,
+            MentorshipWorkflowStage.LIVE,
+            MentorshipWorkflowStage.COMPLETED,
+        } and review_started_at:
+            timeline.append(
+                MentorshipTrackingEventResponse(
+                    key="under_review",
+                    label="Under Review",
+                    at=review_started_at,
+                    actor="mentor",
+                    detail=str(copy_row.get("provider_eta_text") or "").strip() or None,
+                )
+            )
+        if feedback_ready_at:
+            timeline.append(
+                MentorshipTrackingEventResponse(
+                    key="feedback_ready",
+                    label="Feedback Ready",
+                    at=feedback_ready_at,
+                    actor="mentor",
+                )
+            )
+        if booking_opened_at and (
+            booking_open
+            or workflow_stage in {
+                MentorshipWorkflowStage.SCHEDULED,
+                MentorshipWorkflowStage.LIVE,
+                MentorshipWorkflowStage.COMPLETED,
+            }
+        ):
+            timeline.append(
+                MentorshipTrackingEventResponse(
+                    key="booking_open",
+                    label="Booking Open",
+                    at=booking_opened_at,
+                    actor="mentor",
                 )
             )
         if scheduled_for:
             timeline.append(
                 MentorshipTrackingEventResponse(
                     key="scheduled",
-                    label="Session scheduled",
+                    label="Session Scheduled",
                     at=scheduled_for,
-                    actor="mentor",
+                    actor="user" if str(request_meta.get("booking_source") or "").strip() == "learner_self_booking" else "mentor",
                 )
             )
         if session_row and session_status == MentorshipSessionStatus.LIVE:
             timeline.append(
                 MentorshipTrackingEventResponse(
                     key="live",
-                    label="Session live",
+                    label="Session Live",
                     at=str(session_row.get("updated_at") or session_row.get("starts_at") or ""),
                     actor="mentor",
                 )
@@ -4538,7 +6512,7 @@ def get_lifecycle_tracking(
             timeline.append(
                 MentorshipTrackingEventResponse(
                     key="completed",
-                    label="Session completed",
+                    label="Session Completed",
                     at=completed_at,
                     actor=str(request_meta.get("completed_by_role") or "mentor"),
                 )
@@ -4546,19 +6520,31 @@ def get_lifecycle_tracking(
         if request_status == MentorshipRequestStatus.REJECTED:
             timeline.append(
                 MentorshipTrackingEventResponse(
-                    key="rejected",
-                    label="Request rejected",
+                    key="closed",
+                    label="Workflow Closed",
                     at=str(request_row.get("updated_at") or ""),
                     actor=str(request_meta.get("rejected_by_role") or "mentor"),
+                    detail="The mentorship workflow was closed before scheduling.",
+                )
+            )
+        if request_status == MentorshipRequestStatus.EXPIRED:
+            timeline.append(
+                MentorshipTrackingEventResponse(
+                    key="expired",
+                    label="Request Expired",
+                    at=str(request_row.get("updated_at") or ""),
+                    actor=str(request_meta.get("expired_by_role") or "system"),
+                    detail=str(request_meta.get("last_status_reason") or "").strip() or None,
                 )
             )
         if request_status == MentorshipRequestStatus.CANCELLED:
             timeline.append(
                 MentorshipTrackingEventResponse(
-                    key="cancelled",
-                    label="Request cancelled",
+                    key="closed",
+                    label="Workflow Closed",
                     at=str(request_row.get("updated_at") or ""),
                     actor=_tracking_status_actor_from_meta(request_meta, request_row),
+                    detail=str(request_meta.get("last_status_reason") or "").strip() or None,
                 )
             )
 
@@ -4580,7 +6566,11 @@ def get_lifecycle_tracking(
             cycle_issues.append(issue)
             attach_user_issue(request_user_id, issue)
 
-        if request_status == MentorshipRequestStatus.REQUESTED and requested_dt:
+        if (
+            request_status == MentorshipRequestStatus.REQUESTED
+            and requested_dt
+            and workflow_stage != MentorshipWorkflowStage.BOOKING_OPEN
+        ):
             if now_dt > requested_dt + timedelta(hours=MENTOR_REQUEST_RESPONSE_DELAY_HOURS):
                 waited_hours = int((now_dt - requested_dt).total_seconds() // 3600)
                 issue = build_issue(
@@ -4640,6 +6630,19 @@ def get_lifecycle_tracking(
             )
             cycle_issues.append(issue)
             attach_user_issue(request_user_id, issue)
+        if request_status == MentorshipRequestStatus.EXPIRED:
+            issue = build_issue(
+                code="request_expired",
+                label="Mentorship request expired.",
+                actor="system",
+                detected_at=str(request_row.get("updated_at") or generated_at),
+                related_type="mentorship_request",
+                related_id=request_id,
+                detail=str(request_meta.get("last_status_reason") or "").strip() or None,
+                severity="info",
+            )
+            cycle_issues.append(issue)
+            attach_user_issue(request_user_id, issue)
 
         if request_status == MentorshipRequestStatus.COMPLETED and not session_row:
             issue = build_issue(
@@ -4673,10 +6676,15 @@ def get_lifecycle_tracking(
                 test_title=test_title,
                 request_status=request_status,
                 session_status=session_status,
+                workflow_stage=workflow_stage,
+                booking_open=booking_open,
                 requested_at=str(request_row.get("requested_at") or ""),
                 accepted_at=accepted_at,
+                feedback_ready_at=feedback_ready_at,
+                booking_opened_at=booking_opened_at,
                 scheduled_for=scheduled_for,
                 completed_at=completed_at,
+                join_available=join_available,
                 slot_id=slot_id if slot_id > 0 else None,
                 slot_mode=(
                     _normalize_mentorship_mode(slot_row.get("mode") if slot_row else (session_row or {}).get("mode"))
@@ -4802,7 +6810,7 @@ def get_lifecycle_tracking(
             1
             for row in user_requests
             if _normalize_mentorship_request_status(row.get("status"))
-            in {MentorshipRequestStatus.REQUESTED, MentorshipRequestStatus.SCHEDULED}
+            in {MentorshipRequestStatus.REQUESTED, MentorshipRequestStatus.ACCEPTED, MentorshipRequestStatus.SCHEDULED}
         )
         session_non_cancelled = [
             row for row in user_sessions if _normalize_mentorship_session_status(row.get("status")) != MentorshipSessionStatus.CANCELLED
@@ -4877,7 +6885,7 @@ def get_lifecycle_tracking(
         1
         for row in request_rows
         if _normalize_mentorship_request_status(row.get("status"))
-        in {MentorshipRequestStatus.REQUESTED, MentorshipRequestStatus.SCHEDULED}
+        in {MentorshipRequestStatus.REQUESTED, MentorshipRequestStatus.ACCEPTED, MentorshipRequestStatus.SCHEDULED}
     )
     scheduled_mentorship_total = sum(
         1 for row in request_rows if _normalize_mentorship_request_status(row.get("status")) == MentorshipRequestStatus.SCHEDULED
@@ -5429,6 +7437,24 @@ def create_mentorship_request(
     mentor_profile_meta = _normalize_profile_meta((mentor_profile_row or {}).get("meta"))
     availability_mode = _as_role(mentor_profile_meta.get("mentorship_availability_mode")) or "series_only"
     available_series_ids = _parse_series_id_list(mentor_profile_meta.get("mentorship_available_series_ids"))
+    requested_service_type = payload.service_type or (
+        MentorshipServiceType.COPY_EVALUATION_AND_MENTORSHIP if resolved_submission_id else MentorshipServiceType.MENTORSHIP_ONLY
+    )
+    payment_amount = round(
+        max(
+            _safe_float(
+                mentor_profile_meta.get(
+                    "copy_evaluation_price"
+                    if requested_service_type == MentorshipServiceType.COPY_EVALUATION_AND_MENTORSHIP
+                    else "mentorship_price"
+                ),
+                0.0,
+            ),
+            0.0,
+        ),
+        2,
+    )
+    payment_currency = str(mentor_profile_meta.get("currency") or "INR").strip().upper()[:8] or "INR"
     if availability_mode == "series_only":
         if not resolved_series_id:
             raise HTTPException(
@@ -5450,7 +7476,7 @@ def create_mentorship_request(
     if existing_submission_request:
         existing_status = _normalize_mentorship_request_status(existing_submission_request.get("status"))
         if not booking_slot_row:
-            return _request_response(existing_submission_request)
+            return _request_response(existing_submission_request, supabase=supabase)
         if existing_status in {
             MentorshipRequestStatus.CANCELLED,
             MentorshipRequestStatus.REJECTED,
@@ -5465,17 +7491,81 @@ def create_mentorship_request(
             now_iso=requested_at_iso,
             actor_user_id=user_id,
             actor_role=actor_role,
-            workflow_stage="booked_by_user",
+            workflow_stage=MentorshipWorkflowStage.SCHEDULED.value,
             request_meta_updates={
                 "booked_by_user_at": requested_at_iso,
                 "booked_by_user": user_id,
                 "booked_by_user_role": actor_role,
-                "booking_source": "self_service_slot",
+                "booking_source": "learner_self_booking",
                 "mentor_notified_at": requested_at_iso,
                 "mentor_notification_channel": "dashboard",
             },
         )
-        return _request_response(updated_request)
+        return _request_response(updated_request, supabase=supabase)
+
+    existing_open_request = _safe_first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .select("id,status")
+        .eq("user_id", user_id)
+        .eq("provider_user_id", resolved_provider_id)
+        .in_(
+            "status",
+            [
+                MentorshipRequestStatus.REQUESTED.value,
+                MentorshipRequestStatus.ACCEPTED.value,
+                MentorshipRequestStatus.SCHEDULED.value,
+            ],
+        )
+        .order("requested_at", desc=True)
+        .limit(1)
+    )
+    if existing_open_request:
+        raise HTTPException(
+            status_code=409,
+            detail="You already have an active mentorship request with this mentor.",
+        )
+
+    provider_next_slot_at = _provider_open_slot_index(
+        [resolved_provider_id],
+        supabase=supabase,
+        now_iso=requested_at_iso,
+    ).get(resolved_provider_id)
+    initial_workflow_stage = MentorshipWorkflowStage.SUBMITTED.value
+    insert_meta: Dict[str, Any] = {
+        "standalone": is_standalone,
+        "requires_entitlement": bool(is_standalone and payload.slot_id is None),
+        "service_type": requested_service_type.value,
+        "payment_status": MentorshipPaymentStatus.NOT_INITIATED.value,
+        "payment_amount": payment_amount,
+        "payment_currency": payment_currency,
+        "workflow_stage": initial_workflow_stage,
+    }
+    preferred_timing = _as_optional_text(payload.preferred_timing, max_length=280)
+    if preferred_timing:
+        insert_meta["preferred_timing"] = preferred_timing
+    learner_name = str(payload.learner_name or _user_ctx_display_name(user_ctx) or "").strip()
+    if learner_name:
+        insert_meta["learner_name"] = learner_name
+    learner_email = str(payload.learner_email or user_ctx.get("email") or "").strip()
+    if learner_email:
+        insert_meta["learner_email"] = learner_email
+    provider_name = str(payload.provider_name or (mentor_profile_row or {}).get("display_name") or "").strip()
+    if provider_name:
+        insert_meta["provider_name"] = provider_name
+    if resolved_submission_id and not payload.service_type:
+        insert_meta["flow_kind"] = "copy_evaluation"
+        insert_meta["copy_status"] = CopySubmissionStatus.CHECKED.value
+        insert_meta["feedback_ready_at"] = requested_at_iso
+        insert_meta["workflow_stage"] = (
+            MentorshipWorkflowStage.BOOKING_OPEN.value
+            if provider_next_slot_at
+            else MentorshipWorkflowStage.FEEDBACK_READY.value
+        )
+        if provider_next_slot_at:
+            insert_meta["booking_opened_at"] = requested_at_iso
+    else:
+        insert_meta["admin_queue_status"] = "pending"
+        insert_meta["admin_queue_received_at"] = requested_at_iso
 
     insert_payload = {
         "user_id": user_id,
@@ -5488,17 +7578,16 @@ def create_mentorship_request(
         "status": MentorshipRequestStatus.REQUESTED.value,
         "requested_at": requested_at_iso,
         "updated_at": requested_at_iso,
-        "meta": {
-            "standalone": is_standalone,
-            "requires_entitlement": bool(is_standalone and payload.slot_id is None),
-            "workflow_stage": "admin_scheduling",
-            "admin_queue_status": "pending",
-            "admin_queue_received_at": requested_at_iso,
-        },
+        "meta": insert_meta,
     }
     row = _first(supabase.table(MENTORSHIP_REQUESTS_TABLE).insert(insert_payload).execute())
     if not row:
         raise HTTPException(status_code=400, detail="Failed to create mentorship request.")
+    _append_system_request_message(
+        row,
+        body="Request sent to mentor. Chat is now open and payment will be required only after acceptance.",
+        supabase=supabase,
+    )
 
     if booking_slot_row:
         actor_role = _tracking_actor_from_user_ctx(user_ctx, request_row=row)
@@ -5509,20 +7598,20 @@ def create_mentorship_request(
             now_iso=requested_at_iso,
             actor_user_id=user_id,
             actor_role=actor_role,
-            workflow_stage="booked_by_user",
+            workflow_stage=MentorshipWorkflowStage.SCHEDULED.value,
             request_meta_updates={
                 "admin_queue_status": "booked_directly",
                 "booked_by_user_at": requested_at_iso,
                 "booked_by_user": user_id,
                 "booked_by_user_role": actor_role,
-                "booking_source": "self_service_slot",
+                "booking_source": "learner_self_booking",
                 "mentor_notified_at": requested_at_iso,
                 "mentor_notification_channel": "dashboard",
             },
         )
-        return _request_response(updated_request)
+        return _request_response(updated_request, supabase=supabase)
 
-    return _request_response(row)
+    return _request_response(row, supabase=supabase)
 
 
 @router.get("/mentorship/requests", response_model=List[MentorshipRequestResponse])
@@ -5557,7 +7646,194 @@ def list_mentorship_requests(
     if status:
         query = query.eq("status", status.value)
     rows = _rows(query.execute())
-    return [_request_response(row) for row in rows]
+    request_ids = [int(row.get("id") or 0) for row in rows if int(row.get("id") or 0) > 0]
+    submission_ids = [int(row.get("submission_id") or 0) for row in rows if int(row.get("submission_id") or 0) > 0]
+    provider_ids = [str(row.get("provider_user_id") or "").strip() for row in rows if str(row.get("provider_user_id") or "").strip()]
+    learner_ids = [str(row.get("user_id") or "").strip() for row in rows if str(row.get("user_id") or "").strip()]
+
+    session_rows = (
+        _safe_rows(
+            supabase.table(MENTORSHIP_SESSIONS_TABLE)
+            .select("*")
+            .in_("request_id", request_ids)
+        )
+        if request_ids
+        else []
+    )
+    session_by_request_id: Dict[int, Dict[str, Any]] = {}
+    for session_row in session_rows:
+        request_id_value = int(session_row.get("request_id") or 0)
+        if request_id_value <= 0:
+            continue
+        existing = session_by_request_id.get(request_id_value)
+        if not existing or _normalize_mentorship_session_status(existing.get("status")) != MentorshipSessionStatus.LIVE:
+            session_by_request_id[request_id_value] = session_row
+
+    submission_by_id: Dict[int, Dict[str, Any]] = {}
+    if submission_ids:
+        for submission_row in _safe_rows(
+            supabase.table(COPY_SUBMISSIONS_TABLE)
+            .select("*")
+            .in_("id", sorted(set(submission_ids)))
+        ):
+            submission_id_value = int(submission_row.get("id") or 0)
+            if submission_id_value > 0:
+                submission_by_id[submission_id_value] = submission_row
+
+    provider_slot_index = _provider_open_slot_index(sorted(set(provider_ids)), supabase=supabase)
+    learner_briefs = _auth_user_brief_map(learner_ids, supabase=supabase) if learner_ids else {}
+    unread_count_by_request_id: Dict[int, int] = {}
+    if request_ids:
+        try:
+            unread_rows = _rows(
+                supabase.table(MENTORSHIP_MESSAGES_TABLE)
+                .select("request_id")
+                .in_("request_id", request_ids)
+                .neq("sender_user_id", user_id)
+                .eq("is_read", False)
+                .execute()
+            )
+            for unread_row in unread_rows:
+                request_id_value = int(unread_row.get("request_id") or 0)
+                if request_id_value <= 0:
+                    continue
+                unread_count_by_request_id[request_id_value] = unread_count_by_request_id.get(request_id_value, 0) + 1
+        except Exception as exc:
+            if not _is_missing_table_error(exc, MENTORSHIP_MESSAGES_TABLE):
+                raise
+
+    return [
+        _request_response(
+            _enrich_mentorship_request_row(
+                row,
+                learner_briefs=learner_briefs,
+                viewer_unread_count=unread_count_by_request_id.get(int(row.get("id") or 0), 0),
+            ),
+            supabase=supabase,
+            submission_row=submission_by_id.get(int(row.get("submission_id") or 0)),
+            session_row=session_by_request_id.get(int(row.get("id") or 0)),
+            provider_next_slot_at=provider_slot_index.get(str(row.get("provider_user_id") or "").strip()),
+        )
+        for row in rows
+    ]
+
+
+@router.get("/mentorship/requests/{request_id}/messages", response_model=List[MentorshipMessageResponse])
+def list_mentorship_request_messages(
+    request_id: int,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    request_row = _first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .select("*")
+        .eq("id", request_id)
+        .limit(1)
+        .execute()
+    )
+    if not request_row:
+        raise HTTPException(status_code=404, detail="Mentorship request not found.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    is_owner = str(request_row.get("user_id") or "").strip() == user_id
+    is_provider = str(request_row.get("provider_user_id") or "").strip() == user_id and _is_mentor_like(user_ctx)
+    if not (is_owner or is_provider or _is_admin_or_moderator(user_ctx)):
+        raise HTTPException(status_code=403, detail="You cannot access this mentorship chat.")
+
+    return _list_request_messages(request_row, supabase=supabase)
+
+
+@router.post("/mentorship/requests/{request_id}/messages/read")
+def mark_mentorship_request_messages_read(
+    request_id: int,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    request_row = _first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .select("*")
+        .eq("id", request_id)
+        .limit(1)
+        .execute()
+    )
+    if not request_row:
+        raise HTTPException(status_code=404, detail="Mentorship request not found.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    is_owner = str(request_row.get("user_id") or "").strip() == user_id
+    is_provider = str(request_row.get("provider_user_id") or "").strip() == user_id and _is_mentor_like(user_ctx)
+    if not (is_owner or is_provider or _is_admin_or_moderator(user_ctx)):
+        raise HTTPException(status_code=403, detail="You cannot update this mentorship chat.")
+
+    marked_read = 0
+    try:
+        unread_rows = _rows(
+            supabase.table(MENTORSHIP_MESSAGES_TABLE)
+            .select("id")
+            .eq("request_id", request_id)
+            .neq("sender_user_id", user_id)
+            .eq("is_read", False)
+            .execute()
+        )
+        message_ids = [int(row.get("id") or 0) for row in unread_rows if int(row.get("id") or 0) > 0]
+        marked_read = len(message_ids)
+        if message_ids:
+            supabase.table(MENTORSHIP_MESSAGES_TABLE).update({"is_read": True}).in_("id", message_ids).execute()
+        return {"marked_read": marked_read}
+    except Exception as exc:
+        if not _is_missing_table_error(exc, MENTORSHIP_MESSAGES_TABLE):
+            raise
+
+    meta = _meta_dict(request_row.get("meta"))
+    thread_messages = meta.get("thread_messages")
+    if not isinstance(thread_messages, list):
+        return {"marked_read": 0}
+
+    next_messages: List[Dict[str, Any]] = []
+    for message in thread_messages:
+        if not isinstance(message, dict):
+            continue
+        next_message = dict(message)
+        if str(next_message.get("sender_user_id") or "").strip() != user_id and not bool(next_message.get("is_read", False)):
+            next_message["is_read"] = True
+            marked_read += 1
+        next_messages.append(next_message)
+
+    if marked_read:
+        meta["thread_messages"] = next_messages
+        supabase.table(MENTORSHIP_REQUESTS_TABLE).update({"meta": meta, "updated_at": _utc_now_iso()}).eq("id", request_id).execute()
+    return {"marked_read": marked_read}
+
+
+@router.post("/mentorship/requests/{request_id}/messages", response_model=MentorshipMessageResponse)
+def create_mentorship_request_message(
+    request_id: int,
+    payload: MentorshipMessageCreate,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    request_row = _first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .select("*")
+        .eq("id", request_id)
+        .limit(1)
+        .execute()
+    )
+    if not request_row:
+        raise HTTPException(status_code=404, detail="Mentorship request not found.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    is_owner = str(request_row.get("user_id") or "").strip() == user_id
+    is_provider = str(request_row.get("provider_user_id") or "").strip() == user_id and _is_mentor_like(user_ctx)
+    if not (is_owner or is_provider or _is_admin_or_moderator(user_ctx)):
+        raise HTTPException(status_code=403, detail="You cannot post in this mentorship chat.")
+
+    return _append_request_message(
+        request_row,
+        sender_user_id=user_id,
+        body=payload.body,
+        supabase=supabase,
+    )
 
 
 @router.post("/mentorship/requests/{request_id}/offer-slots", response_model=MentorshipRequestResponse)
@@ -5585,8 +7861,11 @@ def offer_mentorship_request_slots(
             raise HTTPException(status_code=403, detail="Only the assigned mentor can offer slots.")
 
     request_status = _normalize_mentorship_request_status(request_row.get("status"))
-    if request_status != MentorshipRequestStatus.REQUESTED:
-        raise HTTPException(status_code=400, detail="Slots can be offered only while the workflow is pending.")
+    payment_status = _request_payment_status(request_row)
+    if request_status not in {MentorshipRequestStatus.REQUESTED, MentorshipRequestStatus.ACCEPTED}:
+        raise HTTPException(status_code=400, detail="Slots can be offered only for open mentorship workflows.")
+    if request_status == MentorshipRequestStatus.ACCEPTED and payment_status != MentorshipPaymentStatus.PAID:
+        raise HTTPException(status_code=400, detail="Payment must be completed before slot booking opens.")
 
     submission_id = int(request_row.get("submission_id") or 0)
     if submission_id > 0:
@@ -5637,7 +7916,8 @@ def offer_mentorship_request_slots(
     meta["slot_options_offered_at"] = now_iso
     meta["slot_options_offered_by"] = current_user_id
     meta["slot_options_offered_by_role"] = actor_role
-    meta["workflow_stage"] = "slots_offered"
+    meta["workflow_stage"] = MentorshipWorkflowStage.BOOKING_OPEN.value
+    meta["booking_opened_at"] = meta.get("booking_opened_at") or now_iso
     meta["status_updated_by"] = current_user_id
     meta["status_updated_by_role"] = actor_role
     meta["status_updated_at"] = now_iso
@@ -5650,7 +7930,12 @@ def offer_mentorship_request_slots(
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Mentorship request not found.")
-    return _request_response(updated)
+    _append_system_request_message(
+        updated,
+        body="Mentor opened slot booking for this request.",
+        supabase=supabase,
+    )
+    return _request_response(updated, supabase=supabase)
 
 
 @router.post("/mentorship/requests/{request_id}/accept-slot", response_model=MentorshipSessionResponse)
@@ -5676,8 +7961,11 @@ def accept_mentorship_request_slot(
         raise HTTPException(status_code=403, detail="Only the learner can accept an offered slot.")
 
     request_status = _normalize_mentorship_request_status(request_row.get("status"))
-    if request_status != MentorshipRequestStatus.REQUESTED:
+    payment_status = _request_payment_status(request_row)
+    if request_status not in {MentorshipRequestStatus.REQUESTED, MentorshipRequestStatus.ACCEPTED}:
         raise HTTPException(status_code=400, detail="This workflow no longer accepts slot selection.")
+    if request_status == MentorshipRequestStatus.ACCEPTED and payment_status != MentorshipPaymentStatus.PAID:
+        raise HTTPException(status_code=400, detail="Complete payment before selecting a slot.")
 
     submission_id = int(request_row.get("submission_id") or 0)
     if submission_id > 0:
@@ -5698,8 +7986,6 @@ def accept_mentorship_request_slot(
         for slot_id in meta.get("offered_slot_ids", [])
         if isinstance(slot_id, int) and int(slot_id) > 0
     ]
-    if payload.slot_id not in offered_slot_ids:
-        raise HTTPException(status_code=400, detail="Selected slot is not in the mentor's offered options.")
 
     slot_row = _first(
         supabase.table(MENTORSHIP_SLOTS_TABLE)
@@ -5713,6 +7999,21 @@ def accept_mentorship_request_slot(
     if str(slot_row.get("provider_user_id") or "").strip() != str(request_row.get("provider_user_id") or "").strip():
         raise HTTPException(status_code=400, detail="Selected slot belongs to a different mentor.")
 
+    max_bookings = max(int(slot_row.get("max_bookings") or 1), 1)
+    booked_count = max(int(slot_row.get("booked_count") or 0), 0)
+    slot_end_dt = _parse_datetime(slot_row.get("ends_at"))
+    if not bool(slot_row.get("is_active", True)) or not slot_end_dt or slot_end_dt <= _utc_now():
+        raise HTTPException(status_code=400, detail="Selected session time is no longer available.")
+    if booked_count >= max_bookings:
+        raise HTTPException(status_code=400, detail="Selected session time is already fully booked.")
+
+    is_offered_slot = payload.slot_id in offered_slot_ids
+    if not is_offered_slot and submission_id > 0:
+        if _normalize_copy_status(submission_row.get("status")) != CopySubmissionStatus.CHECKED:
+            raise HTTPException(status_code=400, detail="Feedback is still being prepared.")
+    elif not is_offered_slot:
+        raise HTTPException(status_code=400, detail="Selected slot is not available for learner booking.")
+
     now_iso = _utc_now_iso()
     actor_role = _tracking_actor_from_user_ctx(user_ctx, request_row=request_row)
     _updated_request, session_row = _schedule_mentorship_request_with_slot(
@@ -5722,15 +8023,16 @@ def accept_mentorship_request_slot(
         now_iso=now_iso,
         actor_user_id=current_user_id,
         actor_role=actor_role,
-        workflow_stage="slot_accepted_by_user",
+        workflow_stage=MentorshipWorkflowStage.SCHEDULED.value,
         call_provider_override=payload.call_provider,
         meeting_link_override=payload.meeting_link,
         request_meta_updates={
-            "slot_offer_status": "accepted",
+            "slot_offer_status": "accepted" if is_offered_slot else "self_booked",
             "slot_selected_by_user_at": now_iso,
             "slot_selected_by_user": current_user_id,
             "slot_selected_by_user_role": actor_role,
-            "accepted_offered_slot_id": payload.slot_id,
+            "accepted_offered_slot_id": payload.slot_id if is_offered_slot else None,
+            "booking_source": "learner_self_booking",
             "mentor_notified_at": now_iso,
             "mentor_notification_channel": "dashboard",
         },
@@ -5784,7 +8086,7 @@ def schedule_mentorship_request(
         now_iso=now_iso,
         actor_user_id=current_user_id,
         actor_role=actor_role,
-        workflow_stage="scheduled_by_admin",
+        workflow_stage=MentorshipWorkflowStage.SCHEDULED.value,
         call_provider_override=payload.call_provider,
         meeting_link_override=payload.meeting_link,
         request_meta_updates={
@@ -5793,6 +8095,16 @@ def schedule_mentorship_request(
             "scheduled_by_admin": current_user_id,
             "scheduled_by_admin_role": actor_role,
         },
+    )
+    _append_system_request_message(
+        _updated_request,
+        body="Session slot confirmed successfully.",
+        supabase=supabase,
+    )
+    _append_system_request_message(
+        _updated_request,
+        body="Session scheduled by the team.",
+        supabase=supabase,
     )
     return _session_response(session_row)
 
@@ -5820,10 +8132,13 @@ def start_mentorship_request_now(
     request_status = _normalize_mentorship_request_status(request_row.get("status"))
     if request_status in {
         MentorshipRequestStatus.REJECTED,
+        MentorshipRequestStatus.EXPIRED,
         MentorshipRequestStatus.CANCELLED,
         MentorshipRequestStatus.COMPLETED,
     }:
         raise HTTPException(status_code=400, detail="Request is already closed.")
+    if request_status == MentorshipRequestStatus.ACCEPTED and _request_payment_status(request_row) != MentorshipPaymentStatus.PAID:
+        raise HTTPException(status_code=400, detail="Complete payment before starting the session.")
 
     provider_user_id = str(request_row.get("provider_user_id") or "").strip()
     current_user_id = str(user_ctx.get("user_id") or "").strip()
@@ -5840,6 +8155,12 @@ def start_mentorship_request_now(
         payload.call_provider.value if payload.call_provider else profile_call_provider.value,
         meeting_link=payload.meeting_link or profile_zoom_meeting_link,
     )
+    if (
+        requested_call_provider == MentorshipCallProvider.CUSTOM
+        and not str(payload.meeting_link or profile_zoom_meeting_link or "").strip()
+        and _agora_ready()
+    ):
+        requested_call_provider = MentorshipCallProvider.ZOOM_VIDEO_SDK
 
     scheduled_slot_id = int(request_row.get("scheduled_slot_id") or 0)
     slot_row: Optional[Dict[str, Any]] = None
@@ -5954,9 +8275,16 @@ def start_mentorship_request_now(
     request_meta["scheduled_slot_starts_at"] = starts_at_dt.isoformat()
     request_meta["scheduled_slot_ends_at"] = ends_at_dt.isoformat()
     request_meta["session_live_at"] = now_iso
-    request_meta["workflow_stage"] = "session_live"
+    request_meta["workflow_stage"] = MentorshipWorkflowStage.LIVE.value
     request_meta["call_status"] = "live"
     request_meta["call_provider"] = resolved_call_provider.value
+    request_meta["booking_opened_at"] = (
+        request_meta.get("booking_opened_at")
+        or request_meta.get("slot_options_offered_at")
+        or request_meta.get("feedback_ready_at")
+        or request_meta.get("copy_checked_at")
+        or now_iso
+    )
     request_meta["status_updated_by"] = current_user_id
     request_meta["status_updated_by_role"] = _tracking_actor_from_user_ctx(user_ctx, request_row=request_row)
     request_meta["status_updated_at"] = now_iso
@@ -6075,6 +8403,10 @@ def update_mentorship_request_status(
         raise HTTPException(status_code=403, detail="Users can only cancel their own mentorship requests.")
     if is_handler and next_status == MentorshipRequestStatus.CANCELLED and not (is_admin or is_moderator):
         raise HTTPException(status_code=403, detail="Mentor should reject instead of cancelling request.")
+    if is_handler and next_status == MentorshipRequestStatus.ACCEPTED:
+        pass
+    elif is_handler and next_status in {MentorshipRequestStatus.REJECTED, MentorshipRequestStatus.EXPIRED, MentorshipRequestStatus.COMPLETED}:
+        pass
 
     now_iso = _utc_now_iso()
     meta = _meta_dict(row.get("meta"))
@@ -6084,26 +8416,44 @@ def update_mentorship_request_status(
     meta["status_updated_by"] = user_id
     meta["status_updated_by_role"] = actor_role
     meta["status_updated_at"] = now_iso
-    if next_status == MentorshipRequestStatus.SCHEDULED and not meta.get("accepted_at"):
+    if next_status in {MentorshipRequestStatus.ACCEPTED, MentorshipRequestStatus.SCHEDULED} and not meta.get("accepted_at"):
         meta["accepted_at"] = now_iso
         meta["accepted_by"] = user_id
         meta["accepted_by_role"] = actor_role
+    if next_status == MentorshipRequestStatus.ACCEPTED:
+        meta["workflow_stage"] = MentorshipWorkflowStage.ACCEPTED.value
+        if _request_payment_amount(row, supabase=supabase) <= 0:
+            meta["payment_status"] = MentorshipPaymentStatus.PAID.value
+            meta["payment_paid_at"] = meta.get("payment_paid_at") or now_iso
+        else:
+            meta["payment_status"] = meta.get("payment_status") or MentorshipPaymentStatus.NOT_INITIATED.value
+    if next_status == MentorshipRequestStatus.SCHEDULED and _normalize_payment_status(meta.get("payment_status")) != MentorshipPaymentStatus.PAID:
+        meta["payment_status"] = MentorshipPaymentStatus.PAID.value
+        meta["payment_paid_at"] = meta.get("payment_paid_at") or now_iso
+    if next_status == MentorshipRequestStatus.SCHEDULED:
+        meta["workflow_stage"] = MentorshipWorkflowStage.SCHEDULED.value
+        meta["call_status"] = "scheduled"
     if next_status == MentorshipRequestStatus.COMPLETED:
         meta["completed_at"] = now_iso
         meta["completed_by"] = user_id
         meta["completed_by_role"] = actor_role
-        meta["workflow_stage"] = "completed"
+        meta["workflow_stage"] = MentorshipWorkflowStage.COMPLETED.value
         meta["call_status"] = "completed"
     if next_status == MentorshipRequestStatus.REJECTED:
         meta["rejected_at"] = now_iso
         meta["rejected_by"] = user_id
         meta["rejected_by_role"] = actor_role
-        meta["workflow_stage"] = "rejected"
+        meta["workflow_stage"] = MentorshipWorkflowStage.CANCELLED.value
+    if next_status == MentorshipRequestStatus.EXPIRED:
+        meta["expired_at"] = now_iso
+        meta["expired_by"] = user_id
+        meta["expired_by_role"] = actor_role
+        meta["workflow_stage"] = MentorshipWorkflowStage.EXPIRED.value
     if next_status == MentorshipRequestStatus.CANCELLED:
         meta["cancelled_at"] = now_iso
         meta["cancelled_by"] = user_id
         meta["cancelled_by_role"] = actor_role
-        meta["workflow_stage"] = "cancelled"
+        meta["workflow_stage"] = MentorshipWorkflowStage.CANCELLED.value
 
     current_status = _normalize_mentorship_request_status(row.get("status"))
     scheduled_slot_id = int(row.get("scheduled_slot_id") or 0)
@@ -6124,7 +8474,7 @@ def update_mentorship_request_status(
         raise HTTPException(status_code=404, detail="Mentorship request not found.")
 
     if (
-        next_status in {MentorshipRequestStatus.CANCELLED, MentorshipRequestStatus.REJECTED}
+        next_status in {MentorshipRequestStatus.CANCELLED, MentorshipRequestStatus.REJECTED, MentorshipRequestStatus.EXPIRED}
         and current_status == MentorshipRequestStatus.SCHEDULED
         and scheduled_slot_id > 0
     ):
@@ -6133,17 +8483,326 @@ def update_mentorship_request_status(
     if next_status in {
         MentorshipRequestStatus.CANCELLED,
         MentorshipRequestStatus.REJECTED,
+        MentorshipRequestStatus.EXPIRED,
         MentorshipRequestStatus.COMPLETED,
     }:
         mapped_status = (
             MentorshipSessionStatus.CANCELLED.value
-            if next_status in {MentorshipRequestStatus.CANCELLED, MentorshipRequestStatus.REJECTED}
+            if next_status in {MentorshipRequestStatus.CANCELLED, MentorshipRequestStatus.REJECTED, MentorshipRequestStatus.EXPIRED}
             else MentorshipSessionStatus.COMPLETED.value
         )
         supabase.table(MENTORSHIP_SESSIONS_TABLE).update(
             {"status": mapped_status, "updated_at": now_iso}
         ).eq("request_id", request_id).execute()
-    return _request_response(updated)
+    if next_status == MentorshipRequestStatus.ACCEPTED:
+        _append_system_request_message(
+            updated,
+            body="Mentor accepted the request. Payment is now available to confirm the service.",
+            supabase=supabase,
+        )
+    elif next_status == MentorshipRequestStatus.REJECTED:
+        _append_system_request_message(
+            updated,
+            body="Mentor rejected the request." + (f" Reason: {payload.reason.strip()}" if payload.reason else ""),
+            supabase=supabase,
+        )
+    elif next_status == MentorshipRequestStatus.CANCELLED:
+        _append_system_request_message(
+            updated,
+            body="Request was cancelled." + (f" Reason: {payload.reason.strip()}" if payload.reason else ""),
+            supabase=supabase,
+        )
+    elif next_status == MentorshipRequestStatus.EXPIRED:
+        _append_system_request_message(
+            updated,
+            body="Request expired." + (f" Reason: {payload.reason.strip()}" if payload.reason else ""),
+            supabase=supabase,
+        )
+    elif next_status == MentorshipRequestStatus.COMPLETED:
+        _append_system_request_message(
+            updated,
+            body="Mentorship workflow marked complete.",
+            supabase=supabase,
+        )
+    return _request_response(updated, supabase=supabase)
+
+
+@router.delete("/mentorship/requests/{request_id}")
+def delete_mentorship_request(
+    request_id: int,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    request_row = _first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .select("*")
+        .eq("id", request_id)
+        .limit(1)
+        .execute()
+    )
+    if not request_row:
+        raise HTTPException(status_code=404, detail="Mentorship request not found.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    is_admin = _is_admin(user_ctx)
+    is_moderator = _is_moderator(user_ctx)
+    is_owner = str(request_row.get("user_id") or "").strip() == user_id
+    if not (is_owner or is_admin or is_moderator):
+        raise HTTPException(status_code=403, detail="You cannot delete this mentorship request.")
+
+    request_status = _normalize_mentorship_request_status(request_row.get("status"))
+    if is_owner and request_status not in {
+        MentorshipRequestStatus.CANCELLED,
+        MentorshipRequestStatus.REJECTED,
+        MentorshipRequestStatus.EXPIRED,
+        MentorshipRequestStatus.COMPLETED,
+    }:
+        raise HTTPException(status_code=400, detail="Cancel the mentorship request before deleting it.")
+
+    session_rows = _safe_rows(
+        supabase.table(MENTORSHIP_SESSIONS_TABLE)
+        .select("*")
+        .eq("request_id", request_id)
+    )
+    for session_row in session_rows:
+        if _normalize_mentorship_session_status(session_row.get("status")) == MentorshipSessionStatus.LIVE:
+            raise HTTPException(status_code=400, detail="A live session cannot be deleted.")
+
+    if request_status == MentorshipRequestStatus.SCHEDULED:
+        scheduled_slot_id = int(request_row.get("scheduled_slot_id") or 0)
+        if scheduled_slot_id > 0:
+            _decrement_mentorship_slot_booking(scheduled_slot_id, supabase=supabase, updated_at_iso=_utc_now_iso())
+
+    try:
+        supabase.table(MENTORSHIP_MESSAGES_TABLE).delete().eq("request_id", request_id).execute()
+    except Exception as exc:
+        if not _is_missing_table_error(exc, MENTORSHIP_MESSAGES_TABLE):
+            raise
+
+    if session_rows:
+        session_ids = [int(row.get("id") or 0) for row in session_rows if int(row.get("id") or 0) > 0]
+        if session_ids:
+            supabase.table(MENTORSHIP_SESSIONS_TABLE).delete().in_("id", session_ids).execute()
+
+    deleted = _first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .delete()
+        .eq("id", request_id)
+        .execute()
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Mentorship request not found.")
+    return {"message": "Mentorship request deleted.", "id": request_id}
+
+
+@router.post("/mentorship/requests/{request_id}/payment/order", response_model=MentorshipRazorpayOrderResponse)
+def create_mentorship_payment_order(
+    request_id: int,
+    payload: MentorshipRequestPaymentCreate,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    request_row = _first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .select("*")
+        .eq("id", request_id)
+        .limit(1)
+        .execute()
+    )
+    if not request_row:
+        raise HTTPException(status_code=404, detail="Mentorship request not found.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    is_owner = str(request_row.get("user_id") or "").strip() == user_id
+    if not (is_owner or _is_admin_or_moderator(user_ctx)):
+        raise HTTPException(status_code=403, detail="Only the learner can pay for this request.")
+
+    request_status = _normalize_mentorship_request_status(request_row.get("status"))
+    if request_status != MentorshipRequestStatus.ACCEPTED:
+        raise HTTPException(status_code=400, detail="Payment is available only after mentor acceptance.")
+
+    if _request_payment_status(request_row) == MentorshipPaymentStatus.PAID:
+        raise HTTPException(status_code=409, detail="This mentorship request is already paid.")
+
+    amount_display = _request_payment_amount(request_row, supabase=supabase)
+    if amount_display <= 0:
+        raise HTTPException(status_code=400, detail="This mentorship request does not require online payment.")
+
+    currency = _request_payment_currency(request_row, supabase=supabase)
+    amount_minor = _payment_amount_minor_units(amount_display, currency)
+    if amount_minor <= 0:
+        raise HTTPException(status_code=400, detail="Payment amount must be greater than zero.")
+
+    key_id, _key_secret = _get_razorpay_credentials()
+    request_meta = _meta_dict(request_row.get("meta"))
+    learner_name = _as_optional_text(request_meta.get("learner_name"), max_length=120)
+    learner_email = _as_optional_text(request_meta.get("learner_email"), max_length=120)
+    provider_name = _as_optional_text(request_meta.get("provider_name"), max_length=120)
+    description = _mentorship_payment_description(request_row, supabase=supabase)
+    receipt = f"mentorship-{request_id}-{int(datetime.now(timezone.utc).timestamp())}"
+    notes = {
+        "request_id": str(request_id),
+        "learner_user_id": str(request_row.get("user_id") or "").strip(),
+        "mentor_user_id": str(request_row.get("provider_user_id") or "").strip(),
+        "service_type": _request_service_type(request_row).value,
+    }
+    if provider_name:
+        notes["provider_name"] = provider_name[:64]
+
+    razorpay_order = _create_razorpay_order(
+        amount_minor=amount_minor,
+        currency=currency,
+        receipt=receipt,
+        notes=notes,
+    )
+
+    now_iso = _utc_now_iso()
+    updated_row = _persist_payment_meta(
+        request_row,
+        supabase=supabase,
+        updated_at=now_iso,
+        meta_updates={
+            "payment_status": MentorshipPaymentStatus.PENDING.value,
+            "payment_method": str(payload.payment_method or "razorpay").strip().lower()[:60] or "razorpay",
+            "payment_gateway": "razorpay",
+            "payment_attempted_at": now_iso,
+            "payment_currency": currency,
+            "payment_amount": amount_display,
+            "payment_order_id": str(razorpay_order.get("id") or "").strip(),
+            "payment_order_receipt": str(razorpay_order.get("receipt") or receipt).strip()[:80],
+            "payment_order_created_at": now_iso,
+            "payment_order_amount": int(razorpay_order.get("amount") or amount_minor),
+            "payment_order_status": str(razorpay_order.get("status") or "created").strip()[:40],
+            "workflow_stage": MentorshipWorkflowStage.PAYMENT_PENDING.value,
+            "coupon_code": str(payload.coupon_code or "").strip()[:60] or request_meta.get("coupon_code"),
+        },
+    )
+
+    return MentorshipRazorpayOrderResponse(
+        request_id=request_id,
+        order_id=str(razorpay_order.get("id") or "").strip(),
+        key_id=key_id,
+        amount=int(razorpay_order.get("amount") or amount_minor),
+        currency=currency,
+        amount_display=amount_display,
+        name="Mentors App",
+        description=description,
+        prefill={
+            "name": learner_name or "",
+            "email": learner_email or "",
+        },
+        notes={
+            "request_id": str(request_id),
+            "provider_name": provider_name or "",
+            "request_status": _normalize_mentorship_request_status(updated_row.get("status")).value,
+        },
+    )
+
+
+@router.post("/mentorship/requests/{request_id}/payment/verify", response_model=MentorshipRequestResponse)
+def verify_mentorship_payment(
+    request_id: int,
+    payload: MentorshipRequestPaymentVerify,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    request_row = _first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .select("*")
+        .eq("id", request_id)
+        .limit(1)
+        .execute()
+    )
+    if not request_row:
+        raise HTTPException(status_code=404, detail="Mentorship request not found.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    is_owner = str(request_row.get("user_id") or "").strip() == user_id
+    if not (is_owner or _is_admin_or_moderator(user_ctx)):
+        raise HTTPException(status_code=403, detail="Only the learner can verify this payment.")
+
+    request_status = _normalize_mentorship_request_status(request_row.get("status"))
+    if request_status != MentorshipRequestStatus.ACCEPTED:
+        raise HTTPException(status_code=400, detail="Payment is available only after mentor acceptance.")
+
+    if _request_payment_status(request_row) == MentorshipPaymentStatus.PAID:
+        return _request_response(request_row, supabase=supabase)
+
+    request_meta = _meta_dict(request_row.get("meta"))
+    expected_order_id = str(request_meta.get("payment_order_id") or "").strip()
+    if expected_order_id and expected_order_id != payload.razorpay_order_id.strip():
+        raise HTTPException(status_code=400, detail="Payment order does not match the latest checkout attempt.")
+
+    if not _verify_razorpay_signature(
+        order_id=payload.razorpay_order_id.strip(),
+        payment_id=payload.razorpay_payment_id.strip(),
+        signature=payload.razorpay_signature.strip(),
+    ):
+        _persist_payment_meta(
+            request_row,
+            supabase=supabase,
+            meta_updates={
+                "payment_status": MentorshipPaymentStatus.FAILED.value,
+                "payment_failure_reason": "signature_verification_failed",
+                "payment_failed_at": _utc_now_iso(),
+            },
+        )
+        raise HTTPException(status_code=400, detail="Razorpay payment verification failed.")
+
+    updated_row = _mark_mentorship_request_paid(
+        request_row,
+        supabase=supabase,
+        payment_method=payload.payment_method or "razorpay",
+        coupon_code=payload.coupon_code,
+        payment_gateway="razorpay",
+        payment_gateway_meta={
+            "payment_order_id": payload.razorpay_order_id.strip(),
+            "razorpay_payment_id": payload.razorpay_payment_id.strip(),
+            "razorpay_signature": payload.razorpay_signature.strip(),
+            "payment_failure_reason": "",
+            "payment_failed_at": "",
+        },
+    )
+    return _request_response(updated_row, supabase=supabase)
+
+
+@router.post("/mentorship/requests/{request_id}/pay", response_model=MentorshipRequestResponse)
+def pay_for_mentorship_request(
+    request_id: int,
+    payload: MentorshipRequestPaymentCreate,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    request_row = _first(
+        supabase.table(MENTORSHIP_REQUESTS_TABLE)
+        .select("*")
+        .eq("id", request_id)
+        .limit(1)
+        .execute()
+    )
+    if not request_row:
+        raise HTTPException(status_code=404, detail="Mentorship request not found.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    is_owner = str(request_row.get("user_id") or "").strip() == user_id
+    if not (is_owner or _is_admin_or_moderator(user_ctx)):
+        raise HTTPException(status_code=403, detail="Only the learner can complete this payment.")
+
+    request_status = _normalize_mentorship_request_status(request_row.get("status"))
+    if request_status != MentorshipRequestStatus.ACCEPTED:
+        raise HTTPException(status_code=400, detail="Payment is available only after mentor acceptance.")
+
+    if _request_payment_amount(request_row, supabase=supabase) > 0:
+        raise HTTPException(status_code=400, detail="Online checkout is required for paid mentorship requests.")
+
+    updated_row = _mark_mentorship_request_paid(
+        request_row,
+        supabase=supabase,
+        payment_method=payload.payment_method or "complimentary",
+        coupon_code=payload.coupon_code,
+        payment_gateway="offline",
+    )
+    return _request_response(updated_row, supabase=supabase)
 
 
 @router.get("/mentorship/sessions", response_model=List[MentorshipSessionResponse])
@@ -6433,6 +9092,13 @@ def get_professional_profile_detail(
         role_label=role_label,
         achievements=_sanitize_text_list(profile_meta.get("achievements"), max_items=20, max_length=220),
         service_specifications=_sanitize_text_list(profile_meta.get("service_specifications"), max_items=24, max_length=220),
+        mentorship_price=round(max(_safe_float(profile_meta.get("mentorship_price"), 0.0), 0.0), 2),
+        copy_evaluation_price=round(max(_safe_float(profile_meta.get("copy_evaluation_price"), 0.0), 0.0), 2),
+        currency=str(profile_meta.get("currency") or "INR").strip().upper()[:8] or "INR",
+        response_time_text=_as_optional_text(profile_meta.get("response_time_text"), max_length=120),
+        exam_focus=_as_optional_text(profile_meta.get("exam_focus"), max_length=180),
+        students_mentored=_parse_optional_non_negative_int(profile_meta.get("students_mentored")),
+        sessions_completed=_parse_optional_non_negative_int(profile_meta.get("sessions_completed")),
         authenticity_proof_url=_as_optional_text(profile_meta.get("authenticity_proof_url"), max_length=800),
         authenticity_note=_as_optional_text(profile_meta.get("authenticity_note"), max_length=240),
         mentorship_availability_mode=_as_role(profile_meta.get("mentorship_availability_mode")) or "series_only",
@@ -6748,7 +9414,7 @@ def upsert_my_professional_profile(
 
 
 # ==========================================
-# Zoom Integrations and Video SDK Handlers
+# Zoom integrations and Agora call handlers
 # ==========================================
 import hmac
 import hashlib
@@ -6761,8 +9427,161 @@ from urllib.error import HTTPError
 ZOOM_WEBHOOK_SECRET = os.getenv("ZOOM_WEBHOOK_SECRET", "")
 ZOOM_CLIENT_ID = os.getenv("ZOOM_CLIENT_ID", "")
 ZOOM_CLIENT_SECRET = os.getenv("ZOOM_CLIENT_SECRET", "")
-ZOOM_SDK_KEY = os.getenv("ZOOM_SDK_KEY", "")
-ZOOM_SDK_SECRET = os.getenv("ZOOM_SDK_SECRET", "")
+AGORA_APP_ID = os.getenv("AGORA_APP_ID", os.getenv("ZOOM_SDK_KEY", ""))
+AGORA_APP_CERTIFICATE = os.getenv("AGORA_APP_CERTIFICATE", os.getenv("ZOOM_SDK_SECRET", ""))
+
+
+def _agora_ready() -> bool:
+    return bool(str(AGORA_APP_ID or "").strip() and str(AGORA_APP_CERTIFICATE or "").strip())
+
+
+def _agora_uid_for_resource(resource_key: str, user_id: str) -> int:
+    digest = hashlib.sha256(f"{resource_key}:{user_id}".encode("utf-8")).hexdigest()
+    value = int(digest[:8], 16)
+    if value <= 0:
+        return max(1, int(hashlib.sha256(resource_key.encode("utf-8")).hexdigest()[:8], 16))
+    return value
+
+
+def _agora_uid_for_session(session_id: int, user_id: str) -> int:
+    return _agora_uid_for_resource(f"mentorship-session-{session_id}", user_id)
+
+
+def _discussion_room_channel(scope_type: str, scope_id: int, discussion_key: str) -> str:
+    normalized_scope = "series" if scope_type == "series" else "test"
+    normalized_key = "final" if discussion_key == "final_discussion" else "test"
+    return f"{normalized_scope}-discussion-{normalized_key}-{scope_id}"
+
+
+def _series_discussion_host_allowed(*, user_ctx: Dict[str, Any], series_row: Dict[str, Any]) -> bool:
+    if _is_admin_or_moderator(user_ctx):
+        return True
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    if not user_id:
+        return False
+    if str(series_row.get("provider_user_id") or "").strip() == user_id:
+        return True
+    return user_id in _series_mentor_user_ids(series_row)
+
+
+def _discussion_available_window(
+    discussion: Dict[str, Any],
+) -> tuple[Optional[str], Optional[str]]:
+    scheduled_for = _parse_datetime(discussion.get("scheduled_for"))
+    if scheduled_for is None:
+        return None, None
+    duration_minutes = max(15, min(int(discussion.get("duration_minutes") or 60), 480))
+    available_from = scheduled_for - timedelta(hours=1)
+    available_until = scheduled_for + timedelta(minutes=duration_minutes + 180)
+    return available_from.isoformat(), available_until.isoformat()
+
+
+def _normalize_discussion_speaker_request_status(value: Any) -> DiscussionSpeakerRequestStatus:
+    normalized = _as_role(value)
+    for status in DiscussionSpeakerRequestStatus:
+        if normalized == status.value:
+            return status
+    return DiscussionSpeakerRequestStatus.PENDING
+
+
+def _discussion_speaker_request_response(row: Dict[str, Any]) -> DiscussionSpeakerRequestResponse:
+    return DiscussionSpeakerRequestResponse(
+        id=int(row.get("id") or 0),
+        scope_type=str(row.get("scope_type") or "").strip() or "series",
+        scope_id=int(row.get("scope_id") or 0),
+        series_id=int(row.get("series_id") or 0),
+        discussion_key=str(row.get("discussion_key") or "").strip() or "final_discussion",
+        discussion_channel=str(row.get("discussion_channel") or "").strip(),
+        user_id=str(row.get("user_id") or "").strip(),
+        display_name=str(row.get("display_name") or "").strip() or "Learner",
+        status=_normalize_discussion_speaker_request_status(row.get("status")),
+        note=_as_optional_text(row.get("note"), max_length=1000),
+        requested_at=str(row.get("requested_at") or row.get("created_at") or _utc_now_iso()),
+        resolved_at=_as_optional_text(row.get("resolved_at"), max_length=80),
+        resolved_by_user_id=_as_optional_text(row.get("resolved_by_user_id"), max_length=80),
+        meta=_meta_dict(row.get("meta")),
+        created_at=str(row.get("created_at") or row.get("requested_at") or _utc_now_iso()),
+        updated_at=_as_optional_text(row.get("updated_at"), max_length=80),
+    )
+
+
+def _discussion_active_speaker_request_for_user(
+    *,
+    scope_type: str,
+    scope_id: int,
+    discussion_key: str,
+    user_id: str,
+    supabase: Client,
+) -> Optional[Dict[str, Any]]:
+    if not user_id:
+        return None
+    return _safe_first(
+        supabase.table(DISCUSSION_SPEAKER_REQUESTS_TABLE)
+        .select("*")
+        .eq("scope_type", scope_type)
+        .eq("scope_id", scope_id)
+        .eq("discussion_key", discussion_key)
+        .eq("user_id", user_id)
+        .eq("status", DiscussionSpeakerRequestStatus.APPROVED.value)
+        .order("updated_at", desc=True)
+        .limit(1)
+    )
+
+
+def _resolve_discussion_resource(
+    *,
+    scope_type: str,
+    scope_id: int,
+    user_ctx: Dict[str, Any],
+    supabase: Client,
+) -> Dict[str, Any]:
+    normalized_scope = _as_role(scope_type)
+    if normalized_scope == "series":
+        series_row = _fetch_series_or_404(scope_id, supabase)
+        if not _can_access_series_content(user_ctx=user_ctx, series_row=series_row, supabase=supabase):
+            raise HTTPException(status_code=403, detail="Activate series access before joining this class.")
+        meta = _normalize_series_meta(series_row.get("meta"), strict=False)
+        discussion = _normalize_discussion_config(
+            meta.get("final_discussion"),
+            field_label="Final discussion",
+            strict=False,
+        )
+        if not discussion or str(discussion.get("delivery_mode") or "").strip().lower() != "live_zoom":
+            raise HTTPException(status_code=404, detail="No live discussion is configured for this series.")
+        return {
+            "scope_type": "series",
+            "scope_id": scope_id,
+            "series_id": int(series_row.get("id") or 0),
+            "series_row": series_row,
+            "discussion_key": "final_discussion",
+            "discussion": discussion,
+            "discussion_channel": _discussion_room_channel("series", scope_id, "final_discussion"),
+        }
+
+    if normalized_scope == "test":
+        series_row, collection_row, _series_id = _fetch_series_for_test_or_404(scope_id, supabase)
+        if not _can_access_series_content(user_ctx=user_ctx, series_row=series_row, supabase=supabase):
+            raise HTTPException(status_code=403, detail="Activate series access before joining this class.")
+        meta = _normalize_test_meta(collection_row.get("meta"), strict=False)
+        discussion = _normalize_discussion_config(
+            meta.get("test_discussion"),
+            field_label="Test discussion",
+            strict=False,
+        )
+        if not discussion or str(discussion.get("delivery_mode") or "").strip().lower() != "live_zoom":
+            raise HTTPException(status_code=404, detail="No live discussion is configured for this test.")
+        return {
+            "scope_type": "test",
+            "scope_id": scope_id,
+            "series_id": int(series_row.get("id") or 0),
+            "series_row": series_row,
+            "collection_row": collection_row,
+            "discussion_key": "test_discussion",
+            "discussion": discussion,
+            "discussion_channel": _discussion_room_channel("test", scope_id, "test_discussion"),
+        }
+
+    raise HTTPException(status_code=400, detail="Unsupported discussion scope.")
 
 def _zoom_api_request(method: str, url: str, headers: Dict[str, str] = None, data: Any = None) -> Dict[str, Any]:
     req = UrlRequest(url, method=method)
@@ -6852,7 +9671,7 @@ def _provision_call_provider_session(payload: Dict[str, Any], provider_user_id: 
 
     conn_row = _refresh_zoom_token(provider_user_id, supabase)
     if not conn_row or not conn_row.get("access_token"):
-        raise HTTPException(status_code=400, detail="Mentor Zoom account is not connected or requires reconnect. Please contact the mentor.")
+        raise HTTPException(status_code=400, detail="Zoom account is not connected or requires reconnect.")
 
     mode = payload.get("mode", "video")
     zoom_payload = {
@@ -6891,7 +9710,7 @@ def _provision_call_provider_session(payload: Dict[str, Any], provider_user_id: 
 
 @router.get("/mentorship/integrations/zoom/status", response_model=MentorZoomIntegrationStatusResponse)
 def get_zoom_integration_status(
-    user_ctx: Dict[str, Any] = Depends(require_mentor_user),
+    user_ctx: Dict[str, Any] = Depends(require_series_author_user),
     supabase: Client = Depends(get_supabase_client),
 ):
     user_id = str(user_ctx.get("user_id") or "").strip()
@@ -6939,7 +9758,7 @@ class _ZoomConnectRequest(BaseModel):
 @router.post("/mentorship/integrations/zoom/connect", response_model=MentorZoomConnectResponse)
 def connect_zoom_integration(
     payload: _ZoomConnectRequest,
-    user_ctx: Dict[str, Any] = Depends(require_mentor_user),
+    user_ctx: Dict[str, Any] = Depends(require_series_author_user),
 ):
     import urllib.parse
     root_uri = os.getenv("API_URL", "http://localhost:8000")
@@ -6950,11 +9769,81 @@ def connect_zoom_integration(
     return MentorZoomConnectResponse(authorize_url=auth_url)
 
 
+class _ZoomExchangeRequest(BaseModel):
+    code: str
+    redirect_uri: Optional[str] = None
+
+
+@router.post("/mentorship/integrations/zoom/exchange", response_model=MentorZoomIntegrationStatusResponse)
+def exchange_zoom_integration_code(
+    payload: _ZoomExchangeRequest,
+    user_ctx: Dict[str, Any] = Depends(require_series_author_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    code = str(payload.code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Zoom authorization code is required.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    redirect_uri = str(payload.redirect_uri or "").strip()
+    if not redirect_uri:
+        raise HTTPException(status_code=400, detail="Zoom redirect URI is required.")
+
+    auth_header = "Basic " + base64.b64encode(f"{ZOOM_CLIENT_ID}:{ZOOM_CLIENT_SECRET}".encode()).decode()
+    try:
+        token_data = _zoom_api_request(
+            "POST",
+            ZOOM_TOKEN_URL,
+            headers={"Authorization": auth_header},
+            data=urlencode({
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+            }),
+        )
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        expires_in = token_data.get("expires_in", 3600)
+        expires_at = (_utc_now() + timedelta(seconds=int(expires_in) - 60)).isoformat()
+
+        info_data = _zoom_api_request(
+            "GET",
+            ZOOM_USERINFO_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        row_data = {
+            "user_id": user_id,
+            "zoom_account_id": info_data.get("account_id"),
+            "zoom_user_id": info_data.get("id"),
+            "display_name": f"{info_data.get('first_name', '')} {info_data.get('last_name', '')}".strip(),
+            "email": info_data.get("email"),
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_at": expires_at,
+            "last_error": None,
+            "updated_at": _utc_now_iso(),
+        }
+
+        existing = _safe_first(
+            supabase.table("mentor_zoom_connections").select("user_id").eq("user_id", user_id).limit(1)
+        )
+        if existing:
+            _first(supabase.table("mentor_zoom_connections").update(row_data).eq("user_id", user_id).execute())
+        else:
+            row_data["created_at"] = _utc_now_iso()
+            _first(supabase.table("mentor_zoom_connections").insert(row_data).execute())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Zoom OAuth failed: {str(exc)}")
+
+    return get_zoom_integration_status(user_ctx=user_ctx, supabase=supabase)
+
+
 @router.get("/mentorship/integrations/zoom/callback")
 def handle_zoom_oauth_callback(
     code: str,
     error: Optional[str] = None,
-    user_ctx: Dict[str, Any] = Depends(require_mentor_user),
+    user_ctx: Dict[str, Any] = Depends(require_series_author_user),
     supabase: Client = Depends(get_supabase_client),
 ):
     if error:
@@ -7014,7 +9903,7 @@ def handle_zoom_oauth_callback(
 
 @router.post("/mentorship/integrations/zoom/disconnect")
 def disconnect_zoom_integration(
-    user_ctx: Dict[str, Any] = Depends(require_mentor_user),
+    user_ctx: Dict[str, Any] = Depends(require_series_author_user),
     supabase: Client = Depends(get_supabase_client),
 ):
     user_id = str(user_ctx.get("user_id") or "").strip()
@@ -7041,7 +9930,13 @@ def get_mentorship_call_context(
     user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
     supabase: Client = Depends(get_supabase_client),
 ):
-    session_row = _first(supabase.table(MENTORSHIP_SESSIONS_TABLE).select("*").eq("id", session_id).limit(1))
+    session_row = _first(
+        supabase.table(MENTORSHIP_SESSIONS_TABLE)
+        .select("*")
+        .eq("id", session_id)
+        .limit(1)
+        .execute()
+    )
     if not session_row:
         raise HTTPException(status_code=404, detail="Session not found.")
         
@@ -7053,34 +9948,32 @@ def get_mentorship_call_context(
     if not (is_admin or is_mentor or is_learner):
         raise HTTPException(status_code=403, detail="You are not authorized to join this session.")
         
-    call_provider = session_row.get("call_provider")
+    join_url = str(session_row.get("provider_join_url") or session_row.get("meeting_link") or "").strip()
+    call_provider = _normalize_mentorship_call_provider(
+        session_row.get("call_provider"),
+        meeting_link=session_row.get("meeting_link"),
+    ).value
+    if not join_url and _agora_ready():
+        call_provider = MentorshipCallProvider.ZOOM_VIDEO_SDK.value
     
     if call_provider == "zoom_video_sdk":
-        # Generate short lived SDK credentials
-        topic = f"Mentorship Session {session_row.get('id')}"
-        iat = int(time.time()) - 30
-        exp = iat + 3600 * 2 # 2 hours
-        header = {"alg": "HS256", "typ": "JWT"}
-        role_type = 1 if is_mentor or is_admin else 0
-        payload = {
-            "app_key": ZOOM_SDK_KEY,
-            "tpc": topic,
-            "role_type": role_type,
-            "version": 1,
-            "iat": iat,
-            "exp": exp
-        }
-        def base64url_encode(data: bytes) -> str:
-            return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
-        encoded_header = base64url_encode(json.dumps(header).encode("utf-8"))
-        encoded_payload = base64url_encode(json.dumps(payload).encode("utf-8"))
-        signature = hmac.new(
-            ZOOM_SDK_SECRET.encode("utf-8"),
-            f"{encoded_header}.{encoded_payload}".encode("utf-8"),
-            hashlib.sha256
-        ).digest()
-        jwt_token = f"{encoded_header}.{encoded_payload}.{base64url_encode(signature)}"
-        
+        if not _agora_ready():
+            raise HTTPException(
+                status_code=400,
+                detail="Agora is not configured on the server. Add AGORA_APP_ID and AGORA_APP_CERTIFICATE first.",
+            )
+        channel_name = f"mentorship-session-{session_id}"
+        uid_value = _agora_uid_for_session(session_id, user_id)
+        privilege_expired_ts = int(time.time()) + 3600 * 2
+        rtc_role = 1
+        agora_token = RtcTokenBuilder.buildTokenWithUid(
+            AGORA_APP_ID,
+            AGORA_APP_CERTIFICATE,
+            channel_name,
+            uid_value,
+            rtc_role,
+            privilege_expired_ts,
+        )
         display_name = user_ctx.get("user_metadata", {}).get("full_name") or user_ctx.get("email", "User")
         
         return MentorshipCallContextResponse(
@@ -7088,12 +9981,14 @@ def get_mentorship_call_context(
             request_id=session_row.get("request_id"),
             call_provider=MentorshipCallProvider.ZOOM_VIDEO_SDK,
             mode=MentorshipMode(session_row.get("mode", "video")),
-            sdk_signature=jwt_token,
-            sdk_session_name=topic,
             sdk_user_name=display_name,
             sdk_user_identity=user_id,
-            sdk_role_type=role_type,
-            sdk_key=ZOOM_SDK_KEY
+            sdk_role_type=1 if is_mentor or is_admin else 0,
+            agora_app_id=AGORA_APP_ID,
+            agora_channel=channel_name,
+            agora_token=agora_token,
+            agora_uid=uid_value,
+            provider_error=session_row.get("provider_error"),
         )
         
     # Return links for zoom or custom
@@ -7102,9 +9997,10 @@ def get_mentorship_call_context(
         request_id=session_row.get("request_id"),
         call_provider=MentorshipCallProvider(call_provider),
         mode=MentorshipMode(session_row.get("mode", "video")),
-        join_url=session_row.get("provider_join_url") or session_row.get("meeting_link"),
+        join_url=join_url or None,
         host_url=session_row.get("provider_host_url") if (is_mentor or is_admin) else None,
-        provider_payload=session_row.get("provider_payload") or {}
+        provider_payload=session_row.get("provider_payload") or {},
+        provider_error=session_row.get("provider_error"),
     )
 
 
@@ -7114,7 +10010,13 @@ def recreate_mentorship_provider_session(
     user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
     supabase: Client = Depends(get_supabase_client),
 ):
-    session_row = _first(supabase.table(MENTORSHIP_SESSIONS_TABLE).select("*").eq("id", session_id).limit(1))
+    session_row = _first(
+        supabase.table(MENTORSHIP_SESSIONS_TABLE)
+        .select("*")
+        .eq("id", session_id)
+        .limit(1)
+        .execute()
+    )
     if not session_row:
         raise HTTPException(status_code=404, detail="Session not found.")
         
@@ -7147,6 +10049,100 @@ def recreate_mentorship_provider_session(
         return _session_response(new_row or session_row)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/mentorship/sessions/{session_id}/complete", response_model=MentorshipSessionResponse)
+def complete_mentorship_session(
+    session_id: int,
+    payload: MentorshipSessionComplete,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    session_row = _first(
+        supabase.table(MENTORSHIP_SESSIONS_TABLE)
+        .select("*")
+        .eq("id", session_id)
+        .limit(1)
+        .execute()
+    )
+    if not session_row:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    is_admin = _is_admin_or_moderator(user_ctx)
+    is_mentor = user_id == str(session_row.get("provider_user_id") or "").strip()
+    if not (is_admin or is_mentor):
+        raise HTTPException(status_code=403, detail="Only the assigned mentor or admin can complete this session.")
+
+    current_status = _normalize_mentorship_session_status(session_row.get("status"))
+    if current_status == MentorshipSessionStatus.CANCELLED:
+        raise HTTPException(status_code=400, detail="Cancelled sessions cannot be completed.")
+    if current_status == MentorshipSessionStatus.COMPLETED:
+        return _session_response(session_row)
+
+    now_iso = _utc_now_iso()
+    summary = _as_optional_text(payload.summary, max_length=4000)
+    session_updates: Dict[str, Any] = {
+        "status": MentorshipSessionStatus.COMPLETED.value,
+        "live_started_at": session_row.get("live_started_at") or now_iso,
+        "live_ended_at": now_iso,
+        "updated_at": now_iso,
+    }
+    if summary is not None:
+        session_updates["summary"] = summary
+
+    updated_session = _first(
+        supabase.table(MENTORSHIP_SESSIONS_TABLE)
+        .update(session_updates)
+        .eq("id", session_id)
+        .execute()
+    )
+    if not updated_session:
+        raise HTTPException(status_code=400, detail="Failed to complete mentorship session.")
+
+    request_id = int(session_row.get("request_id") or 0)
+    if request_id > 0:
+        request_row = _first(
+            supabase.table(MENTORSHIP_REQUESTS_TABLE)
+            .select("*")
+            .eq("id", request_id)
+            .limit(1)
+            .execute()
+        )
+        if request_row:
+            meta = _meta_dict(request_row.get("meta"))
+            actor_role = _tracking_actor_from_user_ctx(user_ctx, request_row=request_row)
+            meta["completed_at"] = now_iso
+            meta["completed_by"] = user_id
+            meta["completed_by_role"] = actor_role
+            meta["workflow_stage"] = MentorshipWorkflowStage.COMPLETED.value
+            meta["call_status"] = "completed"
+            meta["status_updated_by"] = user_id
+            meta["status_updated_by_role"] = actor_role
+            meta["status_updated_at"] = now_iso
+            if summary is not None:
+                meta["session_summary"] = summary
+
+            updated_request = _first(
+                supabase.table(MENTORSHIP_REQUESTS_TABLE)
+                .update(
+                    {
+                        "status": MentorshipRequestStatus.COMPLETED.value,
+                        "meta": meta,
+                        "updated_at": now_iso,
+                    }
+                )
+                .eq("id", request_id)
+                .execute()
+            )
+            if updated_request:
+                _append_system_request_message(
+                    updated_request,
+                    body="Mentorship session completed successfully.",
+                    supabase=supabase,
+                )
+
+    return _session_response(updated_session)
 
 
 @router.post("/webhooks/zoom")

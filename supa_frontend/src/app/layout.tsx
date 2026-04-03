@@ -42,7 +42,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${manrope.variable} ${sourceSerif.variable} ${hindiSerif.variable} ${hindiSans.variable} font-sans antialiased bg-slate-50 text-slate-900`}
+        className={`${manrope.variable} ${sourceSerif.variable} ${hindiSerif.variable} ${hindiSans.variable} font-sans antialiased`}
       >
         <AuthProvider>
           {children}

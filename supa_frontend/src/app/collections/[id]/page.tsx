@@ -1,12 +1,16 @@
 import Link from "next/link";
 
 import AppLayout from "@/components/layouts/AppLayout";
+import MainsCollectionTestRunner from "@/components/mains/MainsCollectionTestRunner";
 import ChallengeCreatorCard from "@/components/premium/ChallengeCreatorCard";
+import CollectionContentList, { type CollectionContentListItem } from "@/components/premium/CollectionContentList";
 import HistoryBackButton from "@/components/ui/HistoryBackButton";
+import { canAccessMainsAuthoring, canAccessManualQuizBuilder } from "@/lib/accessControl";
 import { getCollectionTestKind } from "@/lib/collectionKind";
 import { resolveCollectionSeriesId } from "@/lib/collectionNavigation";
 import { richTextToPlainText } from "@/lib/richText";
 import { createClient } from "@/lib/supabase/server";
+import type { MainsCollectionTestPayload } from "@/types/premium";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -16,7 +20,7 @@ type ContentRow = {
   id: number;
   title: string | null;
   type: string;
-  data?: {
+  data?: Record<string, unknown> & {
     description?: string;
     is_free?: boolean;
     url?: string;
@@ -24,18 +28,71 @@ type ContentRow = {
 };
 
 type CollectionItemJoin = {
+  id: number;
+  content_item_id?: number | null;
+  order?: number | null;
   content_items: ContentRow | ContentRow[] | null;
 };
 
-type ContentCardItem = ContentRow & {
-  description?: string;
-  is_free?: boolean;
-  url?: string;
-};
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function asText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function buildMainsPayload(
+  collectionId: number,
+  collectionTitle: string,
+  seriesId: number,
+  items: CollectionContentListItem[],
+): MainsCollectionTestPayload {
+  const orderedItems = [...items].sort((left, right) => {
+    if (left.order !== right.order) return left.order - right.order;
+    return left.collection_item_id - right.collection_item_id;
+  });
+
+  const questions = orderedItems.flatMap((item) => {
+    if (item.type !== "question") return [];
+    const data = asRecord(item.data);
+    const questionText = asText(data.question_text || data.question_statement || data.question);
+    if (!questionText) return [];
+    const wordLimit = Math.max(1, asNumber(data.word_limit) || 150);
+    const maxMarks = Math.max(1, asNumber(data.max_marks || data.marks || data.question_marks) || 10);
+    return [{
+      item_id: item.collection_item_id * 1000,
+      content_item_id: item.content_item_id,
+      question_number: 0,
+      question_text: questionText,
+      answer_approach: asText(data.answer_approach) || null,
+      model_answer: asText(data.model_answer) || null,
+      word_limit: wordLimit,
+      max_marks: maxMarks,
+      answer_style_guidance: asText(data.answer_style_guidance) || null,
+    }];
+  }).map((question, index) => ({ ...question, question_number: index + 1 }));
+
+  return {
+    collection_id: collectionId,
+    series_id: seriesId > 0 ? seriesId : null,
+    collection_title: collectionTitle,
+    total_questions: questions.length,
+    questions,
+  };
+}
 
 export default async function CollectionDetailPage({ params }: PageProps) {
   const { id } = await params;
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data: collection, error: collectionError } = await supabase
     .from("collections")
@@ -47,10 +104,13 @@ export default async function CollectionDetailPage({ params }: PageProps) {
     console.error("Collection not found:", collectionError);
   }
 
-  let contentItems: ContentCardItem[] = [];
+  let contentItems: CollectionContentListItem[] = [];
   const { data: itemsData } = await supabase
     .from("collection_items")
     .select(`
+      id,
+      content_item_id,
+      order,
       content_items (
         id,
         title,
@@ -62,19 +122,35 @@ export default async function CollectionDetailPage({ params }: PageProps) {
 
   if (itemsData) {
     contentItems = (itemsData as CollectionItemJoin[])
-      .map((row) => (Array.isArray(row.content_items) ? (row.content_items[0] ?? null) : row.content_items))
-      .filter((item): item is ContentRow => Boolean(item))
-      .map((item) => ({
-        ...item,
-        description: item.data?.description,
-        is_free: item.data?.is_free,
-        url: item.data?.url,
-      }));
+      .map((row) => {
+        const item = Array.isArray(row.content_items) ? (row.content_items[0] ?? null) : row.content_items;
+        if (!item) return null;
+        return {
+          collection_item_id: row.id,
+          content_item_id: Number(row.content_item_id || item.id || 0),
+          order: Number(row.order || 0),
+          title: item.title,
+          type: item.type,
+          data: item.data,
+          description: typeof item.data?.description === "string" ? item.data.description : undefined,
+          is_free: Boolean(item.data?.is_free),
+          url: typeof item.data?.url === "string" ? item.data.url : undefined,
+        } as CollectionContentListItem;
+      })
+      .filter((item): item is CollectionContentListItem => Boolean(item))
+      .sort((left, right) => {
+        if (left.order !== right.order) return left.order - right.order;
+        return left.collection_item_id - right.collection_item_id;
+      });
   }
 
   const testKind = getCollectionTestKind(collection || null);
   const isMainsTest = testKind === "mains";
+  const canManageQuestions = isMainsTest ? canAccessMainsAuthoring(user) : canAccessManualQuizBuilder(user);
   const linkedSeriesId = resolveCollectionSeriesId(collection || null);
+  const mainsPayload = isMainsTest
+    ? buildMainsPayload(Number(id), String(collection?.title || `Test ${id}`), linkedSeriesId, contentItems)
+    : null;
   const backFallbackHref = linkedSeriesId > 0 ? `/test-series/${linkedSeriesId}` : "/collections";
   const backLabel = linkedSeriesId > 0 ? "Back to Series" : "Back to Tests";
 
@@ -101,18 +177,22 @@ export default async function CollectionDetailPage({ params }: PageProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            <Link
-              href={isMainsTest ? `/collections/${id}/mains-test` : `/collections/${id}/test`}
-              className="inline-flex items-center rounded-md border border-indigo-600 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 shadow-sm transition-colors hover:bg-indigo-100"
-            >
-              {isMainsTest ? "Open Mains Writing Desk" : "Start Prelims Test"}
-            </Link>
-            <Link
-              href={`/collections/${id}/question-methods`}
-              className="inline-flex items-center rounded-md border border-slate-900 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm transition-colors hover:bg-slate-50"
-            >
-              {isMainsTest ? "+ Manage Mains Questions" : "+ Manage Quiz Questions"}
-            </Link>
+            {!isMainsTest ? (
+              <Link
+                href={`/collections/${id}/test`}
+                className="inline-flex items-center rounded-md border border-indigo-600 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 shadow-sm transition-colors hover:bg-indigo-100"
+              >
+                Start Prelims Test
+              </Link>
+            ) : null}
+            {canManageQuestions ? (
+              <Link
+                href={`/collections/${id}/question-methods`}
+                className="inline-flex items-center rounded-md border border-slate-900 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm transition-colors hover:bg-slate-50"
+              >
+                {isMainsTest ? "+ Manage Mains Questions" : "Add Quiz"}
+              </Link>
+            ) : null}
           </div>
         </div>
 
@@ -138,108 +218,52 @@ export default async function CollectionDetailPage({ params }: PageProps) {
         <div className="mt-5 max-w-3xl">
           {isMainsTest ? (
             <p className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
-              This is a Mains Test. Learners read the full paper, then submit one answer PDF or question-wise answer photos for mentor review and marking.
+              This is a Mains Test. The question paper, answer-copy submission, evaluation status, and mentorship flow now sit on this page.
             </p>
           ) : (
             <ChallengeCreatorCard collectionId={id} collectionTitle={collection?.title || undefined} />
           )}
         </div>
+
+        {isMainsTest ? (
+          <div className="mt-8">
+            <MainsCollectionTestRunner collectionId={id} embedded initialPayload={mainsPayload} />
+          </div>
+        ) : null}
       </div>
 
-      <div className="mt-12 border-t border-slate-200 pt-8">
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-2xl font-bold">Test Content</h2>
-          <span className="text-sm text-slate-500">{contentItems.length} items</span>
-        </div>
+      {!isMainsTest ? (
+        <div className="mt-12 border-t border-slate-200 pt-8">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-2xl font-bold">Test Content</h2>
+            <span className="text-sm text-slate-500">{contentItems.length} items</span>
+          </div>
 
-        <div className="space-y-4">
-          {!contentItems || contentItems.length === 0 ? (
-            <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 py-16 text-center">
-              <div className="mx-auto mb-4 h-12 w-12 text-slate-300">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                  />
-                </svg>
-              </div>
-              <p className="font-medium text-slate-500">No content items added to this test yet.</p>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-1">
-              {contentItems.map((content) => (
-                <div
-                  key={content.id}
-                  className="group relative flex items-start space-x-4 rounded-xl border border-slate-200 bg-white p-5 transition-all hover:border-slate-300 hover:shadow-md"
-                >
-                  <div className="mt-1 flex-shrink-0">
-                    {content.type === "video" ? (
-                      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-red-600 ring-1 ring-red-100">
-                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M2 6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
-                        </svg>
-                      </span>
-                    ) : content.type === "pdf" ? (
-                      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600 ring-1 ring-blue-100">
-                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </span>
-                    ) : (
-                      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100">
-                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      href={{
-                        pathname: content.type.startsWith("quiz") ? `/quiz/${content.id}` : `/content/${content.id}`,
-                        query: { backTo: `/collections/${id}` },
-                      }}
-                      className="block focus:outline-none"
-                    >
-                      <span className="absolute inset-0" aria-hidden="true" />
-                      <div className="flex items-center justify-between">
-                        <p className="text-base font-semibold text-slate-900 transition-colors group-hover:text-blue-600">
-                          {content.title}
-                        </p>
-                        <div className="ml-4 flex-shrink-0">
-                          {content.is_free ? (
-                            <span className="inline-flex items-center rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-                              Free
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-500/10">
-                              Locked
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-sm text-slate-500">
-                        {richTextToPlainText(content.description || "") || "Click to view content details and start learning."}
-                      </p>
-                    </Link>
-                  </div>
+          <div className="space-y-4">
+            {!contentItems || contentItems.length === 0 ? (
+              <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 py-16 text-center">
+                <div className="mx-auto mb-4 h-12 w-12 text-slate-300">
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                    />
+                  </svg>
                 </div>
-              ))}
-            </div>
-          )}
+                <p className="font-medium text-slate-500">No content items added to this test yet.</p>
+              </div>
+            ) : (
+              <CollectionContentList
+                collectionId={Number(id)}
+                manageHref={`/collections/${id}/question-methods`}
+                items={contentItems}
+              />
+            )}
+          </div>
         </div>
-      </div>
+      ) : null}
     </AppLayout>
   );
 }

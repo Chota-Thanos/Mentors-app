@@ -17,7 +17,7 @@ export default function MentorshipSlotOfferList({
   onAccept,
 }: MentorshipSlotOfferListProps) {
   if (slots.length === 0) {
-    return <p className="text-xs text-slate-500">No mentor slot options are available yet.</p>;
+    return <p className="text-xs text-slate-500">No session times are available yet.</p>;
   }
 
   return (
@@ -40,7 +40,7 @@ export default function MentorshipSlotOfferList({
                 className="inline-flex items-center rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 disabled:opacity-60"
               >
                 {acceptingSlotId === slot.id ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
-                {acceptingSlotId === slot.id ? "Accepting..." : "Accept This Slot"}
+                {acceptingSlotId === slot.id ? "Booking..." : "Book This Session"}
               </button>
             ) : null}
           </div>

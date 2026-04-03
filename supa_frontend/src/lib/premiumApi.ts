@@ -1,15 +1,15 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { createClient } from "./supabase/client";
+import { backendRoot } from "./backendUrl";
 
-const API_ROOT = (process.env.NEXT_PUBLIC_SUPA_BACKEND_URL || "http://localhost:8003").replace(/\/$/, "");
 const supabase = createClient();
 
 export const premiumApi = axios.create({
-  baseURL: `${API_ROOT}/api/v1/premium`,
+  baseURL: `${backendRoot}/api/v1/premium`,
 });
 
 export const premiumCompatApi = axios.create({
-  baseURL: `${API_ROOT}/api/v1/premium-collections`,
+  baseURL: `${backendRoot}/api/v1/premium-collections`,
 });
 
 // Add Interceptor for Authentication
@@ -47,4 +47,4 @@ const retryOn401 = async (error: AxiosError) => {
 premiumApi.interceptors.response.use((response) => response, retryOn401);
 premiumCompatApi.interceptors.response.use((response) => response, retryOn401);
 
-export const premiumApiRoot = API_ROOT;
+export const premiumApiRoot = backendRoot;

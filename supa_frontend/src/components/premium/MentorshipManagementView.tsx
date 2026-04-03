@@ -2,1768 +2,866 @@
 
 import axios from "axios";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, RefreshCcw } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, CalendarDays, CheckCircle2, Clock3, CreditCard, FileText, Mail, MessageSquareText, MessagesSquare, UserRound } from "lucide-react";
 import { toast } from "sonner";
 
-import CopyEvaluationFlowStatus from "@/components/premium/CopyEvaluationFlowStatus";
-import MentorAvailabilityCalendar from "@/components/premium/MentorAvailabilityCalendar";
-import MentorshipAvailabilityManager from "@/components/premium/MentorshipAvailabilityManager";
-import MentorshipSlotOfferList from "@/components/premium/MentorshipSlotOfferList";
 import WorkflowProgressTrack from "@/components/premium/WorkflowProgressTrack";
-import { useAuth } from "@/context/AuthContext";
-import HistoryBackButton from "@/components/ui/HistoryBackButton";
+import MentorshipChatView from "@/components/premium/MentorshipChatView";
 import RichTextContent from "@/components/ui/RichTextContent";
-import RichTextField from "@/components/ui/RichTextField";
+import { useAuth } from "@/context/AuthContext";
 import { isAdminLike, isMentorLike, isModeratorLike } from "@/lib/accessControl";
-import { buildCopyEvaluationFlowSteps, isCopyEvaluationFlow, offeredSlotsForRequest } from "@/lib/copyEvaluationFlow";
-import { buildMentorshipWorkflowSteps, mentorshipCurrentStatusLabel, mentorshipNextActionLabel } from "@/lib/mentorshipOrderFlow";
-import { buildAvailabilityDays, formatSlotTimeRange, mentorshipCallLabel } from "@/lib/mentorAvailability";
+import { requestOfferedSlotIds } from "@/lib/copyEvaluationFlow";
+import { buildMentorshipWorkflowSteps, mentorshipCurrentStatusLabel, mentorshipKindLabel, mentorshipNextActionLabel, resolveMentorshipWorkflowStage } from "@/lib/mentorshipOrderFlow";
 import { premiumApi } from "@/lib/premiumApi";
-import { toNullableRichText } from "@/lib/richText";
-import type {
-  MentorAvailabilityStatus,
-  MainsCopySubmission,
-  MentorshipEntitlement,
-  MentorshipRequest,
-  MentorshipRequestOfferSlotsPayload,
-  MentorshipSession,
-  MentorshipSlot,
-  TestSeries,
-  TestSeriesTest,
-} from "@/types/premium";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import type { MainsCopySubmission, MentorshipMessage, MentorshipRequest, MentorshipSession, MentorshipSlot } from "@/types/premium";
 
 interface MentorshipManagementViewProps {
   seriesId?: number | null;
   prefillMentorUserId?: string | null;
 }
 
-type ManageMode = "user" | "provider";
+type Mode = "user" | "provider";
+type QueueTab = "new_requests" | "active_conversations" | "upcoming_calls" | "completed";
 
-interface DirectSubmissionReviewDraft {
-  etaHours: string;
-  etaText: string;
-  checkedCopyUrl: string;
-  totalMarks: string;
-  providerNote: string;
+interface DerivedRequestRow {
+  request: MentorshipRequest;
+  submission: MainsCopySubmission | null;
+  session: MentorshipSession | null;
+  offeredSlotCount: number;
+  stage: string;
 }
 
-const toError = (error: unknown): string => {
-  if (!axios.isAxiosError(error)) return "Unknown error";
+function requestUnreadCount(request: MentorshipRequest): number {
+  const raw = Number(request.meta?.viewer_unread_message_count || 0);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+function buildRealtimeRequestFilter(requestIds: number[]): string | null {
+  const ids = Array.from(new Set(requestIds.filter((value) => Number.isFinite(value) && value > 0)));
+  if (!ids.length) return null;
+  if (ids.length === 1) return `request_id=eq.${ids[0]}`;
+  return `request_id=in.(${ids.join(",")})`;
+}
+
+function toError(error: unknown): string {
+  if (!axios.isAxiosError(error)) return error instanceof Error ? error.message : "Unknown error";
   const detail = error.response?.data?.detail;
   return typeof detail === "string" && detail.trim() ? detail : error.message;
-};
+}
 
-const mentorshipStatusLabel = (status: MentorshipRequest["status"]): string => {
-  if (status === "requested") return "Requested";
-  if (status === "scheduled") return "Slot Booked";
-  if (status === "completed") return "Mentorship Completed";
-  if (status === "rejected") return "Request Rejected";
-  return "Request Cancelled";
-};
+function emailHandleToLabel(email?: string | null): string {
+  const handle = String(email || "").split("@")[0]?.trim();
+  if (!handle) return "";
+  return handle
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
 
-const mentorStatusLabel = (status?: MentorAvailabilityStatus | null): string => {
-  if (!status) return "Status unavailable";
-  if (status.status === "available_now") return "Available Now";
-  if (status.status === "busy") return "Busy";
-  return "Offline";
-};
+function requestLabel(request: MentorshipRequest): string {
+  const learnerName = typeof request.meta?.learner_name === "string" ? request.meta.learner_name.trim() : "";
+  if (learnerName) return learnerName;
+  const learnerEmail = typeof request.meta?.learner_email === "string" ? request.meta.learner_email.trim() : "";
+  return emailHandleToLabel(learnerEmail) || "Learner";
+}
 
-const mentorStatusBadgeClass = (status?: MentorAvailabilityStatus | null): string => {
-  if (!status) return "border-slate-200 bg-slate-100 text-slate-700";
-  if (status.status === "available_now") return "border-emerald-200 bg-emerald-100 text-emerald-800";
-  if (status.status === "busy") return "border-amber-200 bg-amber-100 text-amber-800";
-  return "border-slate-200 bg-slate-100 text-slate-700";
-};
+function requestEmail(request: MentorshipRequest): string {
+  return typeof request.meta?.learner_email === "string" ? request.meta.learner_email.trim() : "";
+}
 
-const toIsoDateTime = (value: unknown): string | null => {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim();
-  return normalized ? normalized : null;
-};
+function titleCaseLabel(value?: string | null, fallback = "n/a"): string {
+  const normalized = String(value || "")
+    .trim()
+    .replaceAll("_", " ");
+  if (!normalized) return fallback;
+  return normalized.replace(/\b\w/g, (match) => match.toUpperCase());
+}
 
-const formatDateTime = (value?: string | null): string => {
-  const isoValue = toIsoDateTime(value);
-  if (!isoValue) return "Not set";
-  const parsed = new Date(isoValue);
-  if (Number.isNaN(parsed.getTime())) return isoValue;
-  return parsed.toLocaleString();
-};
+function initialsFromLabel(label?: string | null): string {
+  const parts = String(label || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "LR";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+}
 
-const requestMetaDate = (request: MentorshipRequest, key: string): string | null =>
-  toIsoDateTime(request.meta?.[key]);
+function requestStatusBadgeClass(status?: string | null): string {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "requested") return "border-amber-300 bg-amber-50 text-amber-800";
+  if (normalized === "accepted" || normalized === "scheduled" || normalized === "completed") {
+    return "border-emerald-300 bg-emerald-50 text-emerald-800";
+  }
+  if (normalized === "rejected" || normalized === "cancelled" || normalized === "expired") {
+    return "border-rose-300 bg-rose-50 text-rose-800";
+  }
+  return "border-slate-300 bg-slate-50 text-slate-700";
+}
 
-const isDirectProfileBooking = (request: MentorshipRequest): boolean => {
-  const bookingSource = String(request.meta?.booking_source || "").trim().toLowerCase();
-  return Boolean(request.meta?.standalone) || bookingSource === "self_service_slot";
-};
+function paymentStatusBadgeClass(status?: string | null): string {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "paid") return "border-emerald-300 bg-emerald-50 text-emerald-800";
+  if (normalized === "pending") return "border-amber-300 bg-amber-50 text-amber-800";
+  if (normalized === "failed" || normalized === "refunded") return "border-rose-300 bg-rose-50 text-rose-800";
+  return "border-slate-300 bg-slate-50 text-slate-700";
+}
 
-const buildDirectSubmissionReviewDraft = (submission: MainsCopySubmission): DirectSubmissionReviewDraft => ({
-  etaHours: submission.provider_eta_hours ? String(submission.provider_eta_hours) : "",
-  etaText: submission.provider_eta_text || "",
-  checkedCopyUrl: submission.checked_copy_pdf_url || "",
-  totalMarks:
-    submission.total_marks !== null && submission.total_marks !== undefined ? String(submission.total_marks) : "",
-  providerNote: submission.provider_note || "",
-});
+function sessionDurationMinutes(session: MentorshipSession): number | null {
+  const start = new Date(session.starts_at).getTime();
+  const end = new Date(session.ends_at).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return null;
+  return Math.round((end - start) / 60000);
+}
 
-export default function MentorshipManagementView({ seriesId, prefillMentorUserId }: MentorshipManagementViewProps) {
-  const { user, loading, isAuthenticated } = useAuth();
-  const currentUserId = String(user?.id || "").trim();
-  const adminLike = useMemo(() => isAdminLike(user), [user]);
-  const moderatorLike = useMemo(() => !adminLike && isModeratorLike(user), [user, adminLike]);
-  const mentorLike = useMemo(() => !adminLike && !moderatorLike && isMentorLike(user), [user, adminLike, moderatorLike]);
-  const canScheduleMentorship = useMemo(() => adminLike || moderatorLike, [adminLike, moderatorLike]);
-  const canManageMentorSlots = useMemo(() => mentorLike, [mentorLike]);
-  const canOperateMentorSessions = useMemo(() => mentorLike, [mentorLike]);
-  const canGrantEntitlements = useMemo(() => adminLike || moderatorLike, [adminLike, moderatorLike]);
-  const canHandleMentorship = useMemo(
-    () => canScheduleMentorship || canManageMentorSlots,
-    [canManageMentorSlots, canScheduleMentorship],
-  );
-  const canViewHandlerPanel = useMemo(() => canHandleMentorship, [canHandleMentorship]);
-  const normalizedPrefillMentorUserId = useMemo(
-    () => String(prefillMentorUserId || "").trim(),
-    [prefillMentorUserId],
-  );
+function plainTextExcerpt(value?: string | null, fallback = "No problem statement attached."): string {
+  const normalized = String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return fallback;
+  return normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized;
+}
 
-  const [mode, setMode] = useState<ManageMode>(
-    normalizedPrefillMentorUserId ? "user" : canViewHandlerPanel ? "provider" : "user",
-  );
-  const [providerAspect, setProviderAspect] = useState<"availability" | "calls">(mentorLike ? "availability" : "calls");
+function canStartSessionImmediately(row: DerivedRequestRow): boolean {
+  if (row.session) return false;
+  if (row.request.status !== "accepted") return false;
+  if (row.request.payment_amount > 0 && row.request.payment_status !== "paid") return false;
+  return true;
+}
+
+function mergeMentorshipMessages(current: MentorshipMessage[], incoming: MentorshipMessage): MentorshipMessage[] {
+  const next = [...current];
+  const index = next.findIndex((message) => message.id === incoming.id);
+  if (index >= 0) {
+    next[index] = incoming;
+  } else {
+    next.push(incoming);
+  }
+  next.sort((left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime());
+  return next;
+}
+
+export default function MentorshipManagementView({ seriesId }: MentorshipManagementViewProps) {
+  const router = useRouter();
+  const { user, isAuthenticated } = useAuth();
+  const providerCapable = useMemo(() => isAdminLike(user) || isModeratorLike(user) || isMentorLike(user), [user]);
+  const adminLike = useMemo(() => isAdminLike(user) || isModeratorLike(user), [user]);
+
+  const [modeOverride, setModeOverride] = useState<Mode | null>(null);
+  const [tab, setTab] = useState<QueueTab>("new_requests");
   const [busy, setBusy] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const [slots, setSlots] = useState<MentorshipSlot[]>([]);
   const [requests, setRequests] = useState<MentorshipRequest[]>([]);
   const [sessions, setSessions] = useState<MentorshipSession[]>([]);
-  const [entitlements, setEntitlements] = useState<MentorshipEntitlement[]>([]);
-  const [seriesById, setSeriesById] = useState<Record<string, TestSeries>>({});
-  const [testsById, setTestsById] = useState<Record<string, TestSeriesTest>>({});
-  const [submissionById, setSubmissionById] = useState<Record<string, MainsCopySubmission>>({});
-
-  const [slotByRequestId, setSlotByRequestId] = useState<Record<string, string>>({});
-  const [slotOfferDraftByRequestId, setSlotOfferDraftByRequestId] = useState<Record<string, number[]>>({});
-  const [mentorStatusByProviderId, setMentorStatusByProviderId] = useState<Record<string, MentorAvailabilityStatus>>({});
-  const [startNowBusyByRequestId, setStartNowBusyByRequestId] = useState<Record<string, boolean>>({});
-  const [startNowMeetingLinkByRequestId, setStartNowMeetingLinkByRequestId] = useState<Record<string, string>>({});
-  const [offeringSlotsRequestId, setOfferingSlotsRequestId] = useState<number | null>(null);
-  const [acceptingSlotKey, setAcceptingSlotKey] = useState<string | null>(null);
-  const [directReviewDrafts, setDirectReviewDrafts] = useState<Record<string, DirectSubmissionReviewDraft>>({});
-  const [savingEtaSubmissionId, setSavingEtaSubmissionId] = useState<number | null>(null);
-  const [savingReviewSubmissionId, setSavingReviewSubmissionId] = useState<number | null>(null);
-
-  const [standaloneProviderId, setStandaloneProviderId] = useState(normalizedPrefillMentorUserId);
-  const [standaloneNote, setStandaloneNote] = useState("");
-  const [selectedMentorDateKey, setSelectedMentorDateKey] = useState<string | null>(null);
-  const [selectedMentorSlotId, setSelectedMentorSlotId] = useState<number | null>(null);
-  const [bookingSlotId, setBookingSlotId] = useState<number | null>(null);
-
-  const [grantUserId, setGrantUserId] = useState("");
-  const [grantSessions, setGrantSessions] = useState("1");
-  const [selectedMentorSlots, setSelectedMentorSlots] = useState<MentorshipSlot[]>([]);
-  const latestLearnerBookingSignatureRef = useRef<string | null>(null);
+  const [submissions, setSubmissions] = useState<Record<string, MainsCopySubmission>>({});
+  const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
+  const [messages, setMessages] = useState<MentorshipMessage[]>([]);
+  const [slots, setSlots] = useState<MentorshipSlot[]>([]);
+  const [messageBody, setMessageBody] = useState("");
+  const [offerSlotIds, setOfferSlotIds] = useState<number[]>([]);
+  const [etaText, setEtaText] = useState("");
+  const [checkedCopyUrl, setCheckedCopyUrl] = useState("");
+  const [totalMarks, setTotalMarks] = useState("");
+  const [providerNote, setProviderNote] = useState("");
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   useEffect(() => {
-    if (normalizedPrefillMentorUserId) {
-      setMode("user");
-      return;
-    }
-    setMode(canViewHandlerPanel ? "provider" : "user");
-  }, [canViewHandlerPanel, normalizedPrefillMentorUserId]);
+    if (!providerCapable) setModeOverride(null);
+  }, [providerCapable]);
 
-  useEffect(() => {
-    if (!normalizedPrefillMentorUserId) {
-      return;
-    }
-    setStandaloneProviderId(normalizedPrefillMentorUserId);
-  }, [normalizedPrefillMentorUserId]);
+  const mode: Mode = providerCapable ? modeOverride ?? "provider" : "user";
 
-  const loadSelectedMentorSlots = async (providerUserId: string) => {
-    const providerId = String(providerUserId || "").trim();
-    if (!providerId) {
-      setSelectedMentorSlots([]);
-      return;
-    }
-
-    try {
-      const response = await premiumApi.get<MentorshipSlot[]>("/mentorship/slots", {
-        params: {
-          provider_user_id: providerId,
-          only_available: false,
-        },
-      });
-      setSelectedMentorSlots(Array.isArray(response.data) ? response.data : []);
-    } catch {
-      setSelectedMentorSlots([]);
-    }
-  };
-
-  useEffect(() => {
-    if (mode !== "provider") return;
-    setProviderAspect(canManageMentorSlots ? "availability" : "calls");
-  }, [canManageMentorSlots, mode]);
-
-  const loadAll = async ({ silent = false }: { silent?: boolean } = {}) => {
+  const load = async () => {
     if (!isAuthenticated) {
       setBusy(false);
-      setRefreshing(false);
-      setSeriesById({});
-      setTestsById({});
-      setSubmissionById({});
       return;
     }
-
-    if (silent) {
-      setRefreshing(true);
-    } else {
-      setBusy(true);
-    }
+    setBusy(true);
     try {
-      const scope = mode === "provider" ? (canScheduleMentorship ? "all" : "provider") : "me";
-      const [slotsResponse, requestsResponse, sessionsResponse] = await Promise.all([
-        premiumApi.get<MentorshipSlot[]>("/mentorship/slots", {
-          params: { include_past: mode === "provider", only_available: false },
-        }),
+      const scope = mode === "provider" ? (adminLike ? "all" : "provider") : "me";
+      const [requestRes, sessionRes] = await Promise.all([
         premiumApi.get<MentorshipRequest[]>("/mentorship/requests", { params: { scope } }),
         premiumApi.get<MentorshipSession[]>("/mentorship/sessions", { params: { scope } }),
       ]);
-
-      setSlots(Array.isArray(slotsResponse.data) ? slotsResponse.data : []);
-      setRequests(Array.isArray(requestsResponse.data) ? requestsResponse.data : []);
-      setSessions(Array.isArray(sessionsResponse.data) ? sessionsResponse.data : []);
-
-      if (mode === "user") {
-        const entitlementsResponse = await premiumApi.get<MentorshipEntitlement[]>("/mentorship/entitlements/me");
-        setEntitlements(Array.isArray(entitlementsResponse.data) ? entitlementsResponse.data : []);
-      } else {
-        setEntitlements([]);
+      let nextRequests = Array.isArray(requestRes.data) ? requestRes.data : [];
+      if (seriesId) nextRequests = nextRequests.filter((row) => row.series_id === seriesId);
+      const nextSessions = Array.isArray(sessionRes.data) ? sessionRes.data : [];
+      const submissionIds = Array.from(new Set(nextRequests.map((row) => row.submission_id).filter(Boolean))) as number[];
+      const fetched = await Promise.all(
+        submissionIds.map(async (id) => {
+          try {
+            return [String(id), (await premiumApi.get<MainsCopySubmission>(`/copy-submissions/${id}`)).data] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const nextSubmissions: Record<string, MainsCopySubmission> = {};
+      for (const item of fetched) {
+        if (!item) continue;
+        nextSubmissions[item[0]] = item[1];
       }
+      setRequests(nextRequests);
+      setSessions(nextSessions);
+      setSubmissions(nextSubmissions);
+      setSelectedRequestId((current) => current && nextRequests.some((row) => row.id === current) ? current : nextRequests[0]?.id || null);
     } catch (error: unknown) {
-      if (!silent) {
-        toast.error("Failed to load mentorship management", { description: toError(error) });
-        setSlots([]);
-        setRequests([]);
-        setSessions([]);
-        setEntitlements([]);
-        setSeriesById({});
-        setTestsById({});
-        setSubmissionById({});
-      }
+      toast.error("Failed to load mentorship workspace", { description: toError(error) });
     } finally {
-      if (silent) {
-        setRefreshing(false);
-      } else {
-        setBusy(false);
-      }
+      setBusy(false);
     }
   };
 
   useEffect(() => {
-    if (loading) return;
-    void loadAll();
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, isAuthenticated, mode, canScheduleMentorship]);
+  }, [mode, seriesId, isAuthenticated]);
 
-  const filteredRequests = useMemo(
-    () => {
-      if (!seriesId) return requests;
-      if (mode !== "provider") {
-        return requests.filter((row) => row.series_id === seriesId);
-      }
-      return requests.filter((row) => row.series_id === seriesId || isDirectProfileBooking(row));
-    },
-    [mode, requests, seriesId],
-  );
-
-  const filteredRequestIdSet = useMemo(
-    () => new Set(filteredRequests.map((row) => row.id)),
-    [filteredRequests],
-  );
-
-  const filteredSessions = useMemo(
-    () => (seriesId ? sessions.filter((row) => filteredRequestIdSet.has(row.request_id)) : sessions),
-    [sessions, seriesId, filteredRequestIdSet],
-  );
+  useEffect(() => {
+    const requestIds = requests.map((request) => request.id);
+    const filter = buildRealtimeRequestFilter(requestIds);
+    if (!filter || !user?.id) return;
+    const supabase = createSupabaseClient();
+    const channel = supabase
+      .channel(`mentorship-queue-${mode}-${requestIds.join("-")}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "mentorship_messages", filter },
+        (payload) => {
+          const row = payload.new as { request_id?: number; sender_user_id?: string } | undefined;
+          const requestId = Number(row?.request_id || 0);
+          if (requestId <= 0 || row?.sender_user_id === user.id || row?.sender_user_id === "system") return;
+          setRequests((current) =>
+            current.map((request) => {
+              if (request.id !== requestId || request.id === selectedRequestId) return request;
+              const nextUnread = requestUnreadCount(request) + 1;
+              return {
+                ...request,
+                meta: { ...(request.meta || {}), viewer_unread_message_count: nextUnread, viewer_has_unread_messages: true },
+              };
+            }),
+          );
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [mode, requests, selectedRequestId, user?.id]);
 
   const sessionByRequestId = useMemo(() => {
-    const map: Record<string, MentorshipSession> = {};
-    for (const row of filteredSessions) {
-      const key = String(row.request_id);
-      const existing = map[key];
-      if (!existing || (existing.status !== "live" && row.status === "live")) {
-        map[key] = row;
-      }
-    }
-    return map;
-  }, [filteredSessions]);
+    const output: Record<string, MentorshipSession> = {};
+    for (const row of sessions) output[String(row.request_id)] = row;
+    return output;
+  }, [sessions]);
 
-  useEffect(() => {
-    setSlotOfferDraftByRequestId((prev) => {
-      const next: Record<string, number[]> = {};
-      for (const request of filteredRequests) {
-        const key = String(request.id);
-        const existing = prev[key];
-        const offered = (Array.isArray(request.meta?.offered_slot_ids) ? request.meta.offered_slot_ids : [])
-          .map((value) => Number(value))
-          .filter((value, index, array) => Number.isFinite(value) && value > 0 && array.indexOf(value) === index);
-        next[key] = existing && existing.length > 0 ? existing : offered;
-      }
-      return next;
-    });
-  }, [filteredRequests]);
-
-  useEffect(() => {
-    const next: Record<string, DirectSubmissionReviewDraft> = {};
-    for (const submission of Object.values(submissionById)) {
-      if ((submission.test_collection_id || 0) > 0) continue;
-      next[String(submission.id)] = buildDirectSubmissionReviewDraft(submission);
-    }
-    setDirectReviewDrafts(next);
-  }, [submissionById]);
-
-  const mentorStatusProviderIds = useMemo(() => {
-    const values: string[] = [];
-    const pushValue = (value: unknown) => {
-      const id = String(value || "").trim();
-      if (id && !values.includes(id)) values.push(id);
-    };
-    for (const request of filteredRequests) {
-      pushValue(request.provider_user_id);
-    }
-    if (mode === "user") {
-      pushValue(standaloneProviderId);
-    }
-    return values;
-  }, [filteredRequests, mode, standaloneProviderId]);
-
-  const selectedStandaloneMentorStatus = useMemo(
-    () => mentorStatusByProviderId[String(standaloneProviderId || "").trim()] || null,
-    [mentorStatusByProviderId, standaloneProviderId],
-  );
-  const selectedMentorAvailabilityDays = useMemo(
-    () => buildAvailabilityDays(selectedMentorSlots, 14),
-    [selectedMentorSlots],
-  );
-  const selectedMentorDay = useMemo(
-    () => selectedMentorAvailabilityDays.find((day) => day.dateKey === selectedMentorDateKey) || null,
-    [selectedMentorAvailabilityDays, selectedMentorDateKey],
-  );
-  const selectedMentorSlot = useMemo(
-    () => selectedMentorSlots.find((slot) => slot.id === selectedMentorSlotId) || null,
-    [selectedMentorSlotId, selectedMentorSlots],
-  );
-  const recentLearnerBookings = useMemo(
+  const derived = useMemo<DerivedRequestRow[]>(
     () =>
-      filteredRequests
-        .filter((request) => request.status === "scheduled" && Boolean(requestMetaDate(request, "booked_by_user_at")))
-        .sort((left, right) => {
-          const leftTime = new Date(requestMetaDate(left, "booked_by_user_at") || left.requested_at).getTime();
-          const rightTime = new Date(requestMetaDate(right, "booked_by_user_at") || right.requested_at).getTime();
-          return rightTime - leftTime;
-        }),
-    [filteredRequests],
+      requests.map((request) => {
+        const submission = request.submission_id ? submissions[String(request.submission_id)] || null : null;
+        const session = sessionByRequestId[String(request.id)] || null;
+        const offeredSlotCount = Math.max(requestOfferedSlotIds(request).length, request.booking_open ? 1 : 0);
+        const stage = resolveMentorshipWorkflowStage(request, session, submission, offeredSlotCount);
+        return { request, submission, session, offeredSlotCount, stage };
+      }),
+    [requests, sessionByRequestId, submissions],
   );
-  const recentLearnerBookingCount = recentLearnerBookings.length;
-  const recentLearnerBookingSignature = useMemo(() => {
-    const latestBooking = recentLearnerBookings[0];
-    if (!latestBooking) return null;
-    return `${latestBooking.id}:${requestMetaDate(latestBooking, "booked_by_user_at") || latestBooking.updated_at || latestBooking.requested_at}`;
-  }, [recentLearnerBookings]);
 
-  const pendingRequests = filteredRequests.filter((row) => row.status === "requested").length;
-  const scheduledRequests = filteredRequests.filter((row) => row.status === "scheduled").length;
-  const completedRequests = filteredRequests.filter((row) => row.status === "completed").length;
-  const backFallbackHref = seriesId ? `/test-series/${seriesId}` : prefillMentorUserId ? "/mentors" : "/test-series";
-  const handlerTabLabel = canScheduleMentorship ? "Admin Oversight" : "Mentor Desk";
-  const handlerPanelTitle = canScheduleMentorship ? "Admin Workflow Oversight" : "Mentor Delivery Queue";
-  const handlerPanelDescription = canScheduleMentorship
-    ? "Admins can monitor every mentorship workflow and step in only for older non-copy requests that still need manual slot assignment."
-    : "Publish availability, review copies, offer mentorship slots after checking, and complete audio or video calls from one mentor workspace.";
-  const providerDescription =
-    canManageMentorSlots && providerAspect === "availability"
-      ? "Manage direct copy-evaluation settings, publish day-wise calendar availability, and block specific dates from the mentor workspace."
-      : handlerPanelDescription;
-  const userDescription =
-    "Track direct mentorship bookings and copy-evaluation workflows. For reviewed copies, the mentor first checks the submission, then offers one or more call slots for you to accept.";
+  const queue = useMemo(() => {
+    if (mode !== "provider") return derived;
+    return derived.filter(({ request, stage }) => {
+      if (tab === "new_requests") return request.status === "requested";
+      if (tab === "active_conversations") return request.status === "accepted" || ["paid", "evaluating", "feedback_ready", "booking_open"].includes(stage);
+      if (tab === "upcoming_calls") return ["scheduled", "live"].includes(stage);
+      return ["completed", "cancelled", "expired"].includes(stage) || ["completed", "cancelled", "rejected", "expired"].includes(request.status);
+    });
+  }, [derived, mode, tab]);
 
-  useEffect(() => {
-    if (mode === "provider" && canManageMentorSlots && recentLearnerBookingCount > 0 && providerAspect === "availability") {
-      setProviderAspect("calls");
-    }
-  }, [canManageMentorSlots, mode, providerAspect, recentLearnerBookingCount]);
+  const queueCounts = useMemo(() => {
+    const learnerCount = (rows: DerivedRequestRow[]) => new Set(rows.map((row) => row.request.user_id)).size;
+    return {
+      new_requests: learnerCount(derived.filter(({ request }) => request.status === "requested")),
+      active_conversations: learnerCount(derived.filter(({ stage, request }) => request.status === "accepted" || ["paid", "evaluating", "feedback_ready", "booking_open"].includes(stage))),
+      upcoming_calls: learnerCount(derived.filter(({ stage }) => ["scheduled", "live"].includes(stage))),
+      completed: learnerCount(
+        derived.filter(
+          ({ request, stage }) =>
+            ["completed", "cancelled", "expired"].includes(stage) ||
+            ["completed", "cancelled", "rejected", "expired"].includes(request.status),
+        ),
+      ),
+    };
+  }, [derived]);
 
-  useEffect(() => {
-    if (mode !== "provider" || !canManageMentorSlots) {
-      latestLearnerBookingSignatureRef.current = recentLearnerBookingSignature;
-      return;
-    }
-    if (!recentLearnerBookingSignature) {
-      latestLearnerBookingSignatureRef.current = null;
-      return;
-    }
-
-    if (
-      latestLearnerBookingSignatureRef.current &&
-      latestLearnerBookingSignatureRef.current !== recentLearnerBookingSignature
-    ) {
-      const latestBooking = recentLearnerBookings[0];
-      const scheduledFor = latestBooking ? requestMetaDate(latestBooking, "scheduled_slot_starts_at") : null;
-      toast.success("New learner booking received", {
-        description: scheduledFor
-          ? `Scheduled for ${formatDateTime(scheduledFor)}.`
-          : "A learner booked one of your 20-minute mentorship slots.",
-      });
-    }
-
-    latestLearnerBookingSignatureRef.current = recentLearnerBookingSignature;
-  }, [canManageMentorSlots, mode, recentLearnerBookingSignature, recentLearnerBookings]);
-
-  useEffect(() => {
-    if (selectedMentorDateKey && !selectedMentorAvailabilityDays.some((day) => day.dateKey === selectedMentorDateKey)) {
-      setSelectedMentorDateKey(null);
-    }
-    if (selectedMentorSlotId && !selectedMentorSlots.some((slot) => slot.id === selectedMentorSlotId)) {
-      setSelectedMentorSlotId(null);
-    }
-  }, [selectedMentorAvailabilityDays, selectedMentorDateKey, selectedMentorSlotId, selectedMentorSlots]);
-
-  useEffect(() => {
-    if (!isAuthenticated || filteredRequests.length === 0) {
-      if (filteredRequests.length === 0) {
-        setSeriesById({});
-        setTestsById({});
-        setSubmissionById({});
+  const groupedQueue = useMemo(() => {
+    const grouped = new Map<string, { latest: DerivedRequestRow; rows: DerivedRequestRow[] }>();
+    for (const row of queue) {
+      const existing = grouped.get(row.request.user_id);
+      if (!existing) {
+        grouped.set(row.request.user_id, { latest: row, rows: [row] });
+        continue;
       }
+      existing.rows.push(row);
+      const currentLatestTime = new Date(existing.latest.request.requested_at).getTime();
+      const nextTime = new Date(row.request.requested_at).getTime();
+      if (nextTime >= currentLatestTime) existing.latest = row;
+    }
+    return Array.from(grouped.entries())
+      .map(([userId, value]) => ({
+        userId,
+        ...value,
+      }))
+      .sort(
+        (left, right) =>
+          new Date(right.latest.request.requested_at).getTime() - new Date(left.latest.request.requested_at).getTime(),
+      );
+  }, [queue]);
+
+  const selected = useMemo(() => {
+    const source = mode === "provider" ? groupedQueue.map((entry) => entry.latest) : derived;
+    return source.find((item) => item.request.id === selectedRequestId) || source[0] || null;
+  }, [derived, mode, groupedQueue, selectedRequestId]);
+
+  const selectedLearnerHistory = useMemo(
+    () =>
+      selected
+        ? derived
+          .filter((item) => item.request.user_id === selected.request.user_id)
+          .sort((left, right) => new Date(right.request.requested_at).getTime() - new Date(left.request.requested_at).getTime())
+          .slice(0, 5)
+        : [],
+    [derived, selected],
+  );
+
+  const selectedRequestIdValue = selected?.request.id || null;
+  const selectedProviderUserId = selected?.request.provider_user_id || null;
+  const selectedUnreadCount = selected ? requestUnreadCount(selected.request) : 0;
+
+  useEffect(() => {
+    if (!selectedRequestIdValue || !selectedProviderUserId) {
+      setMessages([]);
+      setSlots([]);
       return;
     }
+    let active = true;
+    Promise.all([
+      premiumApi.get<MentorshipMessage[]>(`/mentorship/requests/${selectedRequestIdValue}/messages`),
+      premiumApi.get<MentorshipSlot[]>("/mentorship/slots", { params: { provider_user_id: selectedProviderUserId, only_available: false } }),
+    ]).then(([messageRes, slotRes]) => {
+      if (!active) return;
+      setMessages(Array.isArray(messageRes.data) ? messageRes.data : []);
+      setSlots(Array.isArray(slotRes.data) ? slotRes.data : []);
+      if (selected && requestUnreadCount(selected.request) > 0) {
+        void premiumApi.post(`/mentorship/requests/${selectedRequestIdValue}/messages/read`).then(() => {
+          if (!active) return;
+          setRequests((current) =>
+            current.map((row) =>
+              row.id === selectedRequestIdValue
+                ? {
+                    ...row,
+                    meta: { ...(row.meta || {}), viewer_unread_message_count: 0, viewer_has_unread_messages: false },
+                  }
+                : row,
+            ),
+          );
+        }).catch(() => undefined);
+      }
+    }).catch(() => {
+      if (!active) return;
+      setMessages([]);
+      setSlots([]);
+    });
+    return () => {
+      active = false;
+    };
+  }, [selected, selectedProviderUserId, selectedRequestIdValue]);
 
-    let cancelled = false;
+  useEffect(() => {
+    const submission = selected?.submission;
+    setEtaText(submission?.provider_eta_text || "");
+    setCheckedCopyUrl(submission?.checked_copy_pdf_url || "");
+    setProviderNote(submission?.provider_note || "");
+    setTotalMarks(submission?.total_marks !== null && submission?.total_marks !== undefined ? String(submission.total_marks) : "");
+    setOfferSlotIds([]);
+  }, [selected?.request.id, selected?.submission]);
 
-    void (async () => {
-      const uniqueSeriesIds = Array.from(
-        new Set(
-          filteredRequests
-            .map((row) => Number(row.series_id || 0))
-            .filter((value) => Number.isFinite(value) && value > 0),
-        ),
-      );
-      const uniqueSubmissionIds = Array.from(
-        new Set(
-          filteredRequests
-            .map((row) => Number(row.submission_id || 0))
-            .filter((value) => Number.isFinite(value) && value > 0),
-        ),
-      );
-
-      try {
-        const [seriesEntries, testEntries, submissionEntries] = await Promise.all([
-          Promise.all(
-            uniqueSeriesIds.map(async (id) => {
-              try {
-                const response = await premiumApi.get<TestSeries>(`/test-series/${id}`);
-                return [String(id), response.data] as const;
-              } catch {
-                return null;
-              }
-            }),
-          ),
-          Promise.all(
-            uniqueSeriesIds.map(async (id) => {
-              try {
-                const response = await premiumApi.get<TestSeriesTest[]>(`/test-series/${id}/tests`, {
-                  params: { include_inactive: true },
-                });
-                return Array.isArray(response.data) ? response.data : [];
-              } catch {
-                return [] as TestSeriesTest[];
-              }
-            }),
-          ),
-          Promise.all(
-            uniqueSubmissionIds.map(async (id) => {
-              try {
-                const response = await premiumApi.get<MainsCopySubmission>(`/copy-submissions/${id}`);
-                return [String(id), response.data] as const;
-              } catch {
-                return null;
-              }
-            }),
-          ),
-        ]);
-
-        if (cancelled) return;
-
-        const nextSeriesById: Record<string, TestSeries> = {};
-        for (const entry of seriesEntries) {
-          if (!entry) continue;
-          nextSeriesById[entry[0]] = entry[1];
-        }
-
-        const nextTestsById: Record<string, TestSeriesTest> = {};
-        for (const rows of testEntries) {
-          for (const row of rows) {
-            nextTestsById[String(row.id)] = row;
+  useEffect(() => {
+    if (!selectedRequestIdValue) return;
+    const supabase = createSupabaseClient();
+    const channel = supabase
+      .channel(`mentor-request-${selectedRequestIdValue}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "mentorship_messages",
+          filter: `request_id=eq.${selectedRequestIdValue}`,
+        },
+        (payload) => {
+          const row = payload.new as MentorshipMessage | undefined;
+          if (!row?.id) return;
+          setMessages((current) => mergeMentorshipMessages(current, row));
+          if (String(row.sender_user_id || "") !== String(user?.id || "") && row.sender_user_id !== "system") {
+            void premiumApi.post(`/mentorship/requests/${selectedRequestIdValue}/messages/read`).catch(() => undefined);
+            setRequests((current) =>
+              current.map((request) =>
+                request.id === selectedRequestIdValue
+                  ? {
+                      ...request,
+                      meta: { ...(request.meta || {}), viewer_unread_message_count: 0, viewer_has_unread_messages: false },
+                    }
+                  : request,
+              ),
+            );
           }
-        }
-
-        const nextSubmissionById: Record<string, MainsCopySubmission> = {};
-        for (const entry of submissionEntries) {
-          if (!entry) continue;
-          nextSubmissionById[entry[0]] = entry[1];
-        }
-
-        setSeriesById(nextSeriesById);
-        setTestsById(nextTestsById);
-        setSubmissionById(nextSubmissionById);
-      } catch {
-        if (!cancelled) {
-          setSeriesById({});
-          setTestsById({});
-          setSubmissionById({});
-        }
-      }
-    })();
-
+        },
+      )
+      .subscribe();
     return () => {
-      cancelled = true;
+      void supabase.removeChannel(channel);
     };
-  }, [filteredRequests, isAuthenticated]);
+  }, [selectedRequestIdValue, user?.id]);
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setMentorStatusByProviderId({});
-      return;
-    }
-    if (mentorStatusProviderIds.length === 0) {
-      setMentorStatusByProviderId({});
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = await premiumApi.get<MentorAvailabilityStatus[]>("/mentorship/mentors/status", {
-          params: {
-            provider_user_ids: mentorStatusProviderIds.join(","),
-            include_offline: true,
-            limit: Math.min(mentorStatusProviderIds.length, 500),
-          },
-        });
-        if (cancelled) return;
-        const map: Record<string, MentorAvailabilityStatus> = {};
-        for (const row of Array.isArray(response.data) ? response.data : []) {
-          const providerUserId = String(row.provider_user_id || "").trim();
-          if (!providerUserId) continue;
-          map[providerUserId] = row;
-        }
-        setMentorStatusByProviderId(map);
-      } catch {
-        if (!cancelled) {
-          setMentorStatusByProviderId({});
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isAuthenticated, mentorStatusProviderIds]);
-
-  useEffect(() => {
-    if (mode !== "user") {
-      setSelectedMentorSlots([]);
-      return;
-    }
-
-    const providerUserId = String(standaloneProviderId || "").trim();
-    if (!providerUserId) {
-      setSelectedMentorSlots([]);
-      return;
-    }
-
-    setSelectedMentorDateKey(null);
-    setSelectedMentorSlotId(null);
-    void loadSelectedMentorSlots(providerUserId);
-  }, [mode, standaloneProviderId]);
-
-  const scheduleRequest = async (requestId: number) => {
-    if (!canScheduleMentorship) {
-      toast.error("Admin or moderator access is required to assign mentorship time");
-      return;
-    }
-    const slotId = Number(slotByRequestId[String(requestId)] || 0);
-    if (!slotId) {
-      toast.error("Select a slot first");
-      return;
-    }
-    try {
-      await premiumApi.post(`/mentorship/requests/${requestId}/schedule`, { slot_id: slotId });
-      toast.success("Request scheduled");
-      await loadAll({ silent: true });
-    } catch (error: unknown) {
-      toast.error("Failed to schedule request", { description: toError(error) });
-    }
-  };
-
-  const startRequestNow = async (requestId: number) => {
-    if (!canOperateMentorSessions) {
-      toast.error("Mains Mentor access is required to start immediate sessions");
-      return;
-    }
-
-    const key = String(requestId);
-    const scheduledSession = sessionByRequestId[key] || null;
-    const scheduledSlot = slots.find((slot) => slot.id === scheduledSession?.slot_id) || null;
-    const callProvider =
-      scheduledSession?.call_provider ||
-      scheduledSlot?.call_provider ||
-      null;
-    setStartNowBusyByRequestId((prev) => ({ ...prev, [key]: true }));
-    try {
-      const meetingLink = String(startNowMeetingLinkByRequestId[key] || "").trim();
-      await premiumApi.post(`/mentorship/requests/${requestId}/start-now`, {
-        call_provider: callProvider,
-        duration_minutes: 45,
-        meeting_link: meetingLink || null,
-      });
-      toast.success("Immediate mentorship session started");
-      setStartNowMeetingLinkByRequestId((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-      await loadAll({ silent: true });
-    } catch (error: unknown) {
-      toast.error("Failed to start immediate session", { description: toError(error) });
-    } finally {
-      setStartNowBusyByRequestId((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-    }
-  };
-
-  const updateRequestStatus = async (
-    requestId: number,
-    status: "rejected" | "completed" | "cancelled",
-  ) => {
-    if (status === "rejected" && !canScheduleMentorship) {
-      toast.error("Admin or moderator access is required to reject requests");
-      return;
-    }
-    if (status === "completed" && !(canOperateMentorSessions || canScheduleMentorship)) {
-      toast.error("Mains Mentor, moderator, or admin access is required to complete requests");
-      return;
-    }
+  const mutateRequest = async (requestId: number, status: "accepted" | "rejected") => {
+    setActionBusy(`${status}-${requestId}`);
     try {
       await premiumApi.put(`/mentorship/requests/${requestId}/status`, { status });
-      toast.success("Request updated");
-      await loadAll({ silent: true });
+      toast.success(status === "accepted" ? "Request accepted" : "Request rejected");
+      await load();
     } catch (error: unknown) {
-      toast.error("Failed to update request", { description: toError(error) });
-    }
-  };
-
-  const bookStandaloneSlot = async () => {
-    const providerId = standaloneProviderId.trim();
-    if (!providerId) {
-      toast.error("Mains Mentor user id is required");
-      return;
-    }
-    if (!selectedMentorSlot) {
-      toast.error("Select an available 20-minute slot first");
-      return;
-    }
-
-    setBookingSlotId(selectedMentorSlot.id);
-    try {
-      await premiumApi.post("/mentorship/requests", {
-        provider_user_id: providerId,
-        slot_id: selectedMentorSlot.id,
-        preferred_mode: selectedMentorSlot.mode,
-        note: toNullableRichText(standaloneNote),
-      });
-      toast.success("Mentorship slot booked. The mentor can now see it in Calls & Records.");
-      setStandaloneNote("");
-      setSelectedMentorSlotId(null);
-      await Promise.all([loadAll({ silent: true }), loadSelectedMentorSlots(providerId)]);
-    } catch (error: unknown) {
-      toast.error("Failed to book mentorship slot", { description: toError(error) });
+      toast.error("Request update failed", { description: toError(error) });
     } finally {
-      setBookingSlotId(null);
+      setActionBusy(null);
     }
   };
 
-  const updateDirectReviewDraft = (
-    submissionId: number,
-    updater: (draft: DirectSubmissionReviewDraft) => DirectSubmissionReviewDraft,
-  ) => {
-    setDirectReviewDrafts((prev) => {
-      const current = prev[String(submissionId)];
-      if (!current) return prev;
-      return { ...prev, [String(submissionId)]: updater(current) };
-    });
-  };
-
-  const saveDirectSubmissionEta = async (submissionId: number) => {
-    const draft = directReviewDrafts[String(submissionId)];
-    if (!draft) return;
-    setSavingEtaSubmissionId(submissionId);
+  const sendMessage = async (requestId: number) => {
+    if (!messageBody.trim()) return;
+    setActionBusy(`chat-${requestId}`);
     try {
-      await premiumApi.put(`/copy-submissions/${submissionId}/eta`, {
-        provider_eta_hours: draft.etaHours.trim() ? Number(draft.etaHours) : undefined,
-        provider_eta_text: draft.etaText.trim() || undefined,
-      });
-      toast.success("Checking ETA updated");
-      await loadAll({ silent: true });
+      const response = await premiumApi.post<MentorshipMessage>(`/mentorship/requests/${requestId}/messages`, { body: messageBody.trim() });
+      setMessages((current) => mergeMentorshipMessages(current, response.data));
+      setMessageBody("");
     } catch (error: unknown) {
-      toast.error("Failed to update ETA", { description: toError(error) });
+      toast.error("Message failed", { description: toError(error) });
     } finally {
-      setSavingEtaSubmissionId(null);
+      setActionBusy(null);
     }
-  };
-
-  const saveDirectSubmissionReview = async (submissionId: number) => {
-    const draft = directReviewDrafts[String(submissionId)];
-    if (!draft) return;
-    setSavingReviewSubmissionId(submissionId);
-    try {
-      await premiumApi.put(`/copy-submissions/${submissionId}/checked-copy`, {
-        checked_copy_pdf_url: draft.checkedCopyUrl.trim() || undefined,
-        total_marks: draft.totalMarks.trim() ? Number(draft.totalMarks) : undefined,
-        provider_note: toNullableRichText(draft.providerNote) || undefined,
-      });
-      toast.success("Copy review saved");
-      await loadAll({ silent: true });
-    } catch (error: unknown) {
-      toast.error("Failed to save review", { description: toError(error) });
-    } finally {
-      setSavingReviewSubmissionId(null);
-    }
-  };
-
-  const toggleOfferedSlot = (requestId: number, slotId: number) => {
-    setSlotOfferDraftByRequestId((prev) => {
-      const key = String(requestId);
-      const current = prev[key] || [];
-      const next = current.includes(slotId)
-        ? current.filter((value) => value !== slotId)
-        : [...current, slotId].sort((left, right) => left - right);
-      return { ...prev, [key]: next };
-    });
   };
 
   const offerSlots = async (requestId: number) => {
-    const payload: MentorshipRequestOfferSlotsPayload = {
-      slot_ids: slotOfferDraftByRequestId[String(requestId)] || [],
-    };
-    if (payload.slot_ids.length === 0) {
-      toast.error("Select at least one mentor slot first");
+    if (!offerSlotIds.length) {
+      toast.error("Select at least one slot.");
       return;
     }
-
-    setOfferingSlotsRequestId(requestId);
+    setActionBusy(`offer-${requestId}`);
     try {
-      await premiumApi.post(`/mentorship/requests/${requestId}/offer-slots`, payload);
-      toast.success("Mentor slot options shared");
-      await loadAll({ silent: true });
+      await premiumApi.post(`/mentorship/requests/${requestId}/offer-slots`, { slot_ids: offerSlotIds });
+      toast.success("Slot booking opened");
+      await load();
     } catch (error: unknown) {
-      toast.error("Failed to offer slots", { description: toError(error) });
+      toast.error("Failed to open slot booking", { description: toError(error) });
     } finally {
-      setOfferingSlotsRequestId(null);
+      setActionBusy(null);
     }
   };
 
-  const acceptOfferedSlot = async (requestId: number, slotId: number) => {
-    const requestSlotKey = `${requestId}:${slotId}`;
-    setAcceptingSlotKey(requestSlotKey);
+  const startSessionNow = async (requestId: number) => {
+    setActionBusy(`start-now-${requestId}`);
     try {
-      await premiumApi.post(`/mentorship/requests/${requestId}/accept-slot`, { slot_id: slotId });
-      toast.success("Mentor slot accepted");
-      await loadAll({ silent: true });
+      const response = await premiumApi.post<MentorshipSession>(`/mentorship/requests/${requestId}/start-now`, {});
+      toast.success("Session started");
+      await load();
+      if (response.data?.id) {
+        router.push(`/mentorship/session/${response.data.id}?autojoin=1`);
+      }
     } catch (error: unknown) {
-      toast.error("Failed to accept mentor slot", { description: toError(error) });
+      toast.error("Failed to start session", { description: toError(error) });
     } finally {
-      setAcceptingSlotKey(null);
+      setActionBusy(null);
     }
   };
 
-  const grantEntitlement = async () => {
-    if (!canGrantEntitlements) {
-      toast.error("Admin or moderator access is required to grant entitlements");
-      return;
-    }
-    const targetUserId = grantUserId.trim();
-    if (!targetUserId) {
-      toast.error("Target user id is required");
-      return;
-    }
-    const sessionsCount = Number(grantSessions);
-    if (!Number.isFinite(sessionsCount) || sessionsCount <= 0) {
-      toast.error("Sessions must be at least 1");
-      return;
-    }
-
+  const saveEta = async (submissionId: number) => {
+    setActionBusy(`eta-${submissionId}`);
     try {
-      await premiumApi.post("/mentorship/entitlements/grant", {
-        user_id: targetUserId,
-        sessions: sessionsCount,
-        source: "manual",
+      await premiumApi.put(`/copy-submissions/${submissionId}/eta`, { provider_eta_text: etaText || undefined, provider_note: providerNote || undefined });
+      toast.success("ETA saved");
+      await load();
+    } catch (error: unknown) {
+      toast.error("Failed to save ETA", { description: toError(error) });
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  const submitEvaluation = async (submissionId: number) => {
+    setActionBusy(`evaluation-${submissionId}`);
+    try {
+      await premiumApi.put(`/copy-submissions/${submissionId}/checked-copy`, {
+        checked_copy_pdf_url: checkedCopyUrl || undefined,
+        total_marks: totalMarks ? Number(totalMarks) : undefined,
+        provider_note: providerNote || undefined,
       });
-      toast.success("Entitlement granted");
-      setGrantUserId("");
-      setGrantSessions("1");
+      toast.success("Evaluation submitted");
+      await load();
     } catch (error: unknown) {
-      toast.error("Failed to grant entitlement", { description: toError(error) });
+      toast.error("Failed to submit evaluation", { description: toError(error) });
+    } finally {
+      setActionBusy(null);
     }
   };
 
-  const mentorOwnedSlots = useMemo(
-    () =>
-      slots.filter(
-        (slot) =>
-          slot.provider_user_id === currentUserId &&
-          Boolean(slot.is_active) &&
-          new Date(slot.ends_at).getTime() >= Date.now(),
-      ),
-    [currentUserId, slots],
-  );
+  if (busy) return <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading mentorship workspace...</div>;
+  if (!isAuthenticated) return <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Sign in to access mentorship.</div>;
 
-  const upcomingSessions = useMemo(
-    () =>
-      [...filteredSessions]
-        .filter((session) => {
-          const endsAt = new Date(session.ends_at).getTime();
-          return endsAt >= Date.now() && (session.status === "scheduled" || session.status === "live");
-        })
-        .sort((left, right) => new Date(left.starts_at).getTime() - new Date(right.starts_at).getTime()),
-    [filteredSessions],
-  );
-
-  const recordedSessions = useMemo(
-    () =>
-      [...filteredSessions]
-        .filter((session) => {
-          const endsAt = new Date(session.ends_at).getTime();
-          return session.status === "completed" || session.status === "cancelled" || endsAt < Date.now();
-        })
-        .sort((left, right) => new Date(right.starts_at).getTime() - new Date(left.starts_at).getTime()),
-    [filteredSessions],
-  );
-
-  if (loading || busy) {
-    return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading mentorship management...</div>;
+  if (mode === "user") {
+    return (
+      <div className="space-y-4">
+        {providerCapable ? <button type="button" onClick={() => setModeOverride("provider")} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">Open mentor queue</button> : null}
+        {derived.map(({ request, submission, session, offeredSlotCount }) => (
+          <article key={request.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-lg font-semibold text-slate-900">Request #{request.id}</p>
+            <p className="mt-1 text-sm text-slate-600">{mentorshipKindLabel(request, submission)}</p>
+            <p className="mt-1 text-sm text-slate-600">{mentorshipCurrentStatusLabel(request, session, submission, offeredSlotCount)}</p>
+            <p className="mt-1 text-sm text-slate-600">{mentorshipNextActionLabel(request, session, submission, offeredSlotCount)}</p>
+            <p className="mt-3 text-sm text-slate-500">{plainTextExcerpt(request.note)}</p>
+            <Link href={`/my-purchases/mentorship/${request.id}`} className="mt-4 inline-flex rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Open request</Link>
+          </article>
+        ))}
+        {!derived.length ? <p className="text-sm text-slate-500">No mentorship requests yet.</p> : null}
+      </div>
+    );
   }
 
-  if (!isAuthenticated) {
-    return <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">Sign in to manage mentorship.</div>;
-  }
+  const offerableSlots = slots.filter((slot) => new Date(slot.ends_at).getTime() > Date.now() && slot.is_active);
+  const totalLearnersInDesk = new Set(derived.map((item) => item.request.user_id)).size;
+  const selectedSession = selected?.session ?? null;
+  const selectedSessionDuration = selectedSession ? sessionDurationMinutes(selectedSession) : null;
+  const selectedLearnerName = selected ? requestLabel(selected.request) : "Learner";
+  const selectedLearnerEmail = selected ? requestEmail(selected.request) : "";
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="space-y-1">
-          <HistoryBackButton
-            fallbackHref={backFallbackHref}
-            label="Back"
-            className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
-            iconClassName="h-4 w-4"
-          />
-          <h1 className="text-2xl font-bold text-slate-900">
-            {mode === "provider" && canScheduleMentorship ? "Admin Mentorship Oversight" : "Mains Mentorship Management"}
-          </h1>
-          <p className="text-sm text-slate-600">
-            {mode === "provider" ? providerDescription : userDescription}
-          </p>
-          {seriesId ? (
-            <p className="text-xs text-slate-500">
-              Filtered for series #{seriesId}. Direct mentor-profile bookings are also shown here.
-            </p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {canViewHandlerPanel ? (
-            <div className="inline-flex rounded border border-slate-300 p-0.5 text-xs">
-              <button type="button" onClick={() => setMode("provider")} className={`rounded px-2 py-1 ${mode === "provider" ? "bg-slate-900 text-white" : "text-slate-600"}`}>{handlerTabLabel}</button>
-              <button type="button" onClick={() => setMode("user")} className={`rounded px-2 py-1 ${mode === "user" ? "bg-slate-900 text-white" : "text-slate-600"}`}>User</button>
-            </div>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => void loadAll({ silent: true })}
-            disabled={refreshing}
-            className="inline-flex items-center gap-1 rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-60"
-          >
-            <RefreshCcw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-            {refreshing ? "Refreshing..." : "Refresh"}
+    <div className="space-y-8">
+      <section className="overflow-hidden rounded-[30px] border border-[#d8def4] bg-[radial-gradient(circle_at_top_left,_rgba(226,232,255,0.95),_rgba(255,255,255,1)_46%,_rgba(239,246,255,0.95)_100%)] p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-3xl">
+            <p className="text-xs font-black uppercase tracking-[0.3em] text-[#1d3b8b]">Mentorship Desk</p>
+            <p className="mt-3 text-sm text-slate-600">Review learner requests, reply in chat, and move accepted requests into payment or live session.</p>
+          </div>
+          <button type="button" onClick={() => setModeOverride("user")} className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700">
+            Open learner view
           </button>
         </div>
+
+        <div className="mt-6 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+          <article className="rounded-[28px] bg-[#0b1c5a] p-6 text-white shadow-lg shadow-[#0b1c5a]/15">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-300">Learners In Desk</p>
+                <p className="mt-3 text-5xl font-black tracking-tight">{totalLearnersInDesk}</p>
+              </div>
+              <div className="rounded-[22px] bg-white/10 p-4 text-white">
+                <UserRound className="h-8 w-8" />
+              </div>
+            </div>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">New Requests</p>
+                <p className="mt-2 text-2xl font-black">{queueCounts.new_requests}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">Active</p>
+                <p className="mt-2 text-2xl font-black">{queueCounts.active_conversations}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">Upcoming</p>
+                <p className="mt-2 text-2xl font-black">{queueCounts.upcoming_calls}</p>
+              </div>
+            </div>
+          </article>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <article className="rounded-[24px] border border-sky-200 bg-sky-100/70 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-white/70 p-3 text-sky-700">
+                  <MessagesSquare className="h-6 w-6" />
+                </div>
+                <p className="text-4xl font-black tracking-tight text-[#091a4a]">{queueCounts.new_requests}</p>
+              </div>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-sky-900">New Requests</p>
+              <p className="mt-2 text-sm text-slate-600">Learners waiting for an accept or reject decision.</p>
+            </article>
+            <article className="rounded-[24px] border border-slate-200 bg-white p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-slate-100 p-3 text-[#091a4a]">
+                  <CreditCard className="h-6 w-6" />
+                </div>
+                <p className="text-4xl font-black tracking-tight text-[#091a4a]">{queueCounts.active_conversations}</p>
+              </div>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Active Conversations</p>
+              <p className="mt-2 text-sm text-slate-600">Paid work moving through review, feedback, or booking open.</p>
+            </article>
+            <article className="rounded-[24px] border border-slate-200 bg-white p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-slate-100 p-3 text-[#091a4a]">
+                  <CalendarDays className="h-6 w-6" />
+                </div>
+                <p className="text-4xl font-black tracking-tight text-[#091a4a]">{queueCounts.upcoming_calls}</p>
+              </div>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Scheduled Sessions</p>
+              <p className="mt-2 text-sm text-slate-600">Learners already booked into live or scheduled consultations.</p>
+            </article>
+            <article className="rounded-[24px] border border-slate-200 bg-white p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-slate-100 p-3 text-[#091a4a]">
+                  <FileText className="h-6 w-6" />
+                </div>
+                <p className="text-4xl font-black tracking-tight text-[#091a4a]">{queueCounts.completed}</p>
+              </div>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Completed Work</p>
+              <p className="mt-2 text-sm text-slate-600">Archived mentorship requests and evaluations.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <div className="flex flex-wrap gap-2">
+        {(["new_requests", "active_conversations", "upcoming_calls", "completed"] as QueueTab[]).map((value) => (
+          <button key={value} type="button" onClick={() => setTab(value)} className={`rounded-full px-4 py-2 text-sm font-semibold ${tab === value ? "bg-[#091a4a] text-white" : "border border-slate-300 bg-white text-slate-700"}`}>
+            {value.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())} ({queueCounts[value]})
+          </button>
+        ))}
       </div>
 
-      <section className={`grid gap-2 text-xs ${mode === "provider" ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
-        <div className="rounded border border-slate-200 bg-slate-50 p-3"><p className="text-slate-500">{canScheduleMentorship && mode === "provider" ? "Pending workflows" : "Pending requests"}</p><p className="font-semibold text-slate-900">{pendingRequests}</p></div>
-        <div className="rounded border border-slate-200 bg-slate-50 p-3"><p className="text-slate-500">Scheduled requests</p><p className="font-semibold text-slate-900">{scheduledRequests}</p></div>
-        <div className="rounded border border-slate-200 bg-slate-50 p-3"><p className="text-slate-500">Completed requests</p><p className="font-semibold text-slate-900">{completedRequests}</p></div>
-        {mode === "provider" ? (
-          <div className="rounded border border-emerald-200 bg-emerald-50 p-3">
-            <p className="text-emerald-700">Learner bookings</p>
-            <p className="font-semibold text-emerald-900">{recentLearnerBookingCount}</p>
+      <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div>
+            <h2 className="text-xl font-black tracking-tight text-slate-900">Learner Queue</h2>
+            <p className="mt-1 text-sm text-slate-500">Each learner appears once here. Open the card to manage the latest request and see recent history.</p>
           </div>
-        ) : null}
-      </section>
-
-      {mode === "provider" && canManageMentorSlots ? (
-        <section className="rounded-xl border border-slate-200 bg-white p-2">
-          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs">
-            <button
-              type="button"
-              onClick={() => setProviderAspect("availability")}
-              className={`rounded px-3 py-1.5 font-semibold ${providerAspect === "availability" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}
-            >
-              Availability & Settings
-            </button>
-            <button
-              type="button"
-              onClick={() => setProviderAspect("calls")}
-              className={`rounded px-3 py-1.5 font-semibold ${providerAspect === "calls" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}
-            >
-              Calls & Records{recentLearnerBookingCount > 0 ? ` (${recentLearnerBookingCount})` : ""}
-            </button>
-          </div>
-        </section>
-      ) : null}
-
-      {mode === "provider" ? (
-        <div className="space-y-6">
-          {(!canManageMentorSlots || providerAspect === "availability") ? (
-            canManageMentorSlots ? (
-              <MentorshipAvailabilityManager slots={mentorOwnedSlots} onRefresh={() => loadAll({ silent: true })} />
-            ) : (
-              <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-                <h2 className="text-lg font-semibold text-slate-900">Mentor Slot Reference</h2>
-                <p className="text-xs text-slate-600">
-                  Admin sees the same published mentor availability here. Manual assignment is kept only as a fallback for older non-copy workflows.
-                </p>
-                <div className="space-y-2">
-                  {slots.map((slot) => (
-                    <div key={slot.id} className="rounded border border-slate-200 bg-slate-50 p-2 text-xs">
-                      <p className="font-semibold text-slate-800">{slot.title || `Slot #${slot.id}`}</p>
-                      <p className="text-slate-600">{new Date(slot.starts_at).toLocaleString()} - {new Date(slot.ends_at).toLocaleString()}</p>
-                      <p className="text-slate-500">Mentor: {slot.provider_user_id}</p>
-                      <p className="text-slate-600">Bookings: {slot.booked_count}/{slot.max_bookings}</p>
+          <div className="mt-5 space-y-3">
+            {groupedQueue.map(({ userId, latest, rows }) => {
+              const active = selected?.request.id === latest.request.id;
+              const learnerName = requestLabel(latest.request);
+              const learnerEmail = requestEmail(latest.request);
+              const unreadCount = rows.reduce((total, row) => total + requestUnreadCount(row.request), 0);
+              return (
+                <button key={userId} type="button" onClick={() => setSelectedRequestId(latest.request.id)} className={`w-full rounded-[24px] border p-4 text-left transition-colors ${active ? "border-[#091a4a] bg-[#091a4a] text-white" : "border-slate-200 bg-slate-50/80 text-slate-900 hover:bg-slate-100"}`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-sm font-black ${active ? "bg-white/10 text-white" : "bg-sky-100 text-[#091a4a]"}`}>
+                      {initialsFromLabel(learnerName || learnerEmail)}
                     </div>
-                  ))}
-                  {slots.length === 0 ? <p className="text-sm text-slate-500">No slots published yet.</p> : null}
-                </div>
-              </section>
-            )
-          ) : null}
-
-          {(!canManageMentorSlots || providerAspect === "calls") ? (
-            <div className="grid gap-6 lg:grid-cols-[1.35fr_1fr]">
-              <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-                <h2 className="text-lg font-semibold text-slate-900">{handlerPanelTitle}</h2>
-                <p className="text-xs text-slate-600">{handlerPanelDescription}</p>
-                {recentLearnerBookingCount > 0 ? (
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                    <p className="font-semibold">New learner bookings are waiting for you.</p>
-                    <p className="mt-1">
-                      {recentLearnerBookingCount} booking{recentLearnerBookingCount === 1 ? "" : "s"} were made directly from your
-                      public profile and are listed first below.
-                    </p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="truncate text-base font-black tracking-tight">{learnerName}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {unreadCount > 0 ? (
+                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${active ? "border-emerald-200/30 bg-emerald-300/15 text-emerald-100" : "border-emerald-300 bg-emerald-50 text-emerald-800"}`}>
+                              {unreadCount === 1 ? "1 new reply" : `${unreadCount} new replies`}
+                            </span>
+                          ) : null}
+                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${active ? "border-white/20 bg-white/10 text-slate-100" : requestStatusBadgeClass(latest.request.status)}`}>
+                            {titleCaseLabel(latest.request.status)}
+                          </span>
+                        </div>
+                      </div>
+                      <p className={`mt-1 truncate text-xs ${active ? "text-slate-200" : "text-slate-500"}`}>{learnerEmail || mentorshipKindLabel(latest.request, latest.submission)}</p>
+                      <p className={`mt-2 text-xs ${active ? "text-slate-200" : "text-slate-600"}`}>{mentorshipCurrentStatusLabel(latest.request, latest.session, latest.submission, latest.offeredSlotCount)}</p>
+                      <p className={`mt-2 line-clamp-2 text-xs ${active ? "text-slate-300" : "text-slate-500"}`}>{plainTextExcerpt(latest.request.note)}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${active ? "border-white/20 bg-white/10 text-slate-100" : paymentStatusBadgeClass(latest.request.payment_status)}`}>
+                          {titleCaseLabel(latest.request.payment_status)}
+                        </span>
+                        <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${active ? "border-white/20 bg-white/10 text-slate-100" : "border-slate-200 bg-white text-slate-600"}`}>
+                          {rows.length} request{rows.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                ) : null}
-                <div className="space-y-2">
-                  {filteredRequests.map((request) => {
-                    const requestSession = sessionByRequestId[String(request.id)] || null;
-                    const mentorStatus = mentorStatusByProviderId[request.provider_user_id] || null;
-                    const requestSeries = request.series_id ? seriesById[String(request.series_id)] || null : null;
-                    const requestTest = request.test_collection_id ? testsById[String(request.test_collection_id)] || null : null;
-                    const requestSubmission = request.submission_id ? submissionById[String(request.submission_id)] || null : null;
-                    const scheduledSlot = slots.find((slot) => slot.id === request.scheduled_slot_id) || null;
-                    const isCopyFlow = isCopyEvaluationFlow(request, requestSubmission);
-                    const isDirectSubmission = Boolean(requestSubmission && (requestSubmission.test_collection_id || 0) <= 0);
-                    const directReviewDraft =
-                      requestSubmission && isDirectSubmission ? directReviewDrafts[String(requestSubmission.id)] || null : null;
-                    const acceptedAt = requestMetaDate(request, "accepted_at");
-                    const bookedByUserAt = requestMetaDate(request, "booked_by_user_at");
-                    const scheduledFor = requestMetaDate(request, "scheduled_slot_starts_at");
-                    const scheduledByAdminAt = requestMetaDate(request, "scheduled_by_admin_at");
-                    const startNowBusy = Boolean(startNowBusyByRequestId[String(request.id)]);
-                    const canOpenImmediateSession = canOperateMentorSessions && request.status === "scheduled";
-                    const resolvedCallProvider =
-                      requestSession?.call_provider ||
-                      scheduledSlot?.call_provider ||
-                      (String(request.meta?.call_provider || "").trim().toLowerCase() === "zoom" ? "zoom" : "custom");
-                    const matchingSlots = slots.filter(
-                      (slot) =>
-                        slot.provider_user_id === request.provider_user_id &&
-                        new Date(slot.ends_at).getTime() > Date.now(),
-                    );
-                    const offerableSlots = matchingSlots.filter(
-                      (slot) => (slot.booked_count || 0) < (slot.max_bookings || 1) && Boolean(slot.is_active),
-                    );
-                    const offeredSlots = offeredSlotsForRequest(request, slots);
-                    const selectedOfferedSlotIds = slotOfferDraftByRequestId[String(request.id)] || [];
-                    const workflowSteps = buildMentorshipWorkflowSteps({
-                      request,
-                      session: requestSession,
-                      submission: requestSubmission,
-                      offeredSlotCount: offeredSlots.length,
-                    });
-                    const currentStatus = mentorshipCurrentStatusLabel(
-                      request,
-                      requestSession,
-                      requestSubmission,
-                      offeredSlots.length,
-                    );
-                    const nextAction = mentorshipNextActionLabel(
-                      request,
-                      requestSession,
-                      requestSubmission,
-                      offeredSlots.length,
-                    );
-                    const canAssignSlot =
-                      canScheduleMentorship &&
-                      !isCopyFlow &&
-                      (request.status === "requested" || request.status === "scheduled");
-                    const canRejectRequest = canScheduleMentorship && request.status === "requested";
-                    const canOfferSlots =
-                      canManageMentorSlots &&
-                      request.status === "requested" &&
-                      (!isCopyFlow || requestSubmission?.status === "checked");
-                    const canMarkComplete =
-                      (canOperateMentorSessions || canScheduleMentorship) &&
-                      (request.status === "scheduled" || requestSession?.status === "live");
-                    const providerNextAction =
-                      request.status === "completed" || requestSession?.status === "completed"
-                        ? "Workflow delivered successfully."
-                        : requestSession?.status === "live"
-                          ? "Keep the live session running or complete it once delivered."
-                          : isCopyFlow && requestSubmission?.status !== "checked"
-                            ? "Finish the copy evaluation before mentorship can move ahead."
-                            : canOfferSlots && offeredSlots.length === 0
-                              ? "Offer one or more mentor slots after review."
-                              : request.status === "requested" && offeredSlots.length > 0
-                                ? "Waiting for the learner to accept one of the shared slots."
-                                : request.status === "scheduled"
-                                  ? "Run the scheduled session and mark it complete after delivery."
-                                  : canAssignSlot
-                                    ? "Assign a published mentor slot to move this request forward."
-                                    : nextAction;
+                </button>
+              );
+            })}
+            {groupedQueue.length === 0 ? <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">No learners in this queue.</p> : null}
+          </div>
+        </div>
 
-                    return (
-                      <div id={`request-${request.id}`} key={request.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-lg font-semibold text-slate-900">Request #{request.id}</p>
-                              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-600">
-                                {isCopyFlow ? "Copy Evaluation + Mentorship" : "Direct Mentorship"}
-                              </span>
-                              {bookedByUserAt ? (
-                                <span className="rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-[11px] font-semibold text-emerald-800">
-                                  New learner booking
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="mt-2 text-sm text-slate-600">Learner: <span className="font-semibold text-slate-900">{request.user_id}</span></p>
-                            <p className="text-sm text-slate-600">Mentor: <span className="font-semibold text-slate-900">{request.provider_user_id}</span></p>
-                          </div>
-
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 xl:max-w-sm">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-700">
-                                {currentStatus}
-                              </span>
-                              <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${mentorStatusBadgeClass(mentorStatus)}`}>
-                                Mentor {mentorStatusLabel(mentorStatus)}
-                              </span>
-                            </div>
-                            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Next action</p>
-                            <p className="mt-1 font-semibold text-slate-900">{providerNextAction}</p>
-                          </div>
-                        </div>
-
-                        <div className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                            <p>Requested: <span className="font-semibold text-slate-900">{formatDateTime(request.requested_at)}</span></p>
-                            <p>Call setup: <span className="font-semibold text-slate-900">{mentorshipCallLabel(request.preferred_mode, resolvedCallProvider)}</span></p>
-                            {requestSeries ? <p>Series: <span className="font-semibold text-slate-900">{requestSeries.title}</span></p> : null}
-                            {requestTest ? <p>Test: <span className="font-semibold text-slate-900">{requestTest.title}</span></p> : null}
-                            {acceptedAt ? <p>Accepted: <span className="font-semibold text-slate-900">{formatDateTime(acceptedAt)}</span></p> : null}
-                            {bookedByUserAt ? <p>Booked by learner: <span className="font-semibold text-slate-900">{formatDateTime(bookedByUserAt)}</span></p> : null}
-                            {scheduledFor ? <p>Scheduled for: <span className="font-semibold text-slate-900">{formatDateTime(scheduledFor)}</span></p> : null}
-                            {scheduledByAdminAt ? <p>Assigned by admin: <span className="font-semibold text-slate-900">{formatDateTime(scheduledByAdminAt)}</span></p> : null}
-                          </div>
-
-                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                            {requestSession?.slot_id ? (
-                              <p>Slot #{requestSession.slot_id}: <span className="font-semibold text-slate-900">{formatDateTime(requestSession.starts_at)} - {formatDateTime(requestSession.ends_at)}</span></p>
-                            ) : (
-                              <p>No mentorship slot assigned yet.</p>
-                            )}
-                            {requestSession ? (
-                              <p className="mt-1">Platform: <span className="font-semibold text-slate-900">{mentorshipCallLabel(requestSession.mode, requestSession.call_provider)}</span></p>
-                            ) : scheduledSlot ? (
-                              <p className="mt-1">Platform: <span className="font-semibold text-slate-900">{mentorshipCallLabel(scheduledSlot.mode, scheduledSlot.call_provider)}</span></p>
-                            ) : null}
-                            {requestSession?.call_provider === "zoom_video_sdk" && requestSession.status !== "cancelled" ? (
-                              <Link href={`/mentorship/session/${requestSession.id}`} className="mt-2 inline-flex text-sm font-semibold text-indigo-700 hover:underline">
-                                Open in-app room
-                              </Link>
-                            ) : requestSession?.meeting_link && requestSession.status !== "cancelled" ? (
-                              <a href={(canOperateMentorSessions || canScheduleMentorship) && requestSession.provider_host_url ? requestSession.provider_host_url : requestSession.meeting_link} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-sm font-semibold text-indigo-700 hover:underline">
-                                {requestSession.call_provider === "zoom" ? "Join Zoom" : "Open call link"}
-                              </a>
-                            ) : null}
-                            {mentorStatus?.available_now && request.status === "requested" && !isCopyFlow ? (
-                              <p className="mt-2 text-emerald-700">Mentor is available now, but the request still needs a clear slot assignment.</p>
-                            ) : null}
-                            {request.status === "requested" && matchingSlots.length === 0 && (canScheduleMentorship || canManageMentorSlots) ? (
-                              <p className="mt-2 text-amber-700">No active future slot exists for this mentor yet. Publish availability before offering or assigning time.</p>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        <div className="mt-4">
-                          <WorkflowProgressTrack steps={workflowSteps} />
-                        </div>
-
-                        {requestSubmission ? (
-                          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
-                            <p className="font-semibold text-slate-900">Submission #{requestSubmission.id}</p>
-                            <p className="mt-1">Learner: {requestSubmission.user_id}</p>
-                            {requestSubmission.provider_eta_hours || requestSubmission.provider_eta_text ? (
-                              <p className="mt-1">
-                                ETA:
-                                {requestSubmission.provider_eta_hours ? ` ${requestSubmission.provider_eta_hours} hour(s)` : ""}
-                                {requestSubmission.provider_eta_text ? ` | ${requestSubmission.provider_eta_text}` : ""}
-                              </p>
-                            ) : null}
-                            {requestSubmission.learner_note ? (
-                              <div className="mt-2">
-                                <p className="font-semibold text-slate-700">Learner note</p>
-                                <RichTextContent value={requestSubmission.learner_note} className="text-[11px] text-slate-600 [&_p]:my-1" />
-                              </div>
-                            ) : null}
-                            {requestSubmission.provider_note ? (
-                              <div className="mt-2">
-                                <p className="font-semibold text-slate-700">Mentor note</p>
-                                <RichTextContent value={requestSubmission.provider_note} className="text-[11px] text-slate-600 [&_p]:my-1" />
-                              </div>
-                            ) : null}
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {requestSubmission.answer_pdf_url ? (
-                                <a href={requestSubmission.answer_pdf_url ?? undefined} target="_blank" rel="noreferrer" className="text-indigo-700 hover:underline">
-                                  Answer PDF
-                                </a>
-                              ) : null}
-                              {requestSubmission.checked_copy_pdf_url ? (
-                                <a href={requestSubmission.checked_copy_pdf_url} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">
-                                  Checked Copy
-                                </a>
-                              ) : null}
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {request.note ? (
-                          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                            <p className="font-semibold text-slate-700">Order note</p>
-                            <RichTextContent value={request.note} className="mt-1 text-xs text-slate-600 [&_p]:my-1" />
-                          </div>
-                        ) : null}
-                        {requestSubmission && requestSubmission.status !== "checked" && requestTest && canManageMentorSlots ? (
-                          <div className="mt-2 rounded border border-slate-200 bg-white p-2 text-[11px] text-slate-600">
-                            <p>This submission still needs review before slots can be offered.</p>
-                            <Link href={`/collections/${requestSubmission.test_collection_id}/mains-test`} className="mt-2 inline-flex rounded border border-emerald-300 bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
-                              Open Writing Desk Review
-                            </Link>
-                          </div>
-                        ) : null}
-                        {requestSubmission && isDirectSubmission && directReviewDraft && canManageMentorSlots ? (
-                          <div className="mt-2 rounded border border-slate-200 bg-white p-3 text-[11px] text-slate-700">
-                            <p className="font-semibold text-slate-900">Direct Copy Review</p>
-                            <div className="mt-2 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-                              <input
-                                type="number"
-                                min={1}
-                                value={directReviewDraft.etaHours}
-                                onChange={(event) =>
-                                  updateDirectReviewDraft(requestSubmission.id, (draft) => ({ ...draft, etaHours: event.target.value }))
-                                }
-                                className="rounded border border-slate-300 px-2 py-1 text-xs"
-                                placeholder="ETA hours"
-                              />
-                              <input
-                                value={directReviewDraft.etaText}
-                                onChange={(event) =>
-                                  updateDirectReviewDraft(requestSubmission.id, (draft) => ({ ...draft, etaText: event.target.value }))
-                                }
-                                className="rounded border border-slate-300 px-2 py-1 text-xs"
-                                placeholder="ETA note"
-                              />
-                              <button
-                                type="button"
-                                disabled={savingEtaSubmissionId === requestSubmission.id}
-                                onClick={() => void saveDirectSubmissionEta(requestSubmission.id)}
-                                className="rounded border border-slate-300 bg-white px-2 py-1 text-xs disabled:opacity-60"
-                              >
-                                {savingEtaSubmissionId === requestSubmission.id ? "Saving..." : "Save ETA"}
-                              </button>
-                            </div>
-                            <div className="mt-2 grid gap-2 md:grid-cols-2">
-                              <input
-                                value={directReviewDraft.checkedCopyUrl}
-                                onChange={(event) =>
-                                  updateDirectReviewDraft(requestSubmission.id, (draft) => ({ ...draft, checkedCopyUrl: event.target.value }))
-                                }
-                                className="rounded border border-slate-300 px-2 py-1 text-xs"
-                                placeholder="Checked copy PDF URL"
-                              />
-                              <input
-                                type="number"
-                                min={0}
-                                step="0.5"
-                                value={directReviewDraft.totalMarks}
-                                onChange={(event) =>
-                                  updateDirectReviewDraft(requestSubmission.id, (draft) => ({ ...draft, totalMarks: event.target.value }))
-                                }
-                                className="rounded border border-slate-300 px-2 py-1 text-xs"
-                                placeholder="Total marks"
-                              />
-                            </div>
-                            <RichTextField
-                              label="Mentor feedback note"
-                              value={directReviewDraft.providerNote}
-                              onChange={(value) =>
-                                updateDirectReviewDraft(requestSubmission.id, (draft) => ({ ...draft, providerNote: value }))
-                              }
-                              className="mt-2"
-                              placeholder="Write the learner-facing review note, key findings, and mentorship direction."
-                              helperText="Saved with the checked-copy review and shown back in the workflow."
-                            />
-                            <div className="mt-2 flex justify-end">
-                              <button
-                                type="button"
-                                disabled={savingReviewSubmissionId === requestSubmission.id}
-                                onClick={() => void saveDirectSubmissionReview(requestSubmission.id)}
-                                className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 disabled:opacity-60"
-                              >
-                                {savingReviewSubmissionId === requestSubmission.id ? "Saving..." : "Save Review"}
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
-                        {offeredSlots.length > 0 ? (
-                          <div className="mt-2 rounded border border-slate-200 bg-white p-3 text-[11px] text-slate-700">
-                            <p className="font-semibold text-slate-900">
-                              {request.status === "scheduled" ? "Accepted Mentor Slot" : "Offered Mentor Slots"}
-                            </p>
-                            <div className="mt-2">
-                              <MentorshipSlotOfferList slots={offeredSlots} />
-                            </div>
-                          </div>
-                        ) : null}
-                        {canOfferSlots ? (
-                          <div className="mt-2 rounded border border-emerald-200 bg-emerald-50/60 p-3 text-[11px] text-slate-700">
-                            <p className="font-semibold text-slate-900">Offer Multiple Mentor Slots</p>
-                            <p className="mt-1 text-slate-600">
-                              Pick one or more future slots. The learner can accept only one of the offered options.
-                            </p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {offerableSlots.map((slot) => {
-                                const selected = selectedOfferedSlotIds.includes(slot.id);
-                                return (
-                                  <button
-                                    key={`offer-slot-${request.id}-${slot.id}`}
-                                    type="button"
-                                    onClick={() => toggleOfferedSlot(request.id, slot.id)}
-                                    className={`rounded border px-2 py-1 ${selected
-                                        ? "border-emerald-400 bg-emerald-100 text-emerald-800"
-                                        : "border-slate-300 bg-white text-slate-700"
-                                      }`}
-                                  >
-                                    #{slot.id} {formatDateTime(slot.starts_at)}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            {offerableSlots.length === 0 ? (
-                              <p className="mt-2 text-amber-700">Publish future availability first. Only open future slots can be offered.</p>
-                            ) : null}
-                            <div className="mt-2 flex justify-end">
-                              <button
-                                type="button"
-                                disabled={selectedOfferedSlotIds.length === 0 || offeringSlotsRequestId === request.id}
-                                onClick={() => void offerSlots(request.id)}
-                                className="rounded border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-emerald-700 disabled:opacity-60"
-                              >
-                                {offeringSlotsRequestId === request.id ? "Offering..." : "Offer Selected Slots"}
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          {canScheduleMentorship && !isCopyFlow ? (
-                            <>
-                              <select value={slotByRequestId[String(request.id)] || ""} onChange={(event) => setSlotByRequestId((prev) => ({ ...prev, [String(request.id)]: event.target.value }))} className="rounded border border-slate-300 px-2 py-1 text-xs">
-                                <option value="">Select mentor slot</option>
-                                {matchingSlots.map((slot) => <option key={slot.id} value={String(slot.id)}>#{slot.id} {new Date(slot.starts_at).toLocaleString()}</option>)}
-                              </select>
-                              <button type="button" disabled={!canAssignSlot} onClick={() => void scheduleRequest(request.id)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs disabled:opacity-60">Assign Time</button>
-                            </>
+        <div className="space-y-6">
+          {!selected ? <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Select a request.</div> : (
+            <>
+              <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Learner workspace</p>
+                    <div className="flex items-start gap-4">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-sky-100 text-lg font-black text-[#091a4a]">
+                        {initialsFromLabel(selectedLearnerName || selectedLearnerEmail)}
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className="truncate text-3xl font-black tracking-tight text-slate-900">{selectedLearnerName}</h2>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                          {selectedLearnerEmail ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+                              <Mail className="h-4 w-4" />
+                              {selectedLearnerEmail}
+                            </span>
                           ) : null}
-                          {canOperateMentorSessions ? (
-                            <input
-                              value={startNowMeetingLinkByRequestId[String(request.id)] || ""}
-                              onChange={(event) => setStartNowMeetingLinkByRequestId((prev) => ({ ...prev, [String(request.id)]: event.target.value }))}
-                              className="rounded border border-slate-300 px-2 py-1 text-xs"
-                              placeholder={resolvedCallProvider === "zoom" ? "Zoom link override (optional)" : "Meeting link override (optional)"}
-                            />
-                          ) : null}
-                          {canOperateMentorSessions ? (
-                            <button
-                              type="button"
-                              disabled={!canOpenImmediateSession || startNowBusy}
-                              onClick={() => void startRequestNow(request.id)}
-                              className="rounded border border-emerald-300 bg-white px-2 py-1 text-xs text-emerald-700 disabled:opacity-60"
-                            >
-                              {startNowBusy ? "Starting..." : "Start Scheduled Session"}
-                            </button>
-                          ) : null}
-                          {canRejectRequest ? (
-                            <button type="button" onClick={() => void updateRequestStatus(request.id, "rejected")} className="rounded border border-rose-300 bg-white px-2 py-1 text-xs text-rose-700">Reject</button>
-                          ) : null}
-                          {canMarkComplete ? (
-                            <button type="button" onClick={() => void updateRequestStatus(request.id, "completed")} className="rounded border border-emerald-300 bg-white px-2 py-1 text-xs text-emerald-700">Complete</button>
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+                            <MessageSquareText className="h-4 w-4" />
+                            {mentorshipKindLabel(selected.request, selected.submission)}
+                          </span>
+                          {selectedUnreadCount > 0 ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-emerald-800">
+                              <MessagesSquare className="h-4 w-4" />
+                              {selectedUnreadCount === 1 ? "1 unread learner reply" : `${selectedUnreadCount} unread learner replies`}
+                            </span>
                           ) : null}
                         </div>
                       </div>
-                    );
-                  })}
-                  {filteredRequests.length === 0 ? <p className="text-sm text-slate-500">No mentorship requests.</p> : null}
-                </div>
-
-                {canGrantEntitlements ? (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
-                    <h3 className="font-semibold text-slate-800">Grant Entitlement</h3>
-                    <div className="mt-2 grid gap-2 md:grid-cols-[1fr_120px_auto]">
-                      <input value={grantUserId} onChange={(event) => setGrantUserId(event.target.value)} className="rounded border border-slate-300 px-2 py-1" placeholder="User ID" />
-                      <input type="number" min={1} value={grantSessions} onChange={(event) => setGrantSessions(event.target.value)} className="rounded border border-slate-300 px-2 py-1" placeholder="Sessions" />
-                      <button type="button" disabled={!canGrantEntitlements} onClick={() => void grantEntitlement()} className="rounded bg-indigo-700 px-3 py-1 text-white disabled:opacity-60">Grant</button>
                     </div>
+                    <p className="text-sm text-slate-500">This workspace keeps the learner’s latest request, payment state, session controls, and message thread together.</p>
                   </div>
-                ) : null}
-              </section>
-
-              <div className="space-y-6">
-                {recentLearnerBookingCount > 0 ? (
-                  <section className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <h2 className="text-lg font-semibold text-emerald-900">New Learner Bookings</h2>
-                      <span className="rounded-full border border-emerald-300 bg-white px-2 py-1 text-[11px] font-semibold text-emerald-700">
-                        {recentLearnerBookingCount}
+                  <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Payment Summary</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${paymentStatusBadgeClass(selected.request.payment_status)}`}>
+                        {titleCaseLabel(selected.request.payment_status)}
+                      </span>
+                      <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${requestStatusBadgeClass(selected.request.status)}`}>
+                        {titleCaseLabel(selected.request.status)}
                       </span>
                     </div>
-                    <div className="space-y-2">
-                      {recentLearnerBookings.slice(0, 8).map((request) => {
-                        const requestSession = sessionByRequestId[String(request.id)] || null;
-                        const bookedByUserAt = requestMetaDate(request, "booked_by_user_at");
-                        const scheduledFor = requestMetaDate(request, "scheduled_slot_starts_at");
-                        return (
-                          <a
-                            key={`booking-alert-${request.id}`}
-                            href={`#request-${request.id}`}
-                            className="block rounded border border-emerald-200 bg-white p-3 text-xs transition-colors hover:bg-emerald-50/70"
-                          >
-                            <p className="font-semibold text-slate-900">Request #{request.id}</p>
-                            <p className="mt-1 text-slate-600">Learner {request.user_id}</p>
-                            {bookedByUserAt ? <p className="mt-1 text-emerald-700">Booked at: {formatDateTime(bookedByUserAt)}</p> : null}
-                            {scheduledFor ? <p className="text-slate-600">Scheduled for: {formatDateTime(scheduledFor)}</p> : null}
-                            {requestSession?.slot_id ? <p className="text-slate-500">Slot #{requestSession.slot_id}</p> : null}
-                            <p className="mt-2 font-semibold text-emerald-800">Open main queue card</p>
-                          </a>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ) : null}
-
-                <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-lg font-semibold text-slate-900">Upcoming Calls</h2>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
-                      {upcomingSessions.length}
-                    </span>
+                    <p className="mt-3">
+                      Amount: <span className="font-semibold text-slate-900">{selected.request.payment_currency} {selected.request.payment_amount.toLocaleString()}</span>
+                    </p>
                   </div>
-                  <div className="space-y-2">
-                    {upcomingSessions.map((session) => (
-                      <div key={session.id} className="rounded border border-slate-200 bg-slate-50 p-2 text-xs">
-                        <p className="font-semibold text-slate-800">Call #{session.id} | {session.status}</p>
-                        <p className="text-slate-600">{new Date(session.starts_at).toLocaleString()} - {new Date(session.ends_at).toLocaleString()}</p>
-                        <p className="text-slate-600">Learner: {session.user_id}</p>
-                        <p className="text-slate-600">Platform: {mentorshipCallLabel(session.mode, session.call_provider)}</p>
-                        {session.call_provider === "zoom_video_sdk" ? (
-                          <Link href={`/mentorship/session/${session.id}`} className="text-emerald-700 hover:underline">
-                            Open in-app room
-                          </Link>
-                        ) : session.meeting_link ? (
-                          <a href={((canOperateMentorSessions || canScheduleMentorship) && session.provider_host_url) ? session.provider_host_url : session.meeting_link} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">
-                            {session.call_provider === "zoom" ? "Join Zoom" : "Join meeting"}
-                          </a>
-                        ) : null}
+                </div>
+
+                <div className="mt-5"><WorkflowProgressTrack steps={buildMentorshipWorkflowSteps({ request: selected.request, session: selected.session, submission: selected.submission, offeredSlotCount: selected.offeredSlotCount })} /></div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Request Focus</p>
+                    <p className="mt-2 font-semibold text-slate-900">{mentorshipKindLabel(selected.request, selected.submission)}</p>
+                    <p className="mt-1 text-sm text-slate-500">Preferred mode: {titleCaseLabel(selected.request.preferred_mode)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Current Status</p>
+                    <p className="mt-2 font-semibold text-slate-900">{mentorshipCurrentStatusLabel(selected.request, selected.session, selected.submission, selected.offeredSlotCount)}</p>
+                    <p className="mt-1 text-sm text-slate-500">{mentorshipNextActionLabel(selected.request, selected.session, selected.submission, selected.offeredSlotCount)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Request History</p>
+                    <p className="mt-2 font-semibold text-slate-900">{selectedLearnerHistory.length} learner request{selectedLearnerHistory.length === 1 ? "" : "s"}</p>
+                  </div>
+                </div>
+
+                <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Problem Statement</p>
+                  <div className="mt-3 text-sm text-slate-700">
+                    <RichTextContent value={selected.request.note || "No problem statement attached."} className="[&_p]:my-1 whitespace-pre-wrap" />
+                  </div>
+                  {selected.request.preferred_timing ? <p className="mt-3 text-sm text-slate-600">Preferred timing: <span className="font-semibold text-slate-900">{selected.request.preferred_timing}</span></p> : null}
+                </div>
+
+                <div className="mt-5 rounded-[24px] border border-slate-200 bg-white p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Learner Request History</p>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    {selectedLearnerHistory.map((item) => (
+                      <div key={item.request.id} className={`min-w-[180px] rounded-2xl border px-3 py-3 text-left text-xs ${selected.request.id === item.request.id ? "border-[#091a4a] bg-[#091a4a] text-white" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                        <button type="button" onClick={() => setSelectedRequestId(item.request.id)} className="w-full text-left">
+                          <p className="font-semibold">{titleCaseLabel(item.request.status)}</p>
+                          <p className={`mt-1 ${selected.request.id === item.request.id ? "text-slate-200" : "text-slate-500"}`}>{new Date(item.request.requested_at).toLocaleString()}</p>
+                        </button>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {canStartSessionImmediately(item) ? (
+                            <button
+                              type="button"
+                              onClick={() => void startSessionNow(item.request.id)}
+                              disabled={actionBusy !== null}
+                              className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${selected.request.id === item.request.id ? "bg-white text-[#091a4a]" : "bg-emerald-600 text-white"} disabled:opacity-60`}
+                            >
+                              Start Now
+                            </button>
+                          ) : null}
+                          {item.session ? (
+                            <button
+                              type="button"
+                              onClick={() => router.push(`/mentorship/session/${item.session!.id}?autojoin=1`)}
+                              className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold ${selected.request.id === item.request.id ? "border-white/20 text-white" : "border-slate-300 text-slate-700"}`}
+                            >
+                              {item.session.status === "live" ? "Join Call" : "Open Call"}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
-                    {upcomingSessions.length === 0 ? <p className="text-sm text-slate-500">No upcoming calls yet.</p> : null}
                   </div>
-                </section>
+                </div>
+              </section>
 
-                <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-lg font-semibold text-slate-900">Call Records</h2>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
-                      {recordedSessions.length}
-                    </span>
-                  </div>
-                  <div className="space-y-2">
-                    {recordedSessions.map((session) => (
-                      <div key={session.id} className="rounded border border-slate-200 bg-slate-50 p-2 text-xs">
-                        <p className="font-semibold text-slate-800">Call #{session.id} | {session.status}</p>
-                        <p className="text-slate-600">{new Date(session.starts_at).toLocaleString()}</p>
-                        <p className="text-slate-600">Learner: {session.user_id}</p>
-                        <p className="text-slate-600">Platform: {mentorshipCallLabel(session.mode, session.call_provider)}</p>
-                        {session.summary ? <p className="text-slate-600">Summary: {session.summary}</p> : null}
-                        {session.call_provider === "zoom_video_sdk" ? (
-                          <Link href={`/mentorship/session/${session.id}`} className="text-indigo-700 hover:underline">
-                            Review in-app room
-                          </Link>
-                        ) : session.meeting_link ? (
-                          <a href={session.meeting_link} target="_blank" rel="noreferrer" className="text-indigo-700 hover:underline">
-                            {session.call_provider === "zoom" ? "Open Zoom link" : "Open link"}
-                          </a>
-                        ) : null}
-                      </div>
-                    ))}
-                    {recordedSessions.length === 0 ? <p className="text-sm text-slate-500">No completed or past call records yet.</p> : null}
-                  </div>
-                </section>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-            {normalizedPrefillMentorUserId ? (
-              <>
-                <h2 className="text-lg font-semibold text-slate-900">Book Mentorship Slot</h2>
-                <p className="text-xs text-slate-600">
-                  Choose a day, inspect that mentor&apos;s 20-minute slots, and book one directly. The booked slot is then visible
-                  to both learner and mentor.
-                </p>
-                <p className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-800">
-                  Mains Mentor was preselected from the mentors directory. You can still change the mentor before booking.
-                </p>
-                <input value={standaloneProviderId} onChange={(event) => setStandaloneProviderId(event.target.value)} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" placeholder="Mains Mentor user id" />
-                {standaloneProviderId.trim() ? (
-                  <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs">
-                    <span className={`rounded border px-2 py-0.5 font-semibold ${mentorStatusBadgeClass(selectedStandaloneMentorStatus)}`}>
-                      Mains Mentor {mentorStatusLabel(selectedStandaloneMentorStatus)}
-                    </span>
-                    {selectedStandaloneMentorStatus?.next_available_at ? (
-                      <p className="mt-1 text-slate-600">Next available: {formatDateTime(selectedStandaloneMentorStatus.next_available_at)}</p>
-                    ) : null}
-                  </div>
-                ) : null}
-                {standaloneProviderId.trim() ? (
-                  <MentorAvailabilityCalendar
-                    slots={selectedMentorSlots}
-                    days={14}
-                    title="Mentor Availability Before Booking"
-                    description="Click a day to focus it, then select any open slot to book."
-                    emptyLabel="This mentor has not published any future slots yet."
-                    selectedDateKey={selectedMentorDateKey}
-                    selectedSlotId={selectedMentorSlotId}
-                    bookingSlotId={bookingSlotId}
-                    onSelectDate={(dateKey) => setSelectedMentorDateKey(dateKey)}
-                    onSelectSlot={(slot, dateKey) => {
-                      setSelectedMentorDateKey(dateKey);
-                      setSelectedMentorSlotId(slot.id);
+              <MentorshipChatView
+                    mode={mode}
+                    request={selected.request}
+                    session={selected.session}
+                    submission={selected.submission}
+                    messages={messages}
+                    actionBusy={actionBusy}
+                    offerableSlots={offerableSlots}
+                    
+                    onSendMessage={(body) => sendMessage(selected.request.id)}
+                    
+                    onMutateRequest={(status) => mutateRequest(selected.request.id, status)}
+                    
+                    onStartSession={() => startSessionNow(selected.request.id)}
+                    
+                    onOfferSlots={(slotIds) => {
+                      setOfferSlotIds(slotIds);
+                      // Since MentorshipChatView uses a separate state, we should pass it in or call it directly.
+                      // Wait, offerSlots function in MentorshipManagementView uses the `offerSlotIds` state.
+                      // Let's modify the local offerSlots function to take an argument if needed, or update state first.
                     }}
-                    slotActionLabel="Book This Slot"
+                    
+                    onPayClick={() => {
+                        // The user will pay here
+                        router.push(`/my-purchases/mentorship/${selected.request.id}`);
+                    }}
+                    
+                    onJoinSession={(sessionId) => {
+                       router.push(`/mentorship/session/${sessionId}?autojoin=1`);
+                    }}
                   />
-                ) : null}
-                {selectedMentorDateKey ? (
-                  <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-                    <p className="font-semibold text-slate-900">
-                      Selected day:{" "}
-                      {selectedMentorDay
-                        ? selectedMentorDay.date.toLocaleDateString([], { weekday: "long", day: "numeric", month: "short", year: "numeric" })
-                        : selectedMentorDateKey}
-                    </p>
-                    <p className="mt-1 text-slate-600">
-                      {selectedMentorDay?.availableSlots || 0} open slot{selectedMentorDay?.availableSlots === 1 ? "" : "s"} on
-                      this day.
-                    </p>
-                    {!selectedMentorDay || selectedMentorDay.slots.length === 0 ? (
-                      <p className="mt-1 text-slate-500">No slots are available on this day. Pick another date from the calendar.</p>
-                    ) : null}
-                  </div>
-                ) : null}
-                {selectedMentorSlot ? (
-                  <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                    <p className="font-semibold">Selected slot: {formatSlotTimeRange(selectedMentorSlot)}</p>
-                    <p className="mt-1">
-                      Mode: {selectedMentorSlot.mode} | Capacity {selectedMentorSlot.booked_count}/{selectedMentorSlot.max_bookings}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">No slot selected yet. Pick any open slot from the calendar.</p>
-                )}
-                <RichTextField
-                  label="Topic / context"
-                  value={standaloneNote}
-                  onChange={setStandaloneNote}
-                  placeholder="Describe the issue, subject, or current problem before you book the slot."
-                  helperText="This note is attached to the mentorship request."
-                />
-                <button
-                  type="button"
-                  disabled={!selectedMentorSlot || bookingSlotId !== null}
-                  onClick={() => void bookStandaloneSlot()}
-                  className="rounded bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                >
-                  {bookingSlotId !== null ? "Booking..." : "Book Selected Slot"}
-                </button>
-              </>
-            ) : (
-              <>
-                <h2 className="text-lg font-semibold text-slate-900">Book New Mentorship</h2>
-                <p className="text-sm text-slate-600">
-                  New mentor bookings are now handled from each mentor&apos;s profile page so availability and booking stay on one
-                  screen.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Link href="/mentors" className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
-                    Open Mentors Directory
-                  </Link>
-                  <Link href="/mentorship/manage" className="rounded border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-                    Refresh My Bookings
-                  </Link>
-                </div>
-              </>
-            )}
 
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
-              <h3 className="font-semibold text-slate-800">My entitlements</h3>
-              <div className="mt-2 space-y-1">
-                {entitlements.map((entry) => <div key={entry.id} className="rounded border border-slate-200 bg-white px-2 py-1">{entry.source} | Remaining: {entry.sessions_remaining}</div>)}
-                {entitlements.length === 0 ? <p className="text-slate-500">No active entitlements.</p> : null}
-              </div>
-            </div>
-          </section>
-
-          <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-            <h2 className="text-lg font-semibold text-slate-900">My Mentorship Workflows</h2>
-            <div className="space-y-2">
-              {filteredRequests.map((request) => {
-                const mentorStatus = mentorStatusByProviderId[request.provider_user_id] || null;
-                const requestSession = sessionByRequestId[String(request.id)] || null;
-                const requestSeries = request.series_id ? seriesById[String(request.series_id)] || null : null;
-                const requestTest = request.test_collection_id ? testsById[String(request.test_collection_id)] || null : null;
-                const requestSubmission = request.submission_id ? submissionById[String(request.submission_id)] || null : null;
-                const isCopyFlow = isCopyEvaluationFlow(request, requestSubmission);
-                const offeredSlots = offeredSlotsForRequest(request, slots);
-                const requestAcceptingSlotId = acceptingSlotKey?.startsWith(`${request.id}:`)
-                  ? Number(acceptingSlotKey.split(":")[1] || 0) || null
-                  : null;
-                const acceptedAt = requestMetaDate(request, "accepted_at");
-                const bookedByUserAt = requestMetaDate(request, "booked_by_user_at");
-                const mentorNotifiedAt = requestMetaDate(request, "mentor_notified_at");
-                const scheduledFor = requestMetaDate(request, "scheduled_slot_starts_at");
-                const scheduledByAdminAt = requestMetaDate(request, "scheduled_by_admin_at");
-
-                return (
-                  <div key={request.id} className="rounded border border-slate-200 bg-slate-50 p-2 text-xs">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-semibold text-slate-800">Request #{request.id}</p>
-                        <span className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                          {isCopyFlow ? "Copy Evaluation + Mentorship" : "Direct Mentorship"}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="rounded border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
-                          {mentorshipStatusLabel(request.status)}
-                        </span>
-                        <span className={`rounded border px-2 py-0.5 text-[11px] font-semibold ${mentorStatusBadgeClass(mentorStatus)}`}>
-                          Mains Mentor {mentorStatusLabel(mentorStatus)}
-                        </span>
-                      </div>
+                {selected.submission && mode === "provider" ? (
+                <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm mt-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-2xl font-black tracking-tight text-slate-900">Evaluation Workspace</h3>
+                      <p className="mt-1 text-sm text-slate-500">Set the ETA, upload the checked copy, and leave learner-facing feedback here.</p>
                     </div>
-                    <p className="text-slate-600">Mains Mentor: {request.provider_user_id}</p>
-                    <p className="text-slate-600">Requested: {formatDateTime(request.requested_at)}</p>
-                    <p className="text-slate-600">Preferred mode: {request.preferred_mode}</p>
-                    {requestSeries ? <p className="text-slate-600">Series: {requestSeries.title}</p> : null}
-                    {requestTest ? <p className="text-slate-600">Test: {requestTest.title}</p> : null}
-                    {requestSubmission ? (
-                      <div className="rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-600">
-                        <p className="font-semibold text-slate-800">Submission #{requestSubmission.id}</p>
-                        {requestSubmission.learner_note ? (
-                          <div className="mt-1">
-                            <p className="font-semibold text-slate-700">Learner note</p>
-                            <RichTextContent value={requestSubmission.learner_note} className="text-[11px] text-slate-600 [&_p]:my-1" />
-                          </div>
-                        ) : null}
-                        {requestSubmission.provider_note ? (
-                          <div className="mt-1">
-                            <p className="font-semibold text-slate-700">Mentor note</p>
-                            <RichTextContent value={requestSubmission.provider_note} className="text-[11px] text-slate-600 [&_p]:my-1" />
-                          </div>
-                        ) : null}
-                        <div className="mt-1 flex flex-wrap gap-2">
-                          {requestSubmission.answer_pdf_url ? (
-                            <a href={requestSubmission.answer_pdf_url ?? undefined} target="_blank" rel="noreferrer" className="text-indigo-700 hover:underline">
-                              Answer PDF
-                            </a>
-                          ) : null}
-                          {requestSubmission.checked_copy_pdf_url ? (
-                            <a href={requestSubmission.checked_copy_pdf_url} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">
-                              Checked Copy
-                            </a>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                    {isCopyFlow ? (
-                      <div className="mt-2">
-                        <CopyEvaluationFlowStatus
-                          steps={buildCopyEvaluationFlowSteps(requestSubmission, request, requestSession)}
-                        />
-                      </div>
-                    ) : null}
-                    {requestSubmission?.provider_eta_hours || requestSubmission?.provider_eta_text ? (
-                      <p className="text-slate-600">
-                        Checking ETA:
-                        {requestSubmission.provider_eta_hours ? ` ${requestSubmission.provider_eta_hours} hour(s)` : ""}
-                        {requestSubmission.provider_eta_text ? ` | ${requestSubmission.provider_eta_text}` : ""}
-                      </p>
-                    ) : null}
-                    {acceptedAt ? <p className="text-emerald-700">Approved at: {formatDateTime(acceptedAt)}</p> : null}
-                    {bookedByUserAt ? <p className="text-emerald-700">Booked by you at: {formatDateTime(bookedByUserAt)}</p> : null}
-                    {scheduledFor ? <p className="text-emerald-700">Scheduled for: {formatDateTime(scheduledFor)}</p> : null}
-                    {requestSession?.slot_id ? (
-                      <p className="text-emerald-700">
-                        Slot #{requestSession.slot_id}: {formatDateTime(requestSession.starts_at)} - {formatDateTime(requestSession.ends_at)}
-                      </p>
-                    ) : null}
-                    {scheduledByAdminAt ? <p className="text-emerald-700">Assigned by admin: {formatDateTime(scheduledByAdminAt)}</p> : null}
-                    {mentorNotifiedAt ? <p className="text-emerald-700">Mentor notified in dashboard: {formatDateTime(mentorNotifiedAt)}</p> : null}
-                    {requestSession?.status === "live" ? (
-                      <p className="text-emerald-700">
-                        Mains Mentor is live now
-                        {requestSession.call_provider === "zoom_video_sdk" ? (
-                          <>
-                            {" | "}
-                            <Link href={`/mentorship/session/${requestSession.id}`} className="underline">
-                              Open in-app room
-                            </Link>
-                          </>
-                        ) : requestSession.meeting_link ? (
-                          <>
-                            {" | "}
-                            <a href={(canOperateMentorSessions || canScheduleMentorship) && requestSession.provider_host_url ? requestSession.provider_host_url : requestSession.meeting_link} target="_blank" rel="noreferrer" className="underline">
-                              {requestSession.call_provider === "zoom" ? "Join Zoom" : "Join meeting"}
-                            </a>
-                          </>
-                        ) : null}
-                      </p>
-                    ) : null}
-                    {requestSession?.status === "completed" && requestSession.summary ? (
-                      <p className="text-slate-600">Call summary: {requestSession.summary}</p>
-                    ) : null}
-                    {isCopyFlow && request.status === "requested" && requestSubmission?.status !== "checked" ? (
-                      <p className="text-amber-700">
-                        Waiting for the mentor to finish copy review before mentorship slots can be shared.
-                      </p>
-                    ) : null}
-                    {isCopyFlow && request.status === "requested" && requestSubmission?.status === "checked" && offeredSlots.length === 0 ? (
-                      <p className="text-amber-700">Copy review is complete. Waiting for the mentor to share mentorship slots.</p>
-                    ) : null}
-                    {offeredSlots.length > 0 ? (
-                      <div className="mt-2 rounded border border-emerald-200 bg-emerald-50/60 p-3 text-[11px] text-slate-700">
-                        <p className="font-semibold text-slate-900">Mentor Slot Options</p>
-                        <p className="mt-1 text-slate-600">
-                          {request.status === "requested"
-                            ? "Accept one slot only. Once accepted, the workflow moves directly to the scheduled call stage."
-                            : "Shared slot options remain visible here for reference."}
-                        </p>
-                        <div className="mt-2">
-                          <MentorshipSlotOfferList
-                            slots={offeredSlots}
-                            acceptingSlotId={request.status === "requested" ? requestAcceptingSlotId : null}
-                            onAccept={
-                              request.status === "requested"
-                                ? (slotId) => {
-                                  void acceptOfferedSlot(request.id, slotId);
-                                }
-                                : undefined
-                            }
-                          />
-                        </div>
-                      </div>
-                    ) : null}
-                    {request.note ? (
-                      <div className="mt-1">
-                        <p className="font-semibold text-slate-700">Note</p>
-                        <RichTextContent value={request.note} className="text-xs text-slate-600 [&_p]:my-1" />
-                      </div>
-                    ) : null}
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <Link href={`/my-purchases/mentorship/${request.id}`} className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700">
-                        Open receipt
-                      </Link>
-                      {request.status === "requested" || request.status === "scheduled" ? (
-                        <button type="button" onClick={() => void updateRequestStatus(request.id, "cancelled")} className="rounded border border-rose-300 bg-white px-2 py-1 text-[11px] text-rose-700">Cancel</button>
-                      ) : null}
-                    </div>
+                    {selected.submission.answer_pdf_url ? <a href={selected.submission.answer_pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700">Open Learner Copy <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a> : null}
                   </div>
-                );
-              })}
-              {filteredRequests.length === 0 ? <p className="text-sm text-slate-500">No requests yet.</p> : null}
-            </div>
-
-            <h2 className="pt-2 text-lg font-semibold text-slate-900">My Sessions</h2>
-            <div className="space-y-2">
-              {filteredSessions.map((session) => (
-                <div key={session.id} className="rounded border border-slate-200 bg-slate-50 p-2 text-xs">
-                  <p className="font-semibold text-slate-800">Session #{session.id} | {session.status}</p>
-                  <p className="text-slate-600">{new Date(session.starts_at).toLocaleString()} - {new Date(session.ends_at).toLocaleString()}</p>
-                  <p className="text-slate-600">Mode: {session.mode}</p>
-                  {session.call_provider === "zoom_video_sdk" ? (
-                    <Link href={`/mentorship/session/${session.id}`} className="text-indigo-700 hover:underline">Open in-app room</Link>
-                  ) : session.meeting_link ? (
-                    <a href={(canOperateMentorSessions || canScheduleMentorship) && session.provider_host_url ? session.provider_host_url : session.meeting_link} target="_blank" rel="noreferrer" className="text-indigo-700 hover:underline">
-                      {session.call_provider === "zoom" ? "Join Zoom" : "Join meeting"}
-                    </a>
-                  ) : null}
-                </div>
-              ))}
-              {filteredSessions.length === 0 ? <p className="text-sm text-slate-500">No sessions yet.</p> : null}
-            </div>
-          </section>
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <input value={etaText} onChange={(event) => setEtaText(event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" placeholder="Evaluation ETA" />
+                    <input value={totalMarks} onChange={(event) => setTotalMarks(event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" placeholder="Total marks" />
+                    <input value={checkedCopyUrl} onChange={(event) => setCheckedCopyUrl(event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm md:col-span-2" placeholder="Checked copy URL" />
+                    <textarea value={providerNote} onChange={(event) => setProviderNote(event.target.value)} className="min-h-[140px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm md:col-span-2" placeholder="Strengths, weaknesses, answer quality, and next-step advice" />
+                  </div>
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <button type="button" onClick={() => void saveEta(selected.submission!.id)} disabled={actionBusy !== null} className="rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-60">Save ETA</button>
+                    <button type="button" onClick={() => void submitEvaluation(selected.submission!.id)} disabled={actionBusy !== null} className="rounded-full bg-[#091a4a] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">Submit Evaluation</button>
+                  </div>
+                </section>
+              ) : null}
+            </>
+          )}
         </div>
-      )}
-
-      <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-        <h3 className="mb-1 inline-flex items-center gap-1 text-base font-semibold text-slate-900"><CalendarDays className="h-4 w-4" /> Recommended no-confusion flow</h3>
-        <p>Pure mentorship stays direct: learner books a published slot from the mentor profile and the call is scheduled immediately.</p>
-        <p className="mt-1">Copy evaluation + mentorship stays shared everywhere: copy submission -&gt; mentor ETA -&gt; checked copy -&gt; mentor offers slots -&gt; learner accepts one -&gt; audio/video call -&gt; completion.</p>
-      </section>
+      </div>
     </div>
   );
 }

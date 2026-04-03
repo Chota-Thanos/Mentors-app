@@ -15,6 +15,8 @@ import MainsMentorReviewDesk from "./MainsMentorReviewDesk";
 
 interface MainsCollectionTestRunnerProps {
   collectionId: string;
+  embedded?: boolean;
+  initialPayload?: MainsCollectionTestPayload | null;
 }
 
 const toError = (error: unknown): string => {
@@ -26,30 +28,46 @@ const toError = (error: unknown): string => {
   return "Unknown error";
 };
 
-export default function MainsCollectionTestRunner({ collectionId }: MainsCollectionTestRunnerProps) {
-  const { user } = useAuth();
+export default function MainsCollectionTestRunner({
+  collectionId,
+  embedded = false,
+  initialPayload = null,
+}: MainsCollectionTestRunnerProps) {
+  const { user, loading, isAuthenticated } = useAuth();
   const canReview = useMemo(
     () => isAdminLike(user) || isModeratorLike(user) || isMentorLike(user),
     [user],
   );
-  const [isLoading, setIsLoading] = useState(true);
-  const [payload, setPayload] = useState<MainsCollectionTestPayload | null>(null);
+  const [isLoading, setIsLoading] = useState(!initialPayload);
+  const [payload, setPayload] = useState<MainsCollectionTestPayload | null>(initialPayload);
 
   useEffect(() => {
+    if (initialPayload) {
+      setPayload(initialPayload);
+      setIsLoading(false);
+      return;
+    }
+    if (loading) return;
+    let active = true;
     const load = async () => {
       setIsLoading(true);
       try {
         const response = await premiumApi.get<MainsCollectionTestPayload>(`/collections/${collectionId}/mains-test`);
+        if (!active) return;
         setPayload(response.data);
       } catch (error: unknown) {
+        if (!active) return;
         toast.error("Failed to load mains paper", { description: toError(error) });
         setPayload(null);
       } finally {
-        setIsLoading(false);
+        if (active) setIsLoading(false);
       }
     };
     void load();
-  }, [collectionId]);
+    return () => {
+      active = false;
+    };
+  }, [collectionId, initialPayload, isAuthenticated, loading]);
 
   const totalMarks = useMemo(
     () => payload?.questions.reduce((sum, question) => sum + Number(question.max_marks || 0), 0) || 0,
@@ -77,18 +95,24 @@ export default function MainsCollectionTestRunner({ collectionId }: MainsCollect
       <section className="rounded-2xl border border-slate-200 bg-white p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Mains Writing Desk</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {embedded ? "Mains Paper Flow" : "Mains Writing Desk"}
+            </p>
             <h2 className="text-2xl font-bold text-slate-900">{payload.collection_title}</h2>
             <p className="max-w-3xl text-sm text-slate-600">
-              Read the complete paper here, then submit one combined PDF or question-wise answer photos. Learners do not see answer approaches or model answers on this desk.
+              {embedded
+                ? "This test page now carries the full learner flow. Read the complete paper, submit one combined PDF or question-wise answer photos, then track evaluation and mentorship here."
+                : "Read the complete paper here, then submit one combined PDF or question-wise answer photos. Learners do not see answer approaches or model answers on this desk."}
             </p>
-            {payload.series_id ? (
-              <Link href={`/test-series/${payload.series_id}`} className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-700 hover:text-indigo-900">
-                Open linked series
-              </Link>
-            ) : (
-              <p className="text-xs text-amber-700">This paper is not linked to a test series yet, so learner submissions are disabled.</p>
-            )}
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              {payload.series_id ? (
+                <Link href={`/test-series/${payload.series_id}`} className="inline-flex items-center gap-1 font-semibold text-indigo-700 hover:text-indigo-900">
+                  Open linked series
+                </Link>
+              ) : (
+                <p className="text-amber-700">This paper is not linked to a test series yet, so learner submissions are disabled.</p>
+              )}
+            </div>
           </div>
           <div className="grid min-w-[240px] gap-2 text-xs text-slate-600 sm:grid-cols-2">
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -103,27 +127,28 @@ export default function MainsCollectionTestRunner({ collectionId }: MainsCollect
         </div>
       </section>
 
-      <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6">
-        <div>
-          <h3 className="text-lg font-semibold text-slate-900">Question Paper</h3>
-          <p className="text-sm text-slate-500">All questions, marks, and word limits are visible in one place.</p>
-        </div>
-        <div className="space-y-4">
-          {payload.questions.map((question) => (
-            <article key={`${question.content_item_id}:${question.question_number}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-700">Q{question.question_number}</span>
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700">{question.max_marks} marks</span>
-                <span className="rounded-full bg-sky-100 px-2 py-0.5 font-semibold text-sky-700">{question.word_limit} words</span>
-              </div>
-              <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-800">{question.question_text}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
       {canReview ? (
-        <MainsMentorReviewDesk collectionId={collectionId} payload={payload} totalMarks={totalMarks} />
+        <>
+          <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Question Paper</h3>
+              <p className="text-sm text-slate-500">All questions, marks, and word limits are visible in one place.</p>
+            </div>
+            <div className="space-y-4">
+              {payload.questions.map((question) => (
+                <article key={`${question.content_item_id}:${question.question_number}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                    <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-700">Q{question.question_number}</span>
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700">{question.max_marks} marks</span>
+                    <span className="rounded-full bg-sky-100 px-2 py-0.5 font-semibold text-sky-700">{question.word_limit} words</span>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-800">{question.question_text}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+          <MainsMentorReviewDesk collectionId={collectionId} payload={payload} totalMarks={totalMarks} />
+        </>
       ) : (
         <MainsLearnerSubmissionDesk collectionId={collectionId} payload={payload} />
       )}

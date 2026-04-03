@@ -2,6 +2,8 @@
 
 import React, { useCallback, useMemo, useState, useEffect } from "react";
 import AppLayout from "@/components/layouts/AppLayout";
+import RoleWorkspaceSidebar from "@/components/layouts/RoleWorkspaceSidebar";
+import { getMainsMentorWorkspaceSections } from "@/components/layouts/roleWorkspaceLinks";
 import MainsAIEvaluationSection from "@/components/mains/MainsAIEvaluationSection";
 import MainsCategorySelector from "@/components/mains/MainsCategorySelector";
 import {
@@ -199,6 +201,11 @@ const writeStoredMainsItems = (storageKey: string, items: UserAIMainsQuestion[])
 
 export default function MainsEvaluationPage() {
     const { user, isAuthenticated, showLoginModal } = useAuth();
+    const currentUserId = String(user?.id || "").trim();
+    const mainsMentorWorkspaceSections = useMemo(
+        () => getMainsMentorWorkspaceSections(currentUserId || undefined),
+        [currentUserId],
+    );
     const [mainsMentorMode, setMainsMentorMode] = useState(false);
     const [exampleQuestionsModalItem, setExampleQuestionsModalItem] = useState<PremiumAIExampleAnalysis | null>(null);
     const [requestedCollectionId, setRequestedCollectionId] = useState<number | null>(null);
@@ -848,6 +855,16 @@ export default function MainsEvaluationPage() {
             <AppLayout>
                 <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
                     <div className="container mx-auto py-12 px-4 max-w-7xl">
+                        <div className={mainsMentorMode ? "space-y-6 lg:grid lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0" : ""}>
+                            {mainsMentorMode ? (
+                                <RoleWorkspaceSidebar
+                                    title="Mains Mentor"
+                                    subtitle="Mains generation, series delivery, mentorship queue, and repository management."
+                                    sections={mainsMentorWorkspaceSections}
+                                />
+                            ) : null}
+
+                            <div className="min-w-0">
 
                         <section className="mb-10">
                             <div className="mx-auto max-w-4xl text-center">
@@ -1695,6 +1712,8 @@ export default function MainsEvaluationPage() {
                                         })}
                                     </div>
                                 )}
+                            </div>
+                        </div>
                             </div>
                         </div>
                     </div>

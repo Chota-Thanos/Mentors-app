@@ -144,6 +144,7 @@ export interface CollectionCategoryScore {
 }
 
 export interface CollectionScorePayload {
+  attempt_id?: number | null;
   score: number;
   total_questions: number;
   correct_answers: number;
@@ -151,6 +152,29 @@ export interface CollectionScorePayload {
   unanswered: number;
   details: CollectionScoreDetail[];
   category_wise_results: CollectionCategoryScore[];
+}
+
+export type QuizQuestionComplaintStatus = "received" | "pending" | "resolved";
+
+export interface QuizQuestionComplaint {
+  id: number;
+  collection_id: number;
+  collection_title?: string | null;
+  series_id?: number | null;
+  creator_user_id: string;
+  user_id: string;
+  attempt_id: number;
+  question_item_id: number;
+  question_number: number;
+  question_text: string;
+  selected_option?: string | null;
+  correct_answer?: string | null;
+  complaint_text: string;
+  status: QuizQuestionComplaintStatus;
+  creator_note?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  resolved_at?: string | null;
 }
 
 export interface MainsCollectionTestQuestion {
@@ -451,6 +475,22 @@ export interface ChallengeLeaderboardPayload {
   top_entries: ChallengeLeaderboardEntry[];
 }
 
+export interface PublicChallengeListItem {
+  challenge_id: number;
+  challenge_title: string;
+  challenge_description?: string | null;
+  collection_id: number;
+  collection_title: string;
+  collection_description?: string | null;
+  collection_thumbnail_url?: string | null;
+  test_kind: "prelims" | "mains";
+  question_count: number;
+  total_attempts: number;
+  expires_at?: string | null;
+  share_path: string;
+  share_url?: string | null;
+}
+
 export interface AIInstruction {
   id: number;
   name: string;
@@ -603,6 +643,73 @@ export interface ConvertDraftToPremiumQuizResponse {
 
 export type TestSeriesKind = "mains" | "quiz" | "hybrid";
 export type TestSeriesAccessType = "free" | "subscription" | "paid";
+export type TestSeriesDiscussionMode = "video" | "live_zoom";
+export type TestSeriesDiscussionZoomMode = "auto" | "manual";
+
+export interface TestSeriesDiscussion {
+  delivery_mode: TestSeriesDiscussionMode;
+  title?: string | null;
+  description?: string | null;
+  video_url?: string | null;
+  scheduled_for?: string | null;
+  duration_minutes?: number | null;
+  zoom_schedule_mode?: TestSeriesDiscussionZoomMode | null;
+  meeting_link?: string | null;
+  provider_session_id?: string | null;
+  provider_host_url?: string | null;
+  provider_join_url?: string | null;
+  provider_payload?: Record<string, unknown> | null;
+  starts_when_creator_joins?: boolean;
+}
+
+export interface DiscussionCallContext {
+  scope_type: "series" | "test";
+  scope_id: number;
+  discussion_key: "final_discussion" | "test_discussion";
+  discussion_channel?: string | null;
+  title?: string | null;
+  description?: string | null;
+  scheduled_for?: string | null;
+  duration_minutes?: number | null;
+  call_provider: MentorshipCallProvider;
+  mode: MentorshipMode;
+  participant_role: "host" | "speaker" | "listener";
+  host_controls_enabled: boolean;
+  room_url?: string | null;
+  join_url?: string | null;
+  host_url?: string | null;
+  sdk_user_name?: string | null;
+  sdk_role_type?: number | null;
+  agora_app_id?: string | null;
+  agora_channel?: string | null;
+  agora_token?: string | null;
+  agora_uid?: number | null;
+  provider_payload?: Record<string, unknown> | null;
+  provider_error?: string | null;
+  available_from?: string | null;
+  available_until?: string | null;
+}
+
+export type DiscussionSpeakerRequestStatus = "pending" | "approved" | "rejected" | "withdrawn" | "removed";
+
+export interface DiscussionSpeakerRequest {
+  id: number;
+  scope_type: "series" | "test";
+  scope_id: number;
+  series_id: number;
+  discussion_key: "final_discussion" | "test_discussion";
+  discussion_channel: string;
+  user_id: string;
+  display_name: string;
+  status: DiscussionSpeakerRequestStatus;
+  note?: string | null;
+  requested_at: string;
+  resolved_at?: string | null;
+  resolved_by_user_id?: string | null;
+  meta?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at?: string | null;
+}
 
 export interface TestSeries {
   id: number;
@@ -642,6 +749,51 @@ export interface TestSeriesUpdatePayload {
   access_type?: TestSeriesAccessType;
   price?: number;
   is_public?: boolean;
+  is_active?: boolean;
+  meta?: Record<string, unknown>;
+}
+
+export type TestSeriesProgramItemType = "pdf" | "lecture";
+
+export interface TestSeriesProgramItem {
+  id: number;
+  series_id: number;
+  item_type: TestSeriesProgramItemType;
+  title: string;
+  description?: string | null;
+  resource_url?: string | null;
+  scheduled_for?: string | null;
+  duration_minutes?: number | null;
+  cover_image_url?: string | null;
+  series_order: number;
+  is_active: boolean;
+  meta: Record<string, unknown>;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface TestSeriesProgramItemCreatePayload {
+  item_type: TestSeriesProgramItemType;
+  title: string;
+  description?: string | null;
+  resource_url?: string | null;
+  scheduled_for?: string | null;
+  duration_minutes?: number | null;
+  cover_image_url?: string | null;
+  series_order?: number;
+  is_active?: boolean;
+  meta?: Record<string, unknown>;
+}
+
+export interface TestSeriesProgramItemUpdatePayload {
+  item_type?: TestSeriesProgramItemType;
+  title?: string;
+  description?: string | null;
+  resource_url?: string | null;
+  scheduled_for?: string | null;
+  duration_minutes?: number | null;
+  cover_image_url?: string | null;
+  series_order?: number;
   is_active?: boolean;
   meta?: Record<string, unknown>;
 }
@@ -702,6 +854,29 @@ export interface TestSeriesEnrollment {
   subscribed_until?: string | null;
   created_at: string;
   updated_at?: string | null;
+  meta?: Record<string, unknown>;
+}
+
+export interface TestSeriesPaymentOrder {
+  series_id: number;
+  order_id: string;
+  key_id: string;
+  amount: number;
+  currency: string;
+  amount_display: number;
+  name: string;
+  description: string;
+  prefill: Record<string, string>;
+  notes: Record<string, string>;
+}
+
+export interface TestSeriesPaymentVerificationPayload {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+  access_source: string;
+  subscribed_until?: string | null;
+  payment_method: string;
 }
 
 export interface SubscriptionPlan {
@@ -821,6 +996,13 @@ export interface ProfessionalPublicProfileDetail {
   role_label: string;
   achievements: string[];
   service_specifications: string[];
+  mentorship_price: number;
+  copy_evaluation_price: number;
+  currency: string;
+  response_time_text?: string | null;
+  exam_focus?: string | null;
+  students_mentored?: number | null;
+  sessions_completed?: number | null;
   authenticity_proof_url?: string | null;
   authenticity_note?: string | null;
   mentorship_availability_mode: "open" | "series_only";
@@ -972,8 +1154,23 @@ export interface MainsCheckedCopyPayload {
 }
 
 export type MentorshipMode = "video" | "audio";
-export type MentorshipRequestStatus = "requested" | "scheduled" | "rejected" | "cancelled" | "completed";
+export type MentorshipServiceType = "mentorship_only" | "copy_evaluation_and_mentorship";
+export type MentorshipPaymentStatus = "not_initiated" | "pending" | "paid" | "failed" | "refunded";
+export type MentorshipRequestStatus = "requested" | "accepted" | "scheduled" | "rejected" | "expired" | "cancelled" | "completed";
 export type MentorshipSessionStatus = "scheduled" | "live" | "completed" | "cancelled";
+export type MentorshipWorkflowStage =
+  | "submitted"
+  | "accepted"
+  | "payment_pending"
+  | "paid"
+  | "evaluating"
+  | "feedback_ready"
+  | "booking_open"
+  | "scheduled"
+  | "live"
+  | "completed"
+  | "cancelled"
+  | "expired";
 
 export interface MentorshipEntitlement {
   id: number;
@@ -1037,11 +1234,61 @@ export interface MentorshipRequest {
   submission_id?: number | null;
   preferred_mode: MentorshipMode;
   note?: string | null;
+  preferred_timing?: string | null;
+  service_type: MentorshipServiceType;
   status: MentorshipRequestStatus;
+  payment_status: MentorshipPaymentStatus;
+  payment_amount: number;
+  payment_currency: string;
+  accepted_at?: string | null;
   scheduled_slot_id?: number | null;
+  workflow_stage?: MentorshipWorkflowStage;
+  booking_open?: boolean;
+  feedback_ready_at?: string | null;
+  booking_opened_at?: string | null;
+  join_available?: boolean;
   requested_at: string;
   updated_at?: string | null;
   meta: Record<string, unknown>;
+}
+
+export interface MentorshipMessage {
+  id: number;
+  request_id: number;
+  sender_user_id: string;
+  body: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface MentorshipMessagePayload {
+  body: string;
+}
+
+export interface MentorshipPaymentPayload {
+  payment_method: string;
+  coupon_code?: string | null;
+}
+
+export interface MentorshipPaymentOrder {
+  request_id: number;
+  order_id: string;
+  key_id: string;
+  amount: number;
+  currency: string;
+  amount_display: number;
+  name: string;
+  description: string;
+  prefill: Record<string, string>;
+  notes: Record<string, string>;
+}
+
+export interface MentorshipPaymentVerificationPayload {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+  payment_method: string;
+  coupon_code?: string | null;
 }
 
 export interface MentorshipSession {
@@ -1055,9 +1302,17 @@ export interface MentorshipSession {
   starts_at: string;
   ends_at: string;
   meeting_link?: string | null;
+  provider_session_id?: string | null;
+  provider_host_url?: string | null;
+  provider_join_url?: string | null;
+  provider_payload?: Record<string, unknown>;
+  provider_error?: string | null;
+  live_started_at?: string | null;
+  live_ended_at?: string | null;
   copy_attachment_url?: string | null;
   summary?: string | null;
   status: MentorshipSessionStatus;
+  join_available?: boolean;
   created_at: string;
   updated_at?: string | null;
 }
@@ -1134,10 +1389,15 @@ export interface MentorshipTrackingCycle {
   test_title?: string | null;
   request_status: MentorshipRequestStatus;
   session_status?: MentorshipSessionStatus | null;
+  workflow_stage?: MentorshipWorkflowStage;
+  booking_open?: boolean;
   requested_at: string;
   accepted_at?: string | null;
+  feedback_ready_at?: string | null;
+  booking_opened_at?: string | null;
   scheduled_for?: string | null;
   completed_at?: string | null;
+  join_available?: boolean;
   slot_id?: number | null;
   slot_mode?: MentorshipMode | null;
   note?: string | null;

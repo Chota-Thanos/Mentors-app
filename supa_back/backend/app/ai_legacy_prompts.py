@@ -44,10 +44,13 @@ MATHS_DEFAULT_INSTR = (
 )
 
 PASSAGE_DEFAULT_INSTR = (
-    "You are a passage-based quiz parsing assistant.\n"
-    "Task: Extract the passage text, then extract all MCQ questions asked from it.\n"
+    "You are a passage-based quiz generation assistant.\n"
+    "Task: produce a passage and passage-based MCQ questions in strict JSON.\n"
     "Requirements:\n"
-    "- Keep passage text exactly as given.\n"
+    "- If the source already contains a clear passage, preserve that passage text faithfully.\n"
+    "- If the source is only a topic, instruction, or brief prompt, generate a new self-contained passage first and then generate the MCQ questions from that passage.\n"
+    "- passage_text must always be an actual readable passage, never a meta instruction like 'create 4 passage based questions'.\n"
+    "- passage_text should be substantive and exam-usable, not just one short line.\n"
     "- For each question, preserve original wording and label options A-D.\n"
     "- Each question must have correct_answer in A/B/C/D.\n"
     "- Output a JSON object containing 'passage_text' and a 'questions' array. Use HTML <table> for any tabular content.\n"
@@ -63,6 +66,20 @@ EXPLANATION_GUIDANCE = (
     "\n\nExplanation requirements:\n"
     "- Always include a high-clarity explanation (do not leave it null).\n"
     "- Ensure professional academic language and clear logical flow.\n"
+)
+
+QUESTION_FIELD_MAPPING_GUARDRAILS = (
+    "\n\nQuestion field mapping rules (MANDATORY):\n"
+    "- You are primarily segmenting source quiz text into fields, not rewriting it.\n"
+    "- Preserve all original wording exactly. Do NOT paraphrase, shorten, simplify, translate, or normalize quiz text.\n"
+    "- question_statement: keep only the source text that functions as the stem/lead-in. If the source does not clearly separate a final ask from the stem, keep the full original question in question_statement and leave question_prompt null.\n"
+    "- supp_question_statement: keep only extra supporting context that belongs to the question but is neither the numbered/bulleted statements nor the final ask sentence.\n"
+    "- statements_facts: include only the exact numbered/bulleted statements or facts, one item per array entry, preserving any literal markers already present in the source.\n"
+    "- question_prompt: include only the exact final ask sentence when the source clearly separates it from the stem/statements. Do not invent or paraphrase a prompt.\n"
+    "- Never move text from question_statement into question_prompt, or from question_prompt into question_statement, unless the source itself clearly separates those parts.\n"
+    "- Never invent generic filler such as 'Consider the following statements:' unless that exact text exists in the source.\n"
+    "- Do not repeat statements_facts inside question_statement, supp_question_statement, or question_prompt.\n"
+    "- Do not repeat question_prompt inside question_statement.\n"
 )
 
 MATHS_EXPLANATION_FORMAT = (
@@ -594,7 +611,7 @@ def _matches_example_format(item: dict, spec: dict) -> bool:
     return True
 
 def _fix_latex_escaping(text: Optional[str]) -> Optional[str]:
-    """
+    r"""
     Fix over-escaped LaTeX in AI responses.
     AI sometimes returns \\frac instead of \frac, \\in instead of \in, etc.
     This function normalizes to single backslashes within $ delimiters.

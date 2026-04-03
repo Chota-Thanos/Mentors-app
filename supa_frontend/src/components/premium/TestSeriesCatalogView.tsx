@@ -1,7 +1,7 @@
 "use client";
 
 import axios from "axios";
-import { ArrowRight, BookOpen, IndianRupee, Search, ShieldCheck, SlidersHorizontal, Sparkles, Star } from "lucide-react";
+import { ChevronDown, Info, Search, SlidersHorizontal, Star } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -13,31 +13,30 @@ import { richTextToPlainText } from "@/lib/richText";
 import type {
   TestSeriesAccessType,
   TestSeriesDiscoverySeries,
-  TestSeriesDiscoveryTest,
 } from "@/types/premium";
 
 interface TestSeriesCatalogViewProps {
   testKind: "prelims" | "mains";
   title: string;
   description: string;
-  listingMode?: "test" | "series";
+  listingMode?: "series";
 }
 
-const reviewSummaryMeta = (meta: Record<string, unknown> | null | undefined): { average: number; total: number } => {
-  const summary = ((meta || {}) as Record<string, unknown>).review_summary as Record<string, unknown> | undefined;
-  const average = Number(summary?.average_rating || 0);
-  const total = Number(summary?.total_reviews || 0);
-  return {
-    average: Number.isFinite(average) ? average : 0,
-    total: Number.isFinite(total) ? total : 0,
-  };
-};
+type SortOption = "popular" | "highest_rated" | "newest" | "price_low" | "price_high";
 
 const ACCESS_FILTERS: Array<{ value: "all" | TestSeriesAccessType; label: string }> = [
-  { value: "all", label: "All Access Types" },
+  { value: "all", label: "All access" },
   { value: "free", label: "Free" },
   { value: "subscription", label: "Subscription" },
   { value: "paid", label: "Paid" },
+];
+
+const SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
+  { value: "popular", label: "Most Popular" },
+  { value: "highest_rated", label: "Highest Rated" },
+  { value: "newest", label: "Newest" },
+  { value: "price_low", label: "Price: Low to High" },
+  { value: "price_high", label: "Price: High to Low" },
 ];
 
 function cn(...values: Array<string | false | null | undefined>) {
@@ -50,39 +49,375 @@ function toError(error: unknown): string {
   return typeof detail === "string" && detail.trim() ? detail : error.message;
 }
 
-function formatPrice(value?: number | null): string {
+function formatListingPrice(value?: number | null): string {
   const amount = Number(value || 0);
-  if (amount <= 0) return "Free";
-  return `INR ${new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(amount)}`;
+  if (!Number.isFinite(amount) || amount <= 0) return "Free";
+  return `\u20B9${new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(amount)}`;
 }
 
-function accessTone(accessType: TestSeriesAccessType): string {
-  if (accessType === "free") return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  if (accessType === "subscription") return "border-amber-200 bg-amber-50 text-amber-800";
-  return "border-slate-200 bg-slate-100 text-slate-700";
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat("en-IN").format(value);
 }
 
-function initialsFromLabel(label: string): string {
-  const tokens = label.trim().split(/\s+/).filter(Boolean).slice(0, 2);
-  if (tokens.length === 0) return "UP";
-  return tokens.map((token) => token.charAt(0).toUpperCase()).join("");
-}
-
-function textExcerpt(value?: string | null, fallback = "No description provided yet."): string {
+function textExcerpt(value?: string | null, fallback = "Series details will appear here once the provider adds a description."): string {
   const plain = richTextToPlainText(value || "").trim();
   return plain || fallback;
+}
+
+function reviewSummaryMeta(meta: Record<string, unknown> | null | undefined): { average: number; total: number } {
+  const summary = ((meta || {}) as Record<string, unknown>).review_summary as Record<string, unknown> | undefined;
+  const average = Number(summary?.average_rating || 0);
+  const total = Number(summary?.total_reviews || 0);
+  return {
+    average: Number.isFinite(average) ? average : 0,
+    total: Number.isFinite(total) ? total : 0,
+  };
+}
+
+function sortRows(rows: TestSeriesDiscoverySeries[], sortBy: SortOption): TestSeriesDiscoverySeries[] {
+  const nextRows = [...rows];
+  nextRows.sort((left, right) => {
+    const leftReview = reviewSummaryMeta(left.provider_profile?.meta);
+    const rightReview = reviewSummaryMeta(right.provider_profile?.meta);
+    const leftPrice = Number(left.series.price || 0);
+    const rightPrice = Number(right.series.price || 0);
+    const leftCreated = new Date(left.series.created_at || 0).getTime();
+    const rightCreated = new Date(right.series.created_at || 0).getTime();
+    const leftTests = Number(left.series.test_count || 0);
+    const rightTests = Number(right.series.test_count || 0);
+
+    if (sortBy === "highest_rated") {
+      return (
+        rightReview.average - leftReview.average
+        || rightReview.total - leftReview.total
+        || rightTests - leftTests
+        || rightCreated - leftCreated
+      );
+    }
+
+    if (sortBy === "newest") {
+      return rightCreated - leftCreated || rightTests - leftTests || rightReview.total - leftReview.total;
+    }
+
+    if (sortBy === "price_low") {
+      return leftPrice - rightPrice || rightReview.total - leftReview.total || rightCreated - leftCreated;
+    }
+
+    if (sortBy === "price_high") {
+      return rightPrice - leftPrice || rightReview.total - leftReview.total || rightCreated - leftCreated;
+    }
+
+    const leftPopularity =
+      leftReview.total * 100
+      + leftReview.average * 10
+      + leftTests * 4
+      + (left.provider_profile?.is_verified ? 15 : 0);
+    const rightPopularity =
+      rightReview.total * 100
+      + rightReview.average * 10
+      + rightTests * 4
+      + (right.provider_profile?.is_verified ? 15 : 0);
+
+    return rightPopularity - leftPopularity || rightCreated - leftCreated;
+  });
+
+  return nextRows;
+}
+
+function RatingStrip({ value }: { value: number }) {
+  const rounded = Math.max(0, Math.min(5, Math.round(value)));
+  return (
+    <span className="flex items-center gap-0.5 text-amber-500" aria-hidden="true">
+      {Array.from({ length: 5 }).map((_, index) => (
+        <Star
+          key={`${value}-${index}`}
+          className={cn("h-3.5 w-3.5", index < rounded ? "fill-current" : "fill-transparent text-amber-300")}
+        />
+      ))}
+    </span>
+  );
+}
+
+function SeriesBadge({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "violet" | "mint" | "gold" | "neutral";
+}) {
+  const toneClass =
+    tone === "violet"
+      ? "border-violet-200 bg-violet-700 text-white"
+      : tone === "mint"
+        ? "border-teal-200 bg-teal-100 text-teal-900"
+        : tone === "gold"
+          ? "border-amber-200 bg-amber-100 text-amber-900"
+          : "border-slate-200 bg-slate-100 text-slate-700";
+
+  return <span className={cn("inline-flex items-center rounded-md border px-2.5 py-1 text-[11px] font-bold", toneClass)}>{label}</span>;
+}
+
+function CatalogFilters({
+  search,
+  onSearchChange,
+  categoryId,
+  onCategoryChange,
+  categoryOptions,
+  accessType,
+  onAccessTypeChange,
+  minPrice,
+  onMinPriceChange,
+  maxPrice,
+  onMaxPriceChange,
+  onlyFree,
+  onOnlyFreeChange,
+  onReset,
+  compact = false,
+}: {
+  search: string;
+  onSearchChange: (value: string) => void;
+  categoryId: string;
+  onCategoryChange: (value: string) => void;
+  categoryOptions: Array<{ id: number; label: string }>;
+  accessType: "all" | TestSeriesAccessType;
+  onAccessTypeChange: (value: "all" | TestSeriesAccessType) => void;
+  minPrice: string;
+  onMinPriceChange: (value: string) => void;
+  maxPrice: string;
+  onMaxPriceChange: (value: string) => void;
+  onlyFree: boolean;
+  onOnlyFreeChange: (value: boolean) => void;
+  onReset: () => void;
+  compact?: boolean;
+}) {
+  const shellClass = compact
+    ? "rounded-3xl border border-slate-200 bg-white p-4 shadow-sm"
+    : "rounded-3xl border border-slate-200 bg-white p-5 shadow-sm";
+  const inputClass =
+    "w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-violet-500";
+
+  return (
+    <div className={shellClass}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">Filter</p>
+          <h2 className="mt-1 text-lg font-black tracking-tight text-slate-900">Refine results</h2>
+        </div>
+        <button
+          type="button"
+          onClick={onReset}
+          className="text-sm font-semibold text-violet-700 transition hover:text-violet-900"
+        >
+          Reset
+        </button>
+      </div>
+
+      <div className="mt-4 space-y-4">
+        <label className="block space-y-2">
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Search</span>
+          <span className="flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-3 py-3">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input
+              value={search}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder="Search by series or mentor"
+              className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+            />
+          </span>
+        </label>
+
+        <label className="block space-y-2">
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Category</span>
+          <select value={categoryId} onChange={(event) => onCategoryChange(event.target.value)} className={inputClass}>
+            <option value="">All categories</option>
+            {categoryOptions.map((option) => (
+              <option key={option.id} value={String(option.id)}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="block space-y-2">
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Access</span>
+          <select
+            value={accessType}
+            onChange={(event) => onAccessTypeChange(event.target.value as "all" | TestSeriesAccessType)}
+            className={inputClass}
+          >
+            {ACCESS_FILTERS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Min price</span>
+            <input
+              value={minPrice}
+              onChange={(event) => onMinPriceChange(event.target.value)}
+              type="number"
+              min={0}
+              placeholder="0"
+              className={inputClass}
+            />
+          </label>
+          <label className="block space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Max price</span>
+            <input
+              value={maxPrice}
+              onChange={(event) => onMaxPriceChange(event.target.value)}
+              type="number"
+              min={0}
+              placeholder="5000"
+              className={inputClass}
+            />
+          </label>
+        </div>
+
+        <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span>
+            <span className="block text-sm font-semibold text-slate-900">Free only</span>
+            <span className="mt-1 block text-xs text-slate-500">Show only free series in the list.</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={onlyFree}
+            onChange={(event) => onOnlyFreeChange(event.target.checked)}
+            className="h-4 w-4 accent-violet-700"
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function SeriesCard({
+  row,
+  isMains,
+}: {
+  row: TestSeriesDiscoverySeries;
+  isMains: boolean;
+}) {
+  const { series, provider_profile: profile, category_labels } = row;
+  const review = reviewSummaryMeta(profile?.meta);
+  const cover = series.cover_image_url || "";
+  const providerName = profile?.display_name || (isMains ? "Mentors App Mains Faculty" : "Mentors App Prelims Faculty");
+  const providerLine = profile?.headline || profile?.role || (isMains ? "Mains writing mentor" : "Objective practice mentor");
+  const categoryLine = category_labels.filter(Boolean).slice(0, 3).join(", ");
+  const isPremium = series.access_type !== "free";
+  const isPopular = review.total >= 12 && review.average >= 4.2;
+
+  return (
+    <article className="border-b border-slate-200 p-4 last:border-b-0 sm:p-5">
+      <div className="grid gap-4 grid-cols-[112px_minmax(0,1fr)] sm:grid-cols-[140px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)_170px]">
+        <Link href={`/test-series/${series.id}`} className="relative block h-[112px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100 sm:h-[140px] lg:h-[160px]">
+          {cover ? (
+            <Image
+              src={cover}
+              alt={series.title}
+              fill
+              unoptimized
+              sizes="(max-width: 640px) 112px, (max-width: 1024px) 140px, 240px"
+              className="object-cover"
+            />
+          ) : (
+            <div className={cn(
+              "flex h-full items-center justify-center bg-gradient-to-br px-4 text-center",
+              isMains ? "from-amber-100 via-white to-rose-50" : "from-violet-100 via-white to-sky-50",
+            )}>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">{isMains ? "Mains" : "Prelims"}</p>
+                <p className="mt-2 text-sm font-bold text-slate-800">{series.test_count || 0} test{series.test_count === 1 ? "" : "s"}</p>
+              </div>
+            </div>
+          )}
+        </Link>
+
+        <div className="min-w-0">
+          <Link href={`/test-series/${series.id}`} className="block">
+            <h3 className="text-lg font-black leading-6 text-slate-900 transition hover:text-violet-700 sm:text-xl">
+              {series.title}
+            </h3>
+          </Link>
+          <p className="mt-1 text-sm text-slate-600">{providerName}</p>
+
+          {review.total > 0 ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-bold text-amber-700">{review.average.toFixed(1)}</span>
+              <RatingStrip value={review.average} />
+              <span className="text-slate-500">({formatCompactNumber(review.total)})</span>
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-slate-500">{profile?.is_verified ? "Verified mentor" : "Newly added series"}</p>
+          )}
+
+          <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{textExcerpt(series.description)}</p>
+
+          <p className="mt-2 text-sm text-slate-500">
+            {series.test_count || 0} tests
+            {providerLine ? ` \u00B7 ${providerLine}` : ""}
+            {categoryLine ? ` \u00B7 ${categoryLine}` : ""}
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {isPremium ? <SeriesBadge label="Premium" tone="violet" /> : <SeriesBadge label="Free access" tone="mint" />}
+            {isPopular ? <SeriesBadge label="Popular" tone="mint" /> : null}
+            {profile?.is_verified ? <SeriesBadge label="Verified" tone="gold" /> : null}
+            <SeriesBadge label={isMains ? "Answer-writing" : "MCQ series"} tone="neutral" />
+          </div>
+
+          <p className="mt-3 text-xl font-black text-slate-900 lg:hidden">{formatListingPrice(series.price)}</p>
+        </div>
+
+        <div className="hidden lg:flex lg:flex-col lg:items-end lg:justify-between">
+          <div className="text-right">
+            <p className="text-2xl font-black tracking-tight text-slate-900">{formatListingPrice(series.price)}</p>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+              {series.access_type === "free" ? "Start instantly" : series.access_type}
+            </p>
+          </div>
+
+          <div className="flex w-full flex-col gap-2">
+            <Link
+              href={`/test-series/${series.id}`}
+              className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-violet-700 px-4 text-sm font-bold text-violet-700 transition hover:bg-violet-50"
+            >
+              Open series
+            </Link>
+            {profile ? (
+              <Link
+                href={`/profiles/${profile.user_id}`}
+                className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Mentor profile
+              </Link>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 lg:hidden">
+        <Link
+          href={`/test-series/${series.id}`}
+          className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-violet-700 px-4 text-sm font-bold text-violet-700 transition hover:bg-violet-50"
+        >
+          Open series
+        </Link>
+      </div>
+    </article>
+  );
 }
 
 export default function TestSeriesCatalogView({
   testKind,
   title,
   description,
-  listingMode = "test",
 }: TestSeriesCatalogViewProps) {
   const { isAuthenticated } = useAuth();
-  const isMains = testKind === "mains";
-
-  const [testRows, setTestRows] = useState<TestSeriesDiscoveryTest[]>([]);
   const [seriesRows, setSeriesRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -91,99 +426,81 @@ export default function TestSeriesCatalogView({
   const [onlyFree, setOnlyFree] = useState(false);
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
-  const [enrollingSeriesId, setEnrollingSeriesId] = useState<number | null>(null);
+  const [sortBy, setSortBy] = useState<SortOption>("popular");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
-  const activeRows = useMemo(
-    () => (listingMode === "series" ? seriesRows : testRows),
-    [listingMode, seriesRows, testRows],
-  );
-
-  const loadRows = async () => {
-    setLoading(true);
-    try {
-      const params: Record<string, unknown> = { limit: 200 };
-      if (search.trim()) params.search = search.trim();
-      if (categoryId.trim()) params.category_id = Number(categoryId);
-      if (accessType !== "all") params.access_type = accessType;
-      if (onlyFree) params.only_free = true;
-      if (minPrice.trim()) params.min_price = Number(minPrice);
-      if (maxPrice.trim()) params.max_price = Number(maxPrice);
-
-      if (listingMode === "series") {
-        params.series_kind = testKind === "mains" ? "mains" : "quiz";
-        const response = await premiumApi.get<TestSeriesDiscoverySeries[]>("/test-series-discovery/series", { params });
-        setSeriesRows(Array.isArray(response.data) ? response.data : []);
-        setTestRows([]);
-      } else {
-        params.test_kind = testKind;
-        const response = await premiumApi.get<TestSeriesDiscoveryTest[]>("/test-series-discovery/tests", { params });
-        setTestRows(Array.isArray(response.data) ? response.data : []);
-        setSeriesRows([]);
-      }
-    } catch (error: unknown) {
-      setSeriesRows([]);
-      setTestRows([]);
-      toast.error("Failed to load test series", { description: toError(error) });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const isMains = testKind === "mains";
 
   useEffect(() => {
+    let active = true;
+
+    const loadRows = async () => {
+      setLoading(true);
+      try {
+        const params: Record<string, unknown> = {
+          limit: 200,
+          series_kind: isMains ? "mains" : "quiz",
+        };
+
+        if (search.trim()) params.search = search.trim();
+        if (categoryId.trim()) params.category_id = Number(categoryId);
+        if (accessType !== "all") params.access_type = accessType;
+        if (onlyFree) params.only_free = true;
+        if (minPrice.trim()) params.min_price = Number(minPrice);
+        if (maxPrice.trim()) params.max_price = Number(maxPrice);
+
+        const response = await premiumApi.get<TestSeriesDiscoverySeries[]>("/test-series-discovery/series", { params });
+        if (!active) return;
+        setSeriesRows(Array.isArray(response.data) ? response.data : []);
+      } catch (error: unknown) {
+        if (!active) return;
+        setSeriesRows([]);
+        toast.error("Failed to load test series", { description: toError(error) });
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
     void loadRows();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testKind, listingMode, search, categoryId, accessType, onlyFree, minPrice, maxPrice]);
+
+    return () => {
+      active = false;
+    };
+  }, [accessType, categoryId, isMains, maxPrice, minPrice, onlyFree, search]);
 
   const categoryOptions = useMemo(() => {
     const map = new Map<number, string>();
-    for (const row of activeRows) {
+    for (const row of seriesRows) {
       row.category_ids.forEach((id, index) => {
         const label = row.category_labels[index] || `Category ${id}`;
         if (!map.has(id)) map.set(id, label);
       });
     }
-    return Array.from(map.entries())
+
+    return [...map.entries()]
       .map(([id, label]) => ({ id, label }))
       .sort((left, right) => left.label.localeCompare(right.label));
-  }, [activeRows]);
+  }, [seriesRows]);
+
+  const sortedRows = useMemo(() => sortRows(seriesRows, sortBy), [seriesRows, sortBy]);
 
   const summary = useMemo(() => {
     const providerIds = new Set<string>();
     let freeCount = 0;
+    let ratedCount = 0;
 
-    if (listingMode === "series") {
-      for (const row of seriesRows) {
-        if (row.provider_profile?.user_id) providerIds.add(row.provider_profile.user_id);
-        if (row.series.access_type === "free" || Number(row.series.price || 0) <= 0) freeCount += 1;
-      }
-    } else {
-      for (const row of testRows) {
-        if (row.provider_profile?.user_id) providerIds.add(row.provider_profile.user_id);
-        if (row.series.access_type === "free" || Number(row.test.price || 0) <= 0) freeCount += 1;
-      }
+    for (const row of seriesRows) {
+      if (row.provider_profile?.user_id) providerIds.add(row.provider_profile.user_id);
+      if (row.series.access_type === "free" || Number(row.series.price || 0) <= 0) freeCount += 1;
+      if (reviewSummaryMeta(row.provider_profile?.meta).total > 0) ratedCount += 1;
     }
 
     return {
       providerCount: providerIds.size,
       freeCount,
+      ratedCount,
     };
-  }, [listingMode, seriesRows, testRows]);
-
-  const enrollInSeries = async (seriesId: number) => {
-    if (!isAuthenticated) {
-      toast.error("Sign in required to enroll.");
-      return;
-    }
-    setEnrollingSeriesId(seriesId);
-    try {
-      await premiumApi.post(`/test-series/${seriesId}/enroll`, { access_source: "self_service" });
-      toast.success("Enrolled successfully");
-    } catch (error: unknown) {
-      toast.error("Failed to enroll", { description: toError(error) });
-    } finally {
-      setEnrollingSeriesId(null);
-    }
-  };
+  }, [seriesRows]);
 
   const resetFilters = () => {
     setSearch("");
@@ -194,513 +511,166 @@ export default function TestSeriesCatalogView({
     setMaxPrice("");
   };
 
-  const searchPlaceholder = listingMode === "series" ? "Search by series or mentor name" : "Search by test or series title";
-  const resultLabel = listingMode === "series" ? "series" : "test";
-  const heroGradient = isMains ? "from-amber-50 via-white to-emerald-50" : "from-sky-50 via-white to-amber-50";
-  const heroBorder = isMains ? "border-amber-200/80" : "border-sky-200/80";
-  const heroBadge = isMains ? "border-amber-200 bg-white/85 text-amber-800" : "border-sky-200 bg-white/85 text-sky-800";
-  const heroStatTint = isMains ? "border-amber-100 bg-white/80" : "border-sky-100 bg-white/80";
-  const providerPanelTint = isMains ? "border-amber-100 bg-amber-50/70" : "border-sky-100 bg-sky-50/70";
-  const avatarTint = isMains ? "bg-amber-200 text-amber-900" : "bg-sky-200 text-sky-900";
-
   return (
-    <div className="space-y-6">
-      <section className={cn("relative overflow-hidden rounded-[2rem] border bg-gradient-to-br p-6 shadow-sm sm:p-8", heroGradient, heroBorder)}>
-        <div className={cn("absolute -right-12 top-0 h-40 w-40 rounded-full blur-3xl", isMains ? "bg-amber-200/60" : "bg-sky-200/60")} />
-        <div className={cn("absolute bottom-0 left-0 h-36 w-36 rounded-full blur-3xl", isMains ? "bg-emerald-100/80" : "bg-amber-100/80")} />
+    <div className="space-y-5">
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Catalog</p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 sm:text-[2.35rem]">
+              All {title}
+            </h1>
+            <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-600 sm:text-base">{description}</p>
+          </div>
 
-        <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)] lg:items-end">
-          <div className="space-y-4">
-            <div className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.25em]", heroBadge)}>
-              <Sparkles className="h-3.5 w-3.5" />
-              {listingMode === "series" ? "Curated series" : "Exam-ready papers"}
+          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-violet-200 bg-white text-violet-700">
+                <Info className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-base font-bold text-slate-900">
+                  Browse by mentor, price, and category before opening the full series detail.
+                </p>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  {isAuthenticated
+                    ? "Your access continues on the detail page, where the full test roadmap and mentor actions are available."
+                    : "You can inspect the full series structure first and sign in later to activate access."}
+                </p>
+              </div>
             </div>
+          </div>
 
+          <div className="flex flex-wrap gap-2">
+            <SeriesBadge label={`${sortedRows.length} results`} tone="neutral" />
+            <SeriesBadge label={`${summary.providerCount} mentors`} tone="neutral" />
+            <SeriesBadge label={`${summary.freeCount} free`} tone="mint" />
+            {summary.ratedCount > 0 ? <SeriesBadge label={`${summary.ratedCount} rated`} tone="gold" /> : null}
+          </div>
+        </div>
+      </section>
+
+      <div className="grid gap-5 lg:grid-cols-[290px_minmax(0,1fr)] lg:items-start">
+        <div className="hidden lg:block lg:sticky lg:top-24">
+          <CatalogFilters
+            search={search}
+            onSearchChange={setSearch}
+            categoryId={categoryId}
+            onCategoryChange={setCategoryId}
+            categoryOptions={categoryOptions}
+            accessType={accessType}
+            onAccessTypeChange={setAccessType}
+            minPrice={minPrice}
+            onMinPriceChange={setMinPrice}
+            maxPrice={maxPrice}
+            onMaxPriceChange={setMaxPrice}
+            onlyFree={onlyFree}
+            onOnlyFreeChange={setOnlyFree}
+            onReset={resetFilters}
+          />
+        </div>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)] lg:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileFiltersOpen((value) => !value)}
+              className="inline-flex h-[58px] items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-800 shadow-sm"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Filter
+            </button>
+
+            <label className="block rounded-2xl border border-slate-300 bg-white px-4 py-2 shadow-sm">
+              <span className="block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Sort by</span>
+              <span className="mt-1 flex items-center justify-between gap-2">
+                <select
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value as SortOption)}
+                  className="w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                >
+                  {SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="h-4 w-4 text-slate-400" />
+              </span>
+            </label>
+          </div>
+
+          {mobileFiltersOpen ? (
+            <div className="lg:hidden">
+              <CatalogFilters
+                search={search}
+                onSearchChange={setSearch}
+                categoryId={categoryId}
+                onCategoryChange={setCategoryId}
+                categoryOptions={categoryOptions}
+                accessType={accessType}
+                onAccessTypeChange={setAccessType}
+                minPrice={minPrice}
+                onMinPriceChange={setMinPrice}
+                maxPrice={maxPrice}
+                onMaxPriceChange={setMaxPrice}
+                onlyFree={onlyFree}
+                onOnlyFreeChange={setOnlyFree}
+                onReset={resetFilters}
+                compact
+              />
+            </div>
+          ) : null}
+
+          <div className="hidden lg:flex lg:items-center lg:justify-between lg:rounded-3xl lg:border lg:border-slate-200 lg:bg-white lg:p-4 lg:shadow-sm">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">
-                {isMains ? "Write / Review / Improve" : "Attempt / Analyze / Repeat"}
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">Results</p>
+              <p className="mt-1 text-base font-semibold text-slate-900">
+                {loading ? "Refreshing results..." : `${sortedRows.length} series available`}
               </p>
-              <h1 className="mt-3 max-w-3xl text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">{title}</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base">{description}</p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <span className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold", isMains ? "border-amber-200 bg-amber-100 text-amber-900" : "border-sky-200 bg-sky-100 text-sky-900")}>
-                <BookOpen className="h-3.5 w-3.5" />
-                {listingMode === "series" ? "Structured learning paths" : "Paper-level discovery"}
-              </span>
-              <span className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold", isMains ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800")}>
-                <ShieldCheck className="h-3.5 w-3.5" />
-                {isAuthenticated ? "Self-serve enrollment available" : "Sign in to unlock enrollment"}
-              </span>
-            </div>
+            <label className="flex min-w-[240px] items-center justify-between gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3">
+              <span className="text-sm font-semibold text-slate-700">Sort by</span>
+              <div className="relative flex-1">
+                <select
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value as SortOption)}
+                  className="w-full appearance-none bg-transparent pr-7 text-right text-sm font-bold text-slate-900 outline-none"
+                >
+                  {SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              </div>
+            </label>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className={cn("rounded-[1.5rem] border p-4 shadow-sm backdrop-blur", heroStatTint)}>
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">Live results</p>
-              <p className="mt-2 text-3xl font-black tracking-tight text-slate-900">{activeRows.length}</p>
-              <p className="mt-1 text-sm text-slate-600">Published {resultLabel}{activeRows.length === 1 ? "" : "s"} in this catalog.</p>
+          {loading ? (
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <p className="text-sm font-semibold text-slate-600">Loading series catalog...</p>
             </div>
-            <div className={cn("rounded-[1.5rem] border p-4 shadow-sm backdrop-blur", heroStatTint)}>
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">Focus areas</p>
-              <p className="mt-2 text-3xl font-black tracking-tight text-slate-900">{categoryOptions.length}</p>
-              <p className="mt-1 text-sm text-slate-600">Category filters derived from the current result set.</p>
-            </div>
-            <div className={cn("rounded-[1.5rem] border p-4 shadow-sm backdrop-blur", heroStatTint)}>
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">Providers</p>
-              <p className="mt-2 text-3xl font-black tracking-tight text-slate-900">{summary.providerCount}</p>
-              <p className="mt-1 text-sm text-slate-600">Profiles connected to the visible catalog entries.</p>
-            </div>
-            <div className={cn("rounded-[1.5rem] border p-4 shadow-sm backdrop-blur", heroStatTint)}>
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">Free options</p>
-              <p className="mt-2 text-3xl font-black tracking-tight text-slate-900">{summary.freeCount}</p>
-              <p className="mt-1 text-sm text-slate-600">Entries currently discoverable without checkout.</p>
-            </div>
-          </div>
-        </div>
-      </section>
+          ) : null}
 
-      <section className="rounded-[1.75rem] border border-slate-200 bg-white/95 p-5 shadow-sm backdrop-blur sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-slate-600">
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Refine catalog
+          {!loading && sortedRows.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
+              <h2 className="text-xl font-black text-slate-900">No matching series right now</h2>
+              <p className="mt-2 text-sm text-slate-500">Try clearing one or more filters to broaden the result set.</p>
             </div>
-            <h2 className="mt-3 text-xl font-black tracking-tight text-slate-900">Find the right {resultLabel} faster</h2>
-            <p className="mt-1 text-sm text-slate-600">Use search, category, access, and price filters to narrow the visible catalog.</p>
-          </div>
+          ) : null}
 
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="inline-flex items-center justify-center rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
-          >
-            Reset filters
-          </button>
-        </div>
-
-        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <label className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Search</span>
-            <span className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 shadow-sm transition focus-within:border-slate-400 focus-within:bg-white">
-              <Search className="h-4 w-4 text-slate-400" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
-                placeholder={searchPlaceholder}
-              />
-            </span>
-          </label>
-
-          <label className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Category</span>
-            <select
-              value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700 shadow-sm outline-none transition focus:border-slate-400 focus:bg-white"
-            >
-              <option value="">All Categories</option>
-              {categoryOptions.map((option) => (
-                <option key={option.id} value={String(option.id)}>
-                  {option.label}
-                </option>
+          {!loading && sortedRows.length > 0 ? (
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              {sortedRows.map((row) => (
+                <SeriesCard key={row.series.id} row={row} isMains={isMains} />
               ))}
-            </select>
-          </label>
-
-          <label className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Access type</span>
-            <select
-              value={accessType}
-              onChange={(event) => setAccessType(event.target.value as "all" | TestSeriesAccessType)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700 shadow-sm outline-none transition focus:border-slate-400 focus:bg-white"
-            >
-              {ACCESS_FILTERS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Min price</span>
-            <span className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 shadow-sm transition focus-within:border-slate-400 focus-within:bg-white">
-              <IndianRupee className="h-4 w-4 text-slate-400" />
-              <input
-                value={minPrice}
-                onChange={(event) => setMinPrice(event.target.value)}
-                type="number"
-                min={0}
-                className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
-                placeholder="Minimum price"
-              />
-            </span>
-          </label>
-
-          <label className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Max price</span>
-            <span className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 shadow-sm transition focus-within:border-slate-400 focus-within:bg-white">
-              <IndianRupee className="h-4 w-4 text-slate-400" />
-              <input
-                value={maxPrice}
-                onChange={(event) => setMaxPrice(event.target.value)}
-                type="number"
-                min={0}
-                className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
-                placeholder="Maximum price"
-              />
-            </span>
-          </label>
-
-          <label className="flex items-center justify-between rounded-[1.5rem] border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm">
-            <span>
-              <span className="block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Quick filter</span>
-              <span className="mt-1 block text-sm font-semibold text-slate-900">Show free options only</span>
-            </span>
-            <input type="checkbox" checked={onlyFree} onChange={(event) => setOnlyFree(event.target.checked)} className="h-4 w-4 accent-slate-900" />
-          </label>
+            </div>
+          ) : null}
         </div>
-
-        <div className="mt-4 flex flex-col gap-2 border-t border-slate-100 pt-4 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <p>
-            Showing <span className="font-semibold text-slate-800">{activeRows.length}</span> {resultLabel}
-            {activeRows.length === 1 ? "" : "s"} after current filters.
-          </p>
-          <p>{isMains ? "Mains journeys focus on writing flow and mentorship visibility." : "Prelims papers stay optimized for quick objective-practice discovery."}</p>
-        </div>
-      </section>
-
-      {loading ? (
-        <div className="rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center gap-3 text-sm text-slate-500">
-            <span className={cn("h-2.5 w-2.5 animate-pulse rounded-full", isMains ? "bg-amber-500" : "bg-sky-500")} />
-            Loading curated {resultLabel}s...
-          </div>
-        </div>
-      ) : null}
-
-      {!loading && activeRows.length === 0 ? (
-        <div className="rounded-[1.75rem] border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
-          <div className={cn("mx-auto flex h-12 w-12 items-center justify-center rounded-2xl", isMains ? "bg-amber-100 text-amber-800" : "bg-sky-100 text-sky-800")}>
-            <Sparkles className="h-5 w-5" />
-          </div>
-          <h3 className="mt-4 text-lg font-bold text-slate-900">No matching {resultLabel}s right now</h3>
-          <p className="mt-2 text-sm text-slate-500">Try clearing one or more filters to broaden the visible catalog.</p>
-        </div>
-      ) : null}
-
-      {!loading && activeRows.length > 0 ? (
-        <div className="flex items-end justify-between gap-3 px-1">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Catalog results</p>
-            <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-900">
-              {activeRows.length} {resultLabel}
-              {activeRows.length === 1 ? "" : "s"} ready to explore
-            </h2>
-          </div>
-          <p className="hidden text-sm text-slate-500 md:block">Responsive cards optimized for quick browsing.</p>
-        </div>
-      ) : null}
-
-      {!loading && listingMode === "series" ? (
-        <div className="grid gap-5 lg:grid-cols-2">
-          {seriesRows.map((row) => {
-            const series = row.series;
-            const profile = row.provider_profile;
-            const review = profile ? reviewSummaryMeta(profile.meta) : { average: 0, total: 0 };
-            const thumbnail = series.cover_image_url || "";
-            return (
-              <article
-                key={series.id}
-                className="group overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
-              >
-                <div className="grid gap-0 md:grid-cols-[220px_1fr]">
-                  <div className="relative min-h-[240px] overflow-hidden bg-slate-100">
-                    {thumbnail ? (
-                      <Image
-                        src={thumbnail}
-                        alt={series.title}
-                        fill
-                        unoptimized
-                        sizes="(max-width: 768px) 100vw, 220px"
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
-                    ) : (
-                      <div className={cn("flex h-full flex-col items-center justify-center gap-3 bg-gradient-to-br px-6 text-center", isMains ? "from-amber-100 via-white to-emerald-50" : "from-sky-100 via-white to-amber-50")}>
-                        <BookOpen className="h-8 w-8 text-slate-500" />
-                        <p className="text-sm font-semibold text-slate-700">Curated {series.series_kind === "mains" ? "mains" : "prelims"} series</p>
-                      </div>
-                    )}
-
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-slate-900/15 to-transparent" />
-
-                    <div className="absolute left-4 top-4 flex flex-wrap gap-2">
-                      <span className={cn("rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] backdrop-blur", series.series_kind === "mains" ? "border-amber-200/70 bg-amber-100/90 text-amber-900" : "border-sky-200/70 bg-sky-100/90 text-sky-900")}>
-                        {series.series_kind === "mains" ? "Mains series" : "Prelims series"}
-                      </span>
-                      <span className={cn("rounded-full border px-3 py-1 text-[11px] font-semibold capitalize backdrop-blur", accessTone(series.access_type))}>
-                        {series.access_type}
-                      </span>
-                    </div>
-
-                    <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
-                      <div className="rounded-2xl bg-white/95 px-3 py-2 shadow-lg backdrop-blur">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Entry</p>
-                        <p className="mt-1 text-sm font-black text-slate-900">{formatPrice(series.price)}</p>
-                      </div>
-                      <div className="rounded-2xl bg-slate-900/85 px-3 py-2 text-right text-white shadow-lg backdrop-blur">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">Included</p>
-                        <p className="mt-1 text-sm font-black">{series.test_count} test{series.test_count === 1 ? "" : "s"}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-col p-5 sm:p-6">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">
-                          {series.access_type === "free" ? "Open access" : "Guided premium access"}
-                        </p>
-                        <h2 className="mt-2 text-xl font-black tracking-tight text-slate-900">{series.title}</h2>
-                      </div>
-                      {review.total > 0 ? (
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right shadow-sm">
-                          <p className="flex items-center justify-end gap-1 text-sm font-bold text-slate-900">
-                            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                            {review.average.toFixed(1)}
-                          </p>
-                          <p className="text-[11px] text-slate-500">{review.total} review{review.total === 1 ? "" : "s"}</p>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{textExcerpt(series.description)}</p>
-
-                    {row.category_ids.length > 0 ? (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {row.category_ids.map((id, index) => (
-                          <span key={`${series.id}-cat-${id}`} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600">
-                            {row.category_labels[index] || `Category ${id}`}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {profile ? (
-                      <div className={cn("mt-4 rounded-[1.5rem] border p-4", providerPanelTint)}>
-                        <div className="flex items-start gap-3">
-                          <div className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-sm font-black", avatarTint)}>
-                            {initialsFromLabel(profile.display_name)}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="truncate text-sm font-bold text-slate-900">{profile.display_name}</p>
-                              {profile.is_verified ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-700">Verified</span> : null}
-                            </div>
-                            <p className="mt-1 text-xs text-slate-600">{profile.headline || profile.role}</p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {review.total > 0 ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                                  {review.average.toFixed(1)} / {review.total}
-                                </span>
-                              ) : null}
-                              {profile.years_experience ? <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-slate-700">{profile.years_experience}+ years experience</span> : null}
-                            </div>
-                          </div>
-                        </div>
-                        {profile.highlights.length > 0 ? (
-                          <ul className="mt-3 space-y-1 text-xs text-slate-600">
-                            {profile.highlights.slice(0, 2).map((highlight, idx) => (
-                              <li key={`${profile.user_id}-${idx}`}>- {highlight}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      {profile ? (
-                        <Link href={`/profiles/${profile.user_id}`} className="inline-flex items-center justify-center rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50">
-                          View Profile
-                        </Link>
-                      ) : null}
-                      <Link href={`/test-series/${series.id}`} className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800">
-                        Open Series
-                        <ArrowRight className="h-4 w-4" />
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => void enrollInSeries(series.id)}
-                        disabled={enrollingSeriesId === series.id}
-                        className="inline-flex items-center justify-center rounded-full border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {enrollingSeriesId === series.id ? "Enrolling..." : "Enroll"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      ) : null}
-
-      {!loading && listingMode === "test" ? (
-        <div className="grid gap-5 lg:grid-cols-2">
-          {testRows.map((row) => {
-            const test = row.test;
-            const series = row.series;
-            const profile = row.provider_profile;
-            const review = profile ? reviewSummaryMeta(profile.meta) : { average: 0, total: 0 };
-            const startHref = test.test_kind === "mains" ? `/collections/${test.id}/mains-test` : `/collections/${test.id}/test`;
-            const thumbnail = test.thumbnail_url || series.cover_image_url || "";
-            return (
-              <article
-                key={`${series.id}-${test.id}`}
-                className="group overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
-              >
-                <div className="relative min-h-[220px] overflow-hidden bg-slate-100">
-                    {thumbnail ? (
-                      <Image
-                        src={thumbnail}
-                        alt={test.title}
-                        fill
-                        unoptimized
-                        sizes="(max-width: 1024px) 100vw, 560px"
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
-                    ) : (
-                      <div className={cn("flex h-full flex-col items-center justify-center gap-3 bg-gradient-to-br px-6 text-center", isMains ? "from-amber-100 via-white to-emerald-50" : "from-sky-100 via-white to-amber-50")}>
-                        <BookOpen className="h-8 w-8 text-slate-500" />
-                        <p className="text-sm font-semibold text-slate-700">Mock paper cover coming soon</p>
-                      </div>
-                    )}
-
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-900/15 to-transparent" />
-
-                    <div className="absolute left-4 top-4 flex flex-wrap gap-2">
-                      <span className={cn("rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] backdrop-blur", test.test_kind === "mains" ? "border-amber-200/70 bg-amber-100/90 text-amber-900" : "border-sky-200/70 bg-sky-100/90 text-sky-900")}>
-                        {test.test_label}
-                      </span>
-                      <span className={cn("rounded-full border px-3 py-1 text-[11px] font-semibold capitalize backdrop-blur", accessTone(series.access_type))}>
-                        {series.access_type}
-                      </span>
-                    </div>
-
-                    <div className="absolute bottom-4 left-4 right-4 grid gap-2 sm:grid-cols-3">
-                      <div className="rounded-2xl bg-white/95 px-3 py-2 shadow-lg backdrop-blur">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Price</p>
-                        <p className="mt-1 text-sm font-black text-slate-900">{formatPrice(test.price)}</p>
-                      </div>
-                      <div className="rounded-2xl bg-white/95 px-3 py-2 shadow-lg backdrop-blur">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Questions</p>
-                        <p className="mt-1 text-sm font-black text-slate-900">{test.question_count || 0}</p>
-                      </div>
-                      <div className="rounded-2xl bg-slate-900/85 px-3 py-2 text-white shadow-lg backdrop-blur">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">Series</p>
-                        <p className="mt-1 text-sm font-black">#{Math.max(test.series_order || 1, 1)}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-5 sm:p-6">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">Inside {series.title}</p>
-                        <h2 className="mt-2 text-xl font-black tracking-tight text-slate-900">{test.title}</h2>
-                      </div>
-                      {review.total > 0 ? (
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right shadow-sm">
-                          <p className="flex items-center justify-end gap-1 text-sm font-bold text-slate-900">
-                            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                            {review.average.toFixed(1)}
-                          </p>
-                          <p className="text-[11px] text-slate-500">{review.total} review{review.total === 1 ? "" : "s"}</p>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <p className="mt-3 text-sm font-medium text-slate-500">Series: {series.title}</p>
-                    <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">
-                      {textExcerpt(test.description || series.description)}
-                    </p>
-
-                    {row.category_ids.length > 0 ? (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {row.category_ids.map((id, index) => (
-                          <span key={`${test.id}-cat-${id}`} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600">
-                            {row.category_labels[index] || `Category ${id}`}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {profile ? (
-                      <div className={cn("mt-4 rounded-[1.5rem] border p-4", providerPanelTint)}>
-                        <div className="flex items-start gap-3">
-                          <div className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-sm font-black", avatarTint)}>
-                            {initialsFromLabel(profile.display_name)}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="truncate text-sm font-bold text-slate-900">{profile.display_name}</p>
-                              {profile.is_verified ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-700">Verified</span> : null}
-                            </div>
-                            <p className="mt-1 text-xs text-slate-600">{profile.headline || profile.role}</p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {profile.years_experience ? <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-slate-700">{profile.years_experience}+ years experience</span> : null}
-                              {review.total > 0 ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                                  {review.average.toFixed(1)} / {review.total}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                        {profile.highlights.length > 0 ? (
-                          <ul className="mt-3 space-y-1 text-xs text-slate-600">
-                            {profile.highlights.slice(0, 2).map((highlight, idx) => (
-                              <li key={`${profile.user_id}-${idx}`}>- {highlight}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      {profile ? (
-                        <Link href={`/profiles/${profile.user_id}`} className="inline-flex items-center justify-center rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50">
-                          View Profile
-                        </Link>
-                      ) : null}
-                      <Link href={`/test-series/${series.id}`} className="inline-flex items-center justify-center rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50">
-                        Open Series
-                      </Link>
-                      <Link href={startHref} className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800">
-                        {test.test_kind === "mains" ? "Open Writing Desk" : "Start Test"}
-                        <ArrowRight className="h-4 w-4" />
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => void enrollInSeries(series.id)}
-                        disabled={enrollingSeriesId === series.id}
-                        className="inline-flex items-center justify-center rounded-full border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {enrollingSeriesId === series.id ? "Enrolling..." : "Enroll"}
-                      </button>
-                    </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }
-

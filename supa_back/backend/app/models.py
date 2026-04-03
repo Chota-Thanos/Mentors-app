@@ -468,6 +468,7 @@ class CollectionCategoryScore(BaseModel):
 
 
 class CollectionTestScoreResponse(BaseModel):
+    attempt_id: Optional[int] = None
     score: int
     total_questions: int
     correct_answers: int
@@ -475,6 +476,44 @@ class CollectionTestScoreResponse(BaseModel):
     unanswered: int
     details: List[CollectionTestScoreDetail]
     category_wise_results: List[CollectionCategoryScore] = Field(default_factory=list)
+
+
+class QuizQuestionComplaintStatus(str, Enum):
+    RECEIVED = "received"
+    PENDING = "pending"
+    RESOLVED = "resolved"
+
+
+class QuizQuestionComplaintCreate(BaseModel):
+    attempt_id: int
+    question_item_id: int
+    complaint_text: str = Field(min_length=8, max_length=2000)
+
+
+class QuizQuestionComplaintUpdate(BaseModel):
+    status: Optional[QuizQuestionComplaintStatus] = None
+    creator_note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class QuizQuestionComplaintResponse(BaseModel):
+    id: int
+    collection_id: int
+    collection_title: Optional[str] = None
+    series_id: Optional[int] = None
+    creator_user_id: str
+    user_id: str
+    attempt_id: int
+    question_item_id: int
+    question_number: int
+    question_text: str
+    selected_option: Optional[str] = None
+    correct_answer: Optional[str] = None
+    complaint_text: str
+    status: QuizQuestionComplaintStatus = QuizQuestionComplaintStatus.RECEIVED
+    creator_note: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+    resolved_at: Optional[str] = None
 
 
 class MainsCollectionTestQuestion(BaseModel):
@@ -637,6 +676,22 @@ class ChallengeLeaderboardResponse(BaseModel):
     collection_title: str
     total_participants: int
     top_entries: List[ChallengeLeaderboardEntry] = Field(default_factory=list)
+
+
+class PublicChallengeListItemResponse(BaseModel):
+    challenge_id: int
+    challenge_title: str
+    challenge_description: Optional[str] = None
+    collection_id: int
+    collection_title: str
+    collection_description: Optional[str] = None
+    collection_thumbnail_url: Optional[str] = None
+    test_kind: CollectionTestKind = CollectionTestKind.PRELIMS
+    question_count: int = 0
+    total_attempts: int = 0
+    expires_at: Optional[str] = None
+    share_path: str
+    share_url: Optional[str] = None
 
 
 class AIInstructionCreate(BaseModel):
@@ -1029,10 +1084,20 @@ class MentorshipCallProvider(str, Enum):
     ZOOM_VIDEO_SDK = "zoom_video_sdk"
 
 
+class DiscussionSpeakerRequestStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    WITHDRAWN = "withdrawn"
+    REMOVED = "removed"
+
+
 class MentorshipRequestStatus(str, Enum):
     REQUESTED = "requested"
+    ACCEPTED = "accepted"
     SCHEDULED = "scheduled"
     REJECTED = "rejected"
+    EXPIRED = "expired"
     CANCELLED = "cancelled"
     COMPLETED = "completed"
 
@@ -1042,6 +1107,34 @@ class MentorshipSessionStatus(str, Enum):
     LIVE = "live"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+
+class MentorshipWorkflowStage(str, Enum):
+    SUBMITTED = "submitted"
+    ACCEPTED = "accepted"
+    PAYMENT_PENDING = "payment_pending"
+    PAID = "paid"
+    EVALUATING = "evaluating"
+    FEEDBACK_READY = "feedback_ready"
+    BOOKING_OPEN = "booking_open"
+    SCHEDULED = "scheduled"
+    LIVE = "live"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class MentorshipServiceType(str, Enum):
+    MENTORSHIP_ONLY = "mentorship_only"
+    COPY_EVALUATION_AND_MENTORSHIP = "copy_evaluation_and_mentorship"
+
+
+class MentorshipPaymentStatus(str, Enum):
+    NOT_INITIATED = "not_initiated"
+    PENDING = "pending"
+    PAID = "paid"
+    FAILED = "failed"
+    REFUNDED = "refunded"
 
 
 class TestSeriesCreate(BaseModel):
@@ -1082,6 +1175,54 @@ class TestSeriesResponse(BaseModel):
     is_active: bool = True
     meta: Dict[str, Any] = Field(default_factory=dict)
     test_count: int = 0
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class TestSeriesProgramItemType(str, Enum):
+    PDF = "pdf"
+    LECTURE = "lecture"
+
+
+class TestSeriesProgramItemCreate(BaseModel):
+    item_type: TestSeriesProgramItemType = TestSeriesProgramItemType.PDF
+    title: str
+    description: Optional[str] = None
+    resource_url: Optional[str] = None
+    scheduled_for: Optional[str] = None
+    duration_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
+    cover_image_url: Optional[str] = None
+    series_order: int = 0
+    is_active: bool = True
+    meta: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TestSeriesProgramItemUpdate(BaseModel):
+    item_type: Optional[TestSeriesProgramItemType] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    resource_url: Optional[str] = None
+    scheduled_for: Optional[str] = None
+    duration_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
+    cover_image_url: Optional[str] = None
+    series_order: Optional[int] = None
+    is_active: Optional[bool] = None
+    meta: Optional[Dict[str, Any]] = None
+
+
+class TestSeriesProgramItemResponse(BaseModel):
+    id: int
+    series_id: int
+    item_type: TestSeriesProgramItemType = TestSeriesProgramItemType.PDF
+    title: str
+    description: Optional[str] = None
+    resource_url: Optional[str] = None
+    scheduled_for: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    cover_image_url: Optional[str] = None
+    series_order: int = 0
+    is_active: bool = True
+    meta: Dict[str, Any] = Field(default_factory=dict)
     created_at: str
     updated_at: Optional[str] = None
 
@@ -1142,6 +1283,35 @@ class TestSeriesEnrollmentResponse(BaseModel):
     subscribed_until: Optional[str] = None
     created_at: str
     updated_at: Optional[str] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TestSeriesEnrollmentPaymentCreate(BaseModel):
+    access_source: str = Field(default="self_service", max_length=60)
+    subscribed_until: Optional[str] = None
+    payment_method: str = Field(default="razorpay", max_length=60)
+
+
+class TestSeriesEnrollmentPaymentVerify(BaseModel):
+    razorpay_order_id: str = Field(min_length=1, max_length=120)
+    razorpay_payment_id: str = Field(min_length=1, max_length=120)
+    razorpay_signature: str = Field(min_length=1, max_length=256)
+    access_source: str = Field(default="self_service", max_length=60)
+    subscribed_until: Optional[str] = None
+    payment_method: str = Field(default="razorpay", max_length=60)
+
+
+class TestSeriesRazorpayOrderResponse(BaseModel):
+    series_id: int
+    order_id: str
+    key_id: str
+    amount: int
+    currency: str
+    amount_display: float = 0.0
+    name: str
+    description: str
+    prefill: Dict[str, Any] = Field(default_factory=dict)
+    notes: Dict[str, str] = Field(default_factory=dict)
 
 
 class SubscriptionPlanResponse(BaseModel):
@@ -1257,6 +1427,13 @@ class ProfessionalPublicProfileDetailResponse(BaseModel):
     role_label: str = "Professional"
     achievements: List[str] = Field(default_factory=list)
     service_specifications: List[str] = Field(default_factory=list)
+    mentorship_price: float = 0.0
+    copy_evaluation_price: float = 0.0
+    currency: str = "INR"
+    response_time_text: Optional[str] = None
+    exam_focus: Optional[str] = None
+    students_mentored: Optional[int] = None
+    sessions_completed: Optional[int] = None
     authenticity_proof_url: Optional[str] = None
     authenticity_note: Optional[str] = None
     mentorship_availability_mode: str = Field(default="open", pattern="^(open|series_only)$")
@@ -1422,6 +1599,24 @@ class MentorshipRequestCreate(BaseModel):
     slot_segment_ends_at: Optional[str] = None
     preferred_mode: MentorshipMode = MentorshipMode.VIDEO
     note: Optional[str] = None
+    preferred_timing: Optional[str] = None
+    service_type: Optional[MentorshipServiceType] = None
+    learner_name: Optional[str] = None
+    learner_email: Optional[str] = None
+    provider_name: Optional[str] = None
+
+
+class MentorshipRequestPaymentCreate(BaseModel):
+    payment_method: str = Field(default="upi", max_length=60)
+    coupon_code: Optional[str] = Field(default=None, max_length=60)
+
+
+class MentorshipRequestPaymentVerify(BaseModel):
+    razorpay_order_id: str = Field(min_length=1, max_length=120)
+    razorpay_payment_id: str = Field(min_length=1, max_length=120)
+    razorpay_signature: str = Field(min_length=1, max_length=256)
+    payment_method: str = Field(default="razorpay", max_length=60)
+    coupon_code: Optional[str] = Field(default=None, max_length=60)
 
 
 class MentorshipRequestSchedule(BaseModel):
@@ -1440,6 +1635,10 @@ class MentorshipRequestStartNow(BaseModel):
     duration_minutes: int = Field(default=45, ge=15, le=180)
 
 
+class MentorshipSessionComplete(BaseModel):
+    summary: Optional[str] = None
+
+
 class MentorshipRequestStatusUpdate(BaseModel):
     status: MentorshipRequestStatus
     reason: Optional[str] = None
@@ -1454,11 +1653,35 @@ class MentorshipRequestResponse(BaseModel):
     submission_id: Optional[int] = None
     preferred_mode: MentorshipMode = MentorshipMode.VIDEO
     note: Optional[str] = None
+    preferred_timing: Optional[str] = None
+    service_type: MentorshipServiceType = MentorshipServiceType.MENTORSHIP_ONLY
     status: MentorshipRequestStatus = MentorshipRequestStatus.REQUESTED
+    payment_status: MentorshipPaymentStatus = MentorshipPaymentStatus.NOT_INITIATED
+    payment_amount: float = 0.0
+    payment_currency: str = "INR"
+    accepted_at: Optional[str] = None
     scheduled_slot_id: Optional[int] = None
+    workflow_stage: MentorshipWorkflowStage = MentorshipWorkflowStage.SUBMITTED
+    booking_open: bool = False
+    feedback_ready_at: Optional[str] = None
+    booking_opened_at: Optional[str] = None
+    join_available: bool = False
     requested_at: str
     updated_at: Optional[str] = None
     meta: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MentorshipRazorpayOrderResponse(BaseModel):
+    request_id: int
+    order_id: str
+    key_id: str
+    amount: int
+    currency: str
+    amount_display: float = 0.0
+    name: str
+    description: str
+    prefill: Dict[str, Any] = Field(default_factory=dict)
+    notes: Dict[str, str] = Field(default_factory=dict)
 
 
 class MentorshipSessionResponse(BaseModel):
@@ -1482,6 +1705,7 @@ class MentorshipSessionResponse(BaseModel):
     copy_attachment_url: Optional[str] = None
     summary: Optional[str] = None
     status: MentorshipSessionStatus = MentorshipSessionStatus.SCHEDULED
+    join_available: bool = False
     created_at: str
     updated_at: Optional[str] = None
 
@@ -1518,9 +1742,65 @@ class MentorshipCallContextResponse(BaseModel):
     sdk_user_name: Optional[str] = None
     sdk_user_identity: Optional[str] = None
     sdk_role_type: Optional[int] = None
+    agora_app_id: Optional[str] = None
+    agora_channel: Optional[str] = None
+    agora_token: Optional[str] = None
+    agora_uid: Optional[int] = None
     provider_payload: Dict[str, Any] = Field(default_factory=dict)
+    provider_error: Optional[str] = None
     available_from: Optional[str] = None
     available_until: Optional[str] = None
+
+
+class DiscussionCallContextResponse(BaseModel):
+    scope_type: str
+    scope_id: int
+    discussion_key: str
+    discussion_channel: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    scheduled_for: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    call_provider: MentorshipCallProvider = MentorshipCallProvider.ZOOM_VIDEO_SDK
+    mode: MentorshipMode = MentorshipMode.VIDEO
+    participant_role: str = Field(default="listener", pattern="^(host|speaker|listener)$")
+    host_controls_enabled: bool = False
+    room_url: Optional[str] = None
+    join_url: Optional[str] = None
+    host_url: Optional[str] = None
+    sdk_user_name: Optional[str] = None
+    sdk_role_type: Optional[int] = None
+    agora_app_id: Optional[str] = None
+    agora_channel: Optional[str] = None
+    agora_token: Optional[str] = None
+    agora_uid: Optional[int] = None
+    provider_payload: Dict[str, Any] = Field(default_factory=dict)
+    provider_error: Optional[str] = None
+    available_from: Optional[str] = None
+    available_until: Optional[str] = None
+
+
+class DiscussionSpeakerRequestCreate(BaseModel):
+    note: Optional[str] = None
+
+
+class DiscussionSpeakerRequestResponse(BaseModel):
+    id: int
+    scope_type: str
+    scope_id: int
+    series_id: int
+    discussion_key: str
+    discussion_channel: str
+    user_id: str
+    display_name: str
+    status: DiscussionSpeakerRequestStatus = DiscussionSpeakerRequestStatus.PENDING
+    note: Optional[str] = None
+    requested_at: str
+    resolved_at: Optional[str] = None
+    resolved_by_user_id: Optional[str] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+    updated_at: Optional[str] = None
 
 
 class MentorshipEntitlementGrantCreate(BaseModel):
@@ -1583,10 +1863,15 @@ class MentorshipTrackingCycleResponse(BaseModel):
     test_title: Optional[str] = None
     request_status: MentorshipRequestStatus = MentorshipRequestStatus.REQUESTED
     session_status: Optional[MentorshipSessionStatus] = None
+    workflow_stage: MentorshipWorkflowStage = MentorshipWorkflowStage.SUBMITTED
+    booking_open: bool = False
     requested_at: str
     accepted_at: Optional[str] = None
+    feedback_ready_at: Optional[str] = None
+    booking_opened_at: Optional[str] = None
     scheduled_for: Optional[str] = None
     completed_at: Optional[str] = None
+    join_available: bool = False
     slot_id: Optional[int] = None
     slot_mode: Optional[MentorshipMode] = None
     note: Optional[str] = None
@@ -1647,6 +1932,19 @@ class UserPerformanceReportResponse(BaseModel):
     average_provider_marks: float = 0.0
     average_ai_score: float = 0.0
     questions: List[UserPerformanceQuestionRow] = Field(default_factory=list)
+
+
+class MentorshipMessageCreate(BaseModel):
+    body: str
+
+
+class MentorshipMessageResponse(BaseModel):
+    id: int
+    request_id: int
+    sender_user_id: str
+    body: str
+    is_read: bool = False
+    created_at: str
 
 
 CategoryTreeNode.model_rebuild()

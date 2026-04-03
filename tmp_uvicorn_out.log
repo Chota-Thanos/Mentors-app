@@ -1,0 +1,2 @@
+INFO:     127.0.0.1:62777 - "GET /api/v1/premium/collections/9/test HTTP/1.1" 200 OK
+INFO:     192.168.1.6:55158 - "GET /api/v1/premium/collections/9/test HTTP/1.1" 200 OK

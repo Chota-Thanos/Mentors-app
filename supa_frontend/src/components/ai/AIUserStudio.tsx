@@ -10,6 +10,8 @@ import { toast } from "sonner";
 
 import { legacyPremiumAiApi } from "@/lib/legacyPremiumAiApi";
 import { premiumApi, premiumApiRoot } from "@/lib/premiumApi";
+import RoleWorkspaceSidebar from "@/components/layouts/RoleWorkspaceSidebar";
+import { getQuizMasterWorkspaceSections } from "@/components/layouts/roleWorkspaceLinks";
 import {
   normalizeOutputLanguage,
   OUTPUT_LANGUAGE_OPTIONS,
@@ -461,14 +463,6 @@ function normalizeStatements(raw: unknown, depth = 0): string[] {
   return [text];
 }
 
-function looksLikePromptText(text: string): boolean {
-  const cleaned = String(text || "").trim();
-  if (!cleaned) return false;
-  const lowered = cleaned.toLowerCase();
-  if (cleaned.includes("?")) return true;
-  return /^(which|what|how many|how much|who|whom|where|when|select|choose|identify|find|determine|correct|true|false)\b/.test(lowered);
-}
-
 function normalizeTag(value?: string | null): string {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -509,6 +503,32 @@ function normalizeQuestionStatements(question: JsonRecord): string[] {
     ?? question.facts
     ?? null,
   );
+}
+
+function getQuestionRenderParts(question: JsonRecord): {
+  questionText: string;
+  supplementary: string;
+  statements: string[];
+  promptText: string;
+} {
+  const supplementary = String(question.supp_question_statement || question.supplementary_statement || "").trim();
+  const statements = normalizeQuestionStatements(question).map((fact) => String(fact).trim()).filter(Boolean);
+  let questionText = String(question.question_statement || question.question || "").trim();
+  let promptText = String(question.question_prompt || question.prompt || "").trim();
+
+  if (!questionText) {
+    questionText = promptText;
+    promptText = "";
+  } else if (promptText && promptText.toLowerCase() === questionText.toLowerCase()) {
+    promptText = "";
+  }
+
+  return {
+    questionText,
+    supplementary,
+    statements,
+    promptText,
+  };
 }
 
 type OptionShape = { label: string; text: string; is_correct?: boolean };
@@ -798,16 +818,23 @@ type AIUserStudioProps = {
   quizKind: QuizKind;
   mode?: "default" | "quiz_master";
   enforceTargetCollection?: boolean;
+  showQuizKindSwitcher?: boolean;
 };
 
 export default function AIUserStudio({
   quizKind,
   mode = "default",
   enforceTargetCollection = false,
+  showQuizKindSwitcher = false,
 }: AIUserStudioProps) {
   const { user, isAuthenticated } = useAuth();
   const searchParams = useSearchParams();
   const quizMasterMode = mode === "quiz_master";
+  const currentUserId = String(user?.id || "").trim();
+  const quizMasterWorkspaceSections = useMemo(
+    () => getQuizMasterWorkspaceSections(currentUserId || undefined),
+    [currentUserId],
+  );
 
   const [analyses, setAnalyses] = useState<PremiumAIExampleAnalysis[]>([]);
   const [selectedAnalysisId, setSelectedAnalysisId] = useState("");
@@ -853,6 +880,7 @@ export default function AIUserStudio({
   const [recentQuestions, setRecentQuestions] = useState<string[]>([]);
   const [collections, setCollections] = useState<PremiumCollection[]>([]);
   const [selectedCollectionId, setSelectedCollectionId] = useState("");
+  const shouldShowKindSwitcher = !quizMasterMode && showQuizKindSwitcher;
   const [newCollectionName, setNewCollectionName] = useState("");
   const [isAddingToCollection, setIsAddingToCollection] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
@@ -2624,32 +2652,7 @@ export default function AIUserStudio({
 
   const buildSingleAttemptSharePayload = useCallback((attempt: AttemptableQuestion): SharePayload => {
     const question = attempt.question;
-    const supplementary = String(question.supp_question_statement || question.supplementary_statement || "").trim();
-    const statements = normalizeQuestionStatements(question);
-    let promptText = String(question.question_prompt || question.prompt || "").trim();
-    let questionText = String(question.question_statement || question.question || "").trim();
-    let normalizedStatements = statements.map((fact) => String(fact).trim()).filter(Boolean);
-    if (/\bstatement\s*(?:\d+|[ivxlcdm]+)\b/i.test(questionText)) {
-      const split = splitStatementStructure(questionText);
-      if (normalizedStatements.length === 0 && split.statements.length > 0) {
-        normalizedStatements = split.statements;
-      }
-      if (split.lead) {
-        questionText = split.lead;
-      } else if (normalizedStatements.length > 0) {
-        questionText = "Consider the following statements:";
-      }
-      if (!promptText && split.prompt) {
-        promptText = split.prompt;
-      }
-    }
-    if (normalizedStatements.length > 0 && !questionText) {
-      questionText = "Consider the following statements:";
-    }
-    if (normalizedStatements.length > 0 && looksLikePromptText(questionText) && !promptText) {
-      promptText = questionText;
-      questionText = "Consider the following statements:";
-    }
+    const { questionText, supplementary, statements: normalizedStatements, promptText } = getQuestionRenderParts(question);
     const correctAnswer = resolveCorrectAnswer(question, "A");
     const options = normalizeOptions(question.options, correctAnswer);
     const explanationHtml = formatExplanationHtml(String(question.explanation || question.explanation_text || ""));
@@ -2783,32 +2786,7 @@ export default function AIUserStudio({
           const isCorrect = isSubmitted && selectedLabel === correctAnswer;
           const explanation = String(currentQuestion.explanation || currentQuestion.explanation_text || "").trim();
           const explanationHtml = formatExplanationHtml(explanation);
-          const supplementary = String(currentQuestion.supp_question_statement || currentQuestion.supplementary_statement || "").trim();
-          const statements = normalizeQuestionStatements(currentQuestion);
-          let promptText = String(currentQuestion.question_prompt || currentQuestion.prompt || "").trim();
-          let questionText = String(currentQuestion.question_statement || currentQuestion.question || "").trim();
-          let normalizedStatements = statements.map((fact) => String(fact).trim()).filter(Boolean);
-          if (/\bstatement\s*(?:\d+|[ivxlcdm]+)\b/i.test(questionText)) {
-            const split = splitStatementStructure(questionText);
-            if (normalizedStatements.length === 0 && split.statements.length > 0) {
-              normalizedStatements = split.statements;
-            }
-            if (split.lead) {
-              questionText = split.lead;
-            } else if (normalizedStatements.length > 0) {
-              questionText = "Consider the following statements:";
-            }
-            if (!promptText && split.prompt) {
-              promptText = split.prompt;
-            }
-          }
-          if (normalizedStatements.length > 0 && !questionText) {
-            questionText = "Consider the following statements:";
-          }
-          if (normalizedStatements.length > 0 && looksLikePromptText(questionText) && !promptText) {
-            promptText = questionText;
-            questionText = "Consider the following statements:";
-          }
+          const { questionText, supplementary, statements: normalizedStatements, promptText } = getQuestionRenderParts(currentQuestion);
           const isEditingQuestion = editingQuestionKey === currentKey && Boolean(editingQuestionDraft);
 
           return (
@@ -3137,7 +3115,16 @@ export default function AIUserStudio({
   }, [clearGeneratedPreview, quizKind]);
 
   return (
-    <div className="space-y-7">
+    <div className={quizMasterMode ? "space-y-6 lg:grid lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0" : "space-y-7"}>
+      {quizMasterMode ? (
+        <RoleWorkspaceSidebar
+          title="Quiz Master"
+          subtitle="Prelims authoring, parser lanes, and test-series management in one workspace."
+          sections={quizMasterWorkspaceSections}
+        />
+      ) : null}
+
+      <div className="min-w-0 space-y-7">
       <section className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-amber-50 via-white to-sky-50 p-6 shadow-sm">
         <div className="pointer-events-none absolute -right-14 -top-14 h-48 w-48 rounded-full bg-amber-200/30 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-16 left-1/2 h-40 w-40 -translate-x-1/2 rounded-full bg-sky-200/30 blur-3xl" />
@@ -3158,6 +3145,10 @@ export default function AIUserStudio({
               {!useUnifiedMainsLikeLayout ? (
                 <p className="mt-2 text-xs text-slate-600">
                   Current generator: <span className="font-semibold text-slate-800">{QUIZ_KIND_LABEL[quizKind]}</span>. Shared settings are applied across all generators.
+                </p>
+              ) : shouldShowKindSwitcher ? (
+                <p className="mt-2 text-sm text-slate-600">
+                  Start with <span className="font-semibold text-slate-800">{QUIZ_KIND_LABEL[quizKind]}</span> and switch between GK, Maths, and Passage generators from the same workspace.
                 </p>
               ) : null}
               {!useUnifiedMainsLikeLayout && quizMasterMode ? (
@@ -3247,7 +3238,7 @@ export default function AIUserStudio({
             </div>
           ) : null}
 
-          {!useUnifiedMainsLikeLayout ? (
+          {!useUnifiedMainsLikeLayout || shouldShowKindSwitcher ? (
             <div className="grid gap-3 md:grid-cols-3">
               {QUIZ_KINDS.map((kind) => {
                 const isActive = quizKind === kind;
@@ -3256,32 +3247,31 @@ export default function AIUserStudio({
                   <Link
                     key={kind}
                     href={kindRouteMap[kind]}
-                    className={`group rounded-2xl border p-4 transition ${isActive
-                      ? "border-slate-900 bg-slate-900 text-white shadow-lg"
-                      : "border-slate-200 bg-white/90 hover:-translate-y-0.5 hover:border-slate-400 hover:shadow-md"
+                    className={`group rounded-2xl border px-4 py-3 transition ${isActive
+                      ? "border-indigo-300 bg-indigo-50/90 text-indigo-950 shadow-sm"
+                      : "border-slate-200 bg-white/90 hover:border-slate-300 hover:bg-slate-50"
                       }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${isActive ? "bg-white/20 text-white" : meta.tone}`}>
-                        {meta.tag}
-                      </span>
-                      <span className={`text-[11px] font-semibold ${isActive ? "text-white/90" : "text-slate-600 group-hover:text-slate-900"}`}>
-                        {isActive ? "Active" : meta.cta}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className={`text-sm font-semibold ${isActive ? "text-indigo-950" : "text-slate-900"}`}>
+                          {QUIZ_KIND_LABEL[kind]}
+                        </p>
+                        <p className={`mt-0.5 text-[11px] ${isActive ? "text-indigo-700" : "text-slate-500"}`}>
+                          {meta.tag}
+                        </p>
+                      </div>
+                      <span className={`shrink-0 text-[11px] font-semibold ${isActive ? "text-indigo-700" : "text-slate-600 group-hover:text-slate-900"}`}>
+                        {isActive ? "Selected" : meta.cta}
                       </span>
                     </div>
-                    <p className={`mt-3 text-base font-semibold ${isActive ? "text-white" : "text-slate-900"}`}>
-                      {QUIZ_KIND_LABEL[kind]} Generator
-                    </p>
-                    <p className={`mt-1 text-xs leading-relaxed ${isActive ? "text-white/85" : "text-slate-600"}`}>
-                      {meta.description}
-                    </p>
                   </Link>
                 );
               })}
             </div>
           ) : null}
 
-          {!useUnifiedMainsLikeLayout ? (
+          {!useUnifiedMainsLikeLayout || shouldShowKindSwitcher ? (
             <div className="flex flex-wrap gap-2">
               <Link
                 href={kindRouteMap.maths}
@@ -4732,6 +4722,7 @@ export default function AIUserStudio({
           </div>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }

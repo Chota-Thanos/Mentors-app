@@ -1,57 +1,95 @@
-# Supabase Backend (Phase 1)
+# Supabase Backend
 
-This folder contains the **Supabase-Native** backend for the UPSC App. It is designed to replace the legacy SQLAlchemy/Postgres backend incrementally.
+Backend for the Mentors App monorepo. This layer exposes the API used by both `supa_frontend` and `supa_mobile`.
+
+Project-wide overview: [`../README.md`](../README.md)
 
 ## Structure
 
-- **`schema.sql`**: The unified database schema. Run this SQL in your Supabase SQL Editor.
-- **`backend/`**: A slim FastAPI service that acts as the API layer.
-  - **`app/main.py`**: Entry point.
-  - **`app/models.py`**: Pydantic models for the new API.
-  - **`app/routers/premium.py`**: Handles Premium Collections & AI Generation.
-  - **`app/ai_logic.py`**: Encapsulates AI Provider logic (OpenAI/Gemini).
-  - **`app/supabase_client.py`**: Connects to Supabase using `SUPABASE_URL` and `SUPABASE_KEY`.
+- `schema.sql`: core schema bootstrap
+- `migrations/`: targeted SQL migrations
+- `backend/app/main.py`: FastAPI entry point
+- `backend/app/models.py`: Pydantic models
+- `backend/app/routers/premium.py`: collections, quiz test runner, results, complaints, AI routes
+- `backend/app/routers/test_series.py`: test series, mentorship, Zoom integration, prelims discussion/live-class logic
+- `backend/app/ai_logic.py`: AI provider logic and parsing behavior
+- `backend/app/ai_legacy_prompts.py`: legacy prompt instructions used by some parser paths
 
 ## Setup
 
-1.  **Database Migration**:
-    - Copy the content of `schema.sql`.
-    - Paste it into your Supabase Dashboard -> SQL Editor and Run.
+1. Create backend env vars in `backend/.env`.
+2. Install dependencies and run FastAPI.
 
-2.  **Environment Variables**:
-    - Create a `.env` file in `backend/` with:
-      ```
-      SUPABASE_URL=your_supabase_url
-      SUPABASE_KEY=your_supabase_service_role_key
-      OPENAI_API_KEY=sk-...
-      GEMINI_API_KEY=...
-      ```
+```powershell
+cd e:\Mentors-app\supa_back\backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8002
+```
 
-3.  **Run Backend**:
-    ```bash
-    cd backend
-    pip install -r requirements.txt
-    uvicorn app.main:app --reload --port 8002
-    ```
+## Required Environment Variables
 
-## Usage
+- `SUPABASE_URL`
+- `SUPABASE_KEY`
+- `OPENAI_API_KEY`
+- `GEMINI_API_KEY`
+- `API_URL`
+- `ZOOM_CLIENT_ID`
+- `ZOOM_CLIENT_SECRET`
+- `AGORA_APP_ID`
+- `AGORA_APP_CERTIFICATE`
 
-- **Exams**:
-  - `GET/POST/PUT/DELETE /api/v1/premium/exams`
-  - Compatibility: `GET/POST/PUT/DELETE /api/v1/exams`
-- **Categories**:
-  - `GET/POST/PUT/DELETE /api/v1/premium/categories`
-  - Compatibility (quiz-type scoped): `GET/POST/PUT/DELETE /api/v1/premium-categories/{premium_gk|premium_maths|premium_passage}/...`
-- **Collections**: `GET/POST/PUT /api/v1/premium/collections`
-- **Collection Content**: `POST /api/v1/premium/collections/{id}/items`
-- **Quiz Posting**:
-  - `POST /api/v1/premium/quizzes/gk/bulk`
-  - `POST /api/v1/premium/quizzes/maths/bulk`
-  - `POST /api/v1/premium/quizzes/passage`
-  - Supports legacy premium fields: `supp_question_statement`, `statements_facts`, `question_prompt`, `source_reference`,
-    `premium_gk_category_ids` / `premium_maths_category_ids` / `premium_passage_category_ids`, and `alpha_cat_ids`.
-- **Collection Test Runner**:
-  - `GET /api/v1/premium/collections/{id}/test`
-  - `POST /api/v1/premium/collections/{id}/test/score`
-- **AI Instructions**: `GET/POST/PUT /api/v1/premium/ai/instructions`
-- **AI Generation**: `POST /api/v1/premium/ai/generate`
+## Current Backend Responsibilities
+
+### AI Parsing
+
+- stricter quiz parsing field mapping
+- stricter mains field mapping
+- non-destructive normalization of parsed question parts
+
+### Test Series
+
+- series CRUD
+- series test CRUD
+- learner enrollments and access checks
+- prelims vs mains behavior separation
+
+### Learner Prelims Flow
+
+- test runner
+- score submission
+- per-test attempt counts
+- result snapshots
+- question complaint creation and creator review support
+
+### Prelims Discussions / Live Classes
+
+- series-level final discussion stored in series `meta`
+- test-level post-test discussion stored in test `meta`
+- supports:
+  - `video`
+  - `live_zoom`
+- `live_zoom` supports:
+  - connected Zoom auto-provision
+  - manual Zoom link fallback
+- class semantics stored in discussion metadata:
+  - creator-led class
+  - learner joins as listener first
+  - speaker access controlled by host approval on Zoom side
+
+### Mentorship
+
+- mentorship requests
+- slot scheduling
+- evaluation-linked session workflow
+- Zoom meeting / Agora room session context
+
+## Important Migrations
+
+- `migrations/2026-03-12_zoom_integrations.sql`
+- `migrations/2026-03-24_quiz_question_complaints.sql`
+
+## Important Notes About Calls
+
+- Zoom env vars are only for creator-owned Zoom meeting generation through OAuth.
+- Agora env vars power the in-browser mentorship room.
+- Creator-specific Zoom meeting generation still requires per-creator Zoom OAuth connection. The app stores those creator tokens in `mentor_zoom_connections`.

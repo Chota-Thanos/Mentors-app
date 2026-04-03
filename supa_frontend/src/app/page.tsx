@@ -14,15 +14,14 @@ export default function Home() {
             <div className="mb-8 flex justify-center">
               <div className="flex items-center gap-2 rounded-full bg-indigo-50/50 px-3 py-1 text-sm font-medium leading-6 text-indigo-600 ring-1 ring-indigo-600/10 hover:ring-indigo-600/20">
                 <Zap className="h-4 w-4" />
-                <span>New AI Studio 2.0 is live</span>
+                <span>Mentorship workflows are now live</span>
               </div>
             </div>
             <h1 className="text-balance text-3xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-              Master UPSC Preparation with <span className="text-indigo-600">AI Intelligence</span>
+              Master UPSC Preparation with <span className="text-indigo-600">one connected workspace</span>
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
-              Synthesize high-quality mock tests, browse Prelims and Mains test sets, and track your progress with our all-in-one
-              preparation platform.
+              Browse test series, track performance, and use the mentorship flow without turning the main home into a mentor directory.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-x-6">
               <Link
@@ -31,8 +30,20 @@ export default function Home() {
               >
                 Go to Dashboard
               </Link>
-              <Link href="/collections" className="group flex items-center gap-2 text-sm font-bold leading-6 text-slate-900">
-                Browse Tests <span className="transition-transform group-hover:translate-x-1">-&gt;</span>
+              <Link
+                href="/test-series/prelims"
+                className="w-full rounded-xl border border-slate-300 bg-white px-8 py-4 text-center text-sm font-bold text-slate-900 shadow-sm transition-all hover:scale-[1.01] sm:w-auto"
+              >
+                Prelims Programs
+              </Link>
+              <Link
+                href="/test-series/mains"
+                className="w-full rounded-xl border border-slate-300 bg-white px-8 py-4 text-center text-sm font-bold text-slate-900 shadow-sm transition-all hover:scale-[1.01] sm:w-auto"
+              >
+                Mains Programs
+              </Link>
+              <Link href="/mentors" className="group flex items-center gap-2 text-sm font-bold leading-6 text-slate-900">
+                Browse Mentors <span className="transition-transform group-hover:translate-x-1">-&gt;</span>
               </Link>
             </div>
           </div>
@@ -48,7 +59,7 @@ export default function Home() {
               </div>
               <h3 className="text-lg font-bold text-slate-900">AI Quiz Generation</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-500">
-                Paste any article or notes and get UPSC-standard multiple choice questions in seconds.
+                Paste any article or notes and generate practice questions without leaving the app.
               </p>
             </div>
 
@@ -58,17 +69,25 @@ export default function Home() {
               </div>
               <h3 className="text-lg font-bold text-slate-900">Premium Test Banks</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-500">
-                Access curated Prelims and Mains test-ready content designed for IAS aspirants.
+                Access curated prelims and mains series, then move into mentorship when you need expert review.
               </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link href="/test-series/prelims" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                  Prelims Programs
+                </Link>
+                <Link href="/test-series/mains" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                  Mains Programs
+                </Link>
+              </div>
             </div>
 
             <div className="flex flex-col items-start rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               <div className="mb-6 rounded-lg bg-green-50 p-3">
                 <GraduationCap className="h-6 w-6 text-green-600" />
               </div>
-              <h3 className="text-lg font-bold text-slate-900">Test Runner</h3>
+              <h3 className="text-lg font-bold text-slate-900">Mentor Workflows</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-500">
-                Experience a real exam environment with a distraction-free quiz player and instant analytics.
+                Request mentorship, chat first, pay after acceptance, and continue into evaluation or session booking.
               </p>
             </div>
           </div>

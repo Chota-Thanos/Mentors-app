@@ -15,10 +15,10 @@ const stepTone = (state: WorkflowStep["state"]): string => {
 
 export default function WorkflowProgressTrack({ steps }: WorkflowProgressTrackProps) {
   return (
-    <div className="grid gap-3 md:grid-cols-5">
+    <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
       {steps.map((step, index) => (
         <div key={step.key} className="relative">
-          {index < steps.length - 1 ? <div className="absolute left-8 top-8 hidden h-px w-[calc(100%-1rem)] bg-slate-200 md:block" /> : null}
+          {index < steps.length - 1 ? <div className="absolute left-8 top-8 hidden h-px w-[calc(100%-1rem)] bg-slate-200 xl:block" /> : null}
           <div className={`relative h-full rounded-2xl border p-3 ${stepTone(step.state)}`}>
             <div className="flex items-center gap-2">
               <span className="flex h-7 w-7 items-center justify-center rounded-full border border-current text-[11px] font-bold">

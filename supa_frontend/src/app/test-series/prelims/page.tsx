@@ -8,7 +8,8 @@ export default function PrelimsSeriesCatalogPage() {
         <TestSeriesCatalogView
           testKind="prelims"
           title="Prelims Test Series"
-          description="Browse provider-published prelims tests with filters for category, access type, and price."
+          description="Browse published prelims test series. Open a series to see how many tests it contains, review the description, and start any free or accessible test from the series detail page."
+          listingMode="series"
         />
       </div>
     </AppLayout>

@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Supa Frontend
 
-## Getting Started
+Next.js web app for creators, mentors, moderators, and learners.
 
-First, run the development server:
+Project-wide overview: [`../README.md`](../README.md)
 
-```bash
+## Run
+
+```powershell
+cd e:\Mentors-app\supa_frontend
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Main Areas
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Learner
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- series-first test series catalog
+- prelims test runner and result review
+- quiz complaints from result page
+- learner view for prelims discussion videos and live classes
+- discussion visibility directly on prelims series/test list cards before opening the full detail page
 
-## Learn More
+### Quiz Master
 
-To learn more about Next.js, take a look at the following resources:
+- prelims series creation and management
+- quiz creation / parsing workspaces
+- question complaints desk
+- discussion video and live class configuration
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Mains Mentor
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- mains series creation and management
+- copy evaluation workflow
+- mentorship management
+- Zoom meetings and Agora room session delivery
 
-## Deploy on Vercel
+## Current Discussion / Live Class Behavior
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `Discussion video` plays inline on web where embeddable.
+- `Live class on Zoom` is creator-led, not mentorship-style.
+- Creator can choose:
+  - auto-schedule on connected Zoom account
+  - manual existing Zoom link
+- Learner-facing copy assumes:
+  - creator is the main speaker
+  - learners join as listeners first
+  - learners use Zoom raise-hand / host approval to speak
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Important Frontend Pages
+
+- `src/app/test-series/create/page.tsx`
+- `src/components/premium/TestSeriesManageView.tsx`
+- `src/components/premium/TestSeriesConsole.tsx`
+- `src/components/premium/TestSeriesDetailView.tsx`
+- `src/components/premium/CollectionTestResult.tsx`
+- `src/components/premium/QuizComplaintManagementView.tsx`
+- `src/components/premium/DiscussionConfigEditor.tsx`
+- `src/components/premium/ZoomConnectionStatusCard.tsx`
+- `src/app/zoom/connect/callback/page.tsx`
+
+## Environment
+
+At minimum:
+
+- `NEXT_PUBLIC_SUPA_BACKEND_URL`
+- Supabase web auth env vars used by the current client setup
+
+## Notes
+
+- Creator-side Zoom connect is per creator account, not just global env configuration.
+- The current live class model is still Zoom-hosted. It is not yet a fully custom in-app moderated classroom stack.
+- Prelims catalog/detail pages now expose discussion availability at list level so users can see post-test or series wrap-up discussions before opening the series content.

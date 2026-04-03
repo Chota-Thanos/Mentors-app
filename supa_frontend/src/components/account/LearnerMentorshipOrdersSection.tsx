@@ -7,12 +7,15 @@ import { toast } from "sonner";
 
 import WorkflowProgressTrack from "@/components/premium/WorkflowProgressTrack";
 import { loadLearnerMentorshipOrders, type LearnerMentorshipOrdersData } from "@/lib/learnerMentorshipOrders";
+import { premiumApi } from "@/lib/premiumApi";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import {
   buildMentorshipWorkflowSteps,
   formatWorkflowDateTime,
   mentorshipCurrentStatusLabel,
   mentorshipKindLabel,
   mentorshipNextActionLabel,
+  resolveMentorshipWorkflowStage,
 } from "@/lib/mentorshipOrderFlow";
 import { requestOfferedSlotIds } from "@/lib/copyEvaluationFlow";
 
@@ -25,15 +28,40 @@ function toError(error: unknown): string {
 const statusTone = (label: string): string => {
   const normalized = label.toLowerCase();
   if (normalized.includes("completed")) return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  if (normalized.includes("cancelled") || normalized.includes("rejected")) return "border-rose-200 bg-rose-50 text-rose-800";
-  if (normalized.includes("live") || normalized.includes("allotted") || normalized.includes("booked")) return "border-sky-200 bg-sky-50 text-sky-800";
-  if (normalized.includes("evaluation")) return "border-amber-200 bg-amber-50 text-amber-800";
+  if (normalized.includes("closed") || normalized.includes("cancelled")) return "border-rose-200 bg-rose-50 text-rose-800";
+  if (normalized.includes("live") || normalized.includes("scheduled") || normalized.includes("book session")) return "border-sky-200 bg-sky-50 text-sky-800";
+  if (normalized.includes("review") || normalized.includes("feedback")) return "border-amber-200 bg-amber-50 text-amber-800";
   return "border-slate-200 bg-slate-100 text-slate-700";
 };
+
+type LearnerFilter = "all" | "action" | "evaluation" | "session" | "closed";
+
+function plainTextExcerpt(value?: string | null, fallback = "No problem statement attached."): string {
+  const normalized = String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return fallback;
+  return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
+}
+
+function unreadMentorUpdates(request: LearnerMentorshipOrdersData["requests"][number]): number {
+  const rawValue = Number(request.meta?.viewer_unread_message_count || 0);
+  return Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 0;
+}
+
+function buildRealtimeRequestFilter(requestIds: number[]): string | null {
+  const ids = Array.from(new Set(requestIds.filter((value) => Number.isFinite(value) && value > 0)));
+  if (!ids.length) return null;
+  if (ids.length === 1) return `request_id=eq.${ids[0]}`;
+  return `request_id=in.(${ids.join(",")})`;
+}
 
 export default function LearnerMentorshipOrdersSection() {
   const [busy, setBusy] = useState(true);
   const [data, setData] = useState<LearnerMentorshipOrdersData | null>(null);
+  const [filter, setFilter] = useState<LearnerFilter>("all");
+  const [actionBusyId, setActionBusyId] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -57,6 +85,44 @@ export default function LearnerMentorshipOrdersSection() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const requestIds = (data?.requests || []).map((request) => request.id);
+    const filter = buildRealtimeRequestFilter(requestIds);
+    if (!filter) return;
+    const supabase = createSupabaseClient();
+    const channel = supabase
+      .channel(`learner-mentorship-orders-${requestIds.join("-")}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "mentorship_messages", filter },
+        (payload) => {
+          const row = payload.new as { request_id?: number; sender_user_id?: string } | undefined;
+          const requestId = Number(row?.request_id || 0);
+          if (requestId <= 0) return;
+          setData((current) => {
+            if (!current) return current;
+            return {
+              ...current,
+              requests: current.requests.map((request) => {
+                if (request.id !== requestId || row?.sender_user_id === request.user_id || row?.sender_user_id === "system") {
+                  return request;
+                }
+                const nextUnread = unreadMentorUpdates(request) + 1;
+                return {
+                  ...request,
+                  meta: { ...(request.meta || {}), viewer_unread_message_count: nextUnread, viewer_has_unread_messages: true },
+                };
+              }),
+            };
+          });
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [data?.requests]);
 
   const sessionByRequestId = useMemo(() => {
     const map: Record<string, LearnerMentorshipOrdersData["sessions"][number]> = {};
@@ -83,39 +149,152 @@ export default function LearnerMentorshipOrdersSection() {
   }
 
   const requests = data?.requests || [];
+    const requestRows = requests.map((request) => {
+    const session = sessionByRequestId[String(request.id)] || null;
+    const submission = request.submission_id ? data?.submissionsById[String(request.submission_id)] || null : null;
+    const series = request.series_id ? data?.seriesById[String(request.series_id)] || null : null;
+    const test = request.test_collection_id ? data?.testsById[String(request.test_collection_id)] || null : null;
+    const cycle = cycleByRequestId[String(request.id)] || null;
+    const mentorName = data?.mentorNameByUserId[request.provider_user_id] || request.provider_user_id;
+    const offeredSlotCount = Math.max(requestOfferedSlotIds(request).length, request.booking_open ? 1 : 0, cycle?.booking_open ? 1 : 0);
+    const currentStatus = mentorshipCurrentStatusLabel(request, session, submission, offeredSlotCount);
+    const nextAction = mentorshipNextActionLabel(request, session, submission, offeredSlotCount);
+    const steps = buildMentorshipWorkflowSteps({
+      request,
+      session,
+      submission,
+      offeredSlotCount,
+    });
+    const stage = resolveMentorshipWorkflowStage(request, session, submission, offeredSlotCount);
+    const needsPayment = request.status === "accepted" && request.payment_status !== "paid";
+    const hasSessionPhase = Boolean(session) || ["booking_open", "scheduled", "live"].includes(stage);
+    const isClosed = ["completed", "cancelled", "expired"].includes(stage) || ["completed", "cancelled", "rejected", "expired"].includes(request.status);
+    const unreadUpdates = unreadMentorUpdates(request);
+    const needsAction = needsPayment || stage === "booking_open" || Boolean(session?.join_available) || request.status === "rejected" || unreadUpdates > 0;
+    const primaryHref = session?.join_available
+      ? `/mentorship/session/${session.id}?autojoin=1`
+      : needsPayment
+        ? `/my-purchases/mentorship/${request.id}?autopay=1`
+        : `/my-purchases/mentorship/${request.id}`;
+    const primaryLabel = request.status === "rejected"
+      ? "Explore mentors"
+      : session?.join_available
+        ? session.status === "live" ? "Join live call" : "Join call"
+        : needsPayment
+          ? "Pay now"
+          : stage === "booking_open"
+            ? "Select slot"
+            : submission?.checked_copy_pdf_url
+              ? "View feedback"
+              : "Open request";
+    return {
+      request,
+      submission,
+      session,
+      series,
+      test,
+      cycle,
+      mentorName,
+      offeredSlotCount,
+      currentStatus,
+      nextAction,
+      steps,
+      stage,
+      needsAction,
+      hasSessionPhase,
+      isClosed,
+      primaryHref,
+      primaryLabel,
+      unreadUpdates,
+    };
+  });
+
+  const counts = {
+    all: requestRows.length,
+    action: requestRows.filter((row) => row.needsAction).length,
+    evaluation: requestRows.filter((row) => Boolean(row.submission)).length,
+    session: requestRows.filter((row) => row.hasSessionPhase).length,
+    closed: requestRows.filter((row) => row.isClosed).length,
+  };
+
+  const filteredRows = requestRows.filter((row) => {
+    if (filter === "action") return row.needsAction;
+    if (filter === "evaluation") return Boolean(row.submission);
+    if (filter === "session") return row.hasSessionPhase;
+    if (filter === "closed") return row.isClosed;
+    return true;
+  });
+
+  const handleCancelRequest = async (requestId: number) => {
+    if (typeof window !== "undefined" && !window.confirm("Cancel this mentorship request?")) return;
+    setActionBusyId(requestId);
+    try {
+      await premiumApi.put(`/mentorship/requests/${requestId}/status`, { status: "cancelled" });
+      const response = await loadLearnerMentorshipOrders();
+      setData(response);
+      toast.success("Mentorship request cancelled");
+    } catch (error: unknown) {
+      toast.error("Failed to cancel request", { description: toError(error) });
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const handleDeleteRequest = async (requestId: number) => {
+    if (typeof window !== "undefined" && !window.confirm("Delete this mentorship request from your workspace?")) return;
+    setActionBusyId(requestId);
+    try {
+      await premiumApi.delete(`/mentorship/requests/${requestId}`);
+      const response = await loadLearnerMentorshipOrders();
+      setData(response);
+      toast.success("Mentorship request deleted");
+    } catch (error: unknown) {
+      toast.error("Failed to delete request", { description: toError(error) });
+    } finally {
+      setActionBusyId(null);
+    }
+  };
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Mentorship Orders</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Track copy evaluation and mentorship workflows with delivery-style statuses and detailed receipts.
-          </p>
+          <h2 className="text-lg font-semibold text-slate-900">Mentorship Requests</h2>
+          <p className="mt-1 text-sm text-slate-500">Track mentor replies, payment steps, slots, and live session updates in one place.</p>
         </div>
-        <Link href="/mentorship/manage" className="inline-flex rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
-          Open Mentorship Workspace
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/dashboard" className="inline-flex rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+            Back to Dashboard
+          </Link>
+          <Link href="/mentors" className="inline-flex rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+            New Request
+          </Link>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {([
+          ["all", "All"],
+          ["action", "Needs action"],
+          ["evaluation", "Evaluations"],
+          ["session", "Sessions"],
+          ["closed", "Closed"],
+        ] as Array<[LearnerFilter, string]>).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setFilter(value)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold ${filter === value ? "bg-slate-900 text-white" : "border border-slate-300 bg-white text-slate-700"}`}
+          >
+            {label} ({counts[value]})
+          </button>
+        ))}
       </div>
 
       <div className="mt-4 space-y-4">
-        {requests.map((request) => {
-          const session = sessionByRequestId[String(request.id)] || null;
-          const submission = request.submission_id ? data?.submissionsById[String(request.submission_id)] || null : null;
-          const series = request.series_id ? data?.seriesById[String(request.series_id)] || null : null;
-          const test = request.test_collection_id ? data?.testsById[String(request.test_collection_id)] || null : null;
-          const cycle = cycleByRequestId[String(request.id)] || null;
-          const mentorName = data?.mentorNameByUserId[request.provider_user_id] || request.provider_user_id;
-          const offeredSlotCount = Math.max(requestOfferedSlotIds(request).length, cycle?.timeline.some((item) => item.key === "slot_offered") ? 1 : 0);
-          const currentStatus = mentorshipCurrentStatusLabel(request, session, submission, offeredSlotCount);
-          const nextAction = mentorshipNextActionLabel(request, session, submission, offeredSlotCount);
-          const steps = buildMentorshipWorkflowSteps({
-            request,
-            session,
-            submission,
-            offeredSlotCount,
-          });
-
+        {filteredRows.map(({ request, submission, session, series, test, cycle, mentorName, currentStatus, nextAction, steps, primaryHref, primaryLabel, unreadUpdates }) => {
+          const canCancelRequest = !["cancelled", "rejected", "expired", "completed"].includes(request.status) && session?.status !== "live";
+          const canDeleteRequest = ["cancelled", "rejected", "expired", "completed"].includes(request.status) && session?.status !== "live";
           return (
             <article key={request.id} className="rounded-[1.5rem] border border-slate-200 bg-slate-50/70 p-4">
               <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
@@ -128,6 +307,11 @@ export default function LearnerMentorshipOrdersSection() {
                     <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600">
                       {mentorshipKindLabel(request, submission)}
                     </span>
+                    {unreadUpdates > 0 ? (
+                      <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold text-sky-700">
+                        {unreadUpdates} new mentor update{unreadUpdates === 1 ? "" : "s"}
+                      </span>
+                    ) : null}
                   </div>
                   <p className="mt-2 text-sm text-slate-600">
                     Mentor: <span className="font-semibold text-slate-800">{mentorName}</span>
@@ -137,13 +321,10 @@ export default function LearnerMentorshipOrdersSection() {
                   </p>
                   {series ? <p className="text-sm text-slate-600">Series: {series.title}</p> : null}
                   {test ? <p className="text-sm text-slate-600">Test: {test.title}</p> : null}
+                  <p className="mt-2 text-sm text-slate-500">{plainTextExcerpt(request.note)}</p>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 xl:max-w-sm">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Next action</p>
-                  <p className="mt-2 font-semibold text-slate-900">{nextAction}</p>
-                  {session?.starts_at ? <p className="mt-2 text-xs text-slate-500">Session window: {formatWorkflowDateTime(session.starts_at)}</p> : null}
-                </div>
+                <p className="text-sm font-semibold text-slate-900 xl:max-w-sm">{nextAction}</p>
               </div>
 
               <div className="mt-4">
@@ -161,25 +342,48 @@ export default function LearnerMentorshipOrdersSection() {
               ) : null}
 
               <div className="mt-4 flex flex-wrap gap-2">
-                <Link href={`/my-purchases/mentorship/${request.id}`} className="inline-flex rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white">
-                  Open Details
+                <Link href={request.status === "rejected" ? "/mentors" : primaryHref} className="inline-flex rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white">
+                  {primaryLabel}
                 </Link>
+                <Link href={`/my-purchases/mentorship/${request.id}`} className="inline-flex rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                  Open details
+                </Link>
+                {canCancelRequest ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleCancelRequest(request.id)}
+                    disabled={actionBusyId === request.id}
+                    className="inline-flex rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 disabled:opacity-60"
+                  >
+                    {actionBusyId === request.id ? "Working..." : "Cancel"}
+                  </button>
+                ) : null}
+                {canDeleteRequest ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteRequest(request.id)}
+                    disabled={actionBusyId === request.id}
+                    className="inline-flex rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-60"
+                  >
+                    {actionBusyId === request.id ? "Working..." : "Delete"}
+                  </button>
+                ) : null}
                 {submission?.checked_copy_pdf_url ? (
                   <a href={submission.checked_copy_pdf_url} target="_blank" rel="noreferrer" className="inline-flex rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
                     Checked Copy
                   </a>
                 ) : null}
-                {session?.meeting_link ? (
-                  <a href={session.meeting_link} target="_blank" rel="noreferrer" className="inline-flex rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
-                    Join / Open Session Link
-                  </a>
+                {session?.join_available ? (
+                  <Link href={`/mentorship/session/${session.id}?autojoin=1`} className="inline-flex rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                    {session.status === "live" ? "Join live call" : "Join call"}
+                  </Link>
                 ) : null}
               </div>
             </article>
           );
         })}
 
-        {requests.length === 0 ? <p className="text-sm text-slate-500">No mentorship or copy-evaluation workflows yet.</p> : null}
+        {filteredRows.length === 0 ? <p className="text-sm text-slate-500">No mentorship requests match this view yet.</p> : null}
       </div>
     </section>
   );

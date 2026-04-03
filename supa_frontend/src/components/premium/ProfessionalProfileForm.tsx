@@ -114,11 +114,21 @@ export default function ProfessionalProfileForm() {
   const [authenticityNote, setAuthenticityNote] = useState("");
   const [copyEvaluationEnabled, setCopyEvaluationEnabled] = useState(true);
   const [copyEvaluationNote, setCopyEvaluationNote] = useState("");
+  const [mentorshipPrice, setMentorshipPrice] = useState("");
+  const [copyEvaluationPrice, setCopyEvaluationPrice] = useState("");
+  const [currency, setCurrency] = useState("INR");
+  const [responseTimeText, setResponseTimeText] = useState("");
+  const [examFocus, setExamFocus] = useState("");
+  const [studentsMentored, setStudentsMentored] = useState("");
+  const [sessionsCompleted, setSessionsCompleted] = useState("");
   const [defaultCallProvider, setDefaultCallProvider] = useState<MentorshipCallProvider>("custom");
   const [zoomMeetingLink, setZoomMeetingLink] = useState("");
   const [callSetupNote, setCallSetupNote] = useState("");
   const [isPublic, setIsPublic] = useState(true);
   const isMentorProfile = role === "mentor";
+  const achievementRows = useMemo(() => parseList(achievements), [achievements]);
+  const specializationRows = useMemo(() => parseList(specializationTags), [specializationTags]);
+  const languageRows = useMemo(() => parseList(languages), [languages]);
 
   useEffect(() => {
     if (loading) {
@@ -170,6 +180,21 @@ export default function ProfessionalProfileForm() {
             : normalizedRole === "mentor",
         );
         setCopyEvaluationNote(asText(meta.copy_evaluation_note));
+        setMentorshipPrice(
+          meta.mentorship_price !== undefined && meta.mentorship_price !== null ? String(meta.mentorship_price) : "",
+        );
+        setCopyEvaluationPrice(
+          meta.copy_evaluation_price !== undefined && meta.copy_evaluation_price !== null ? String(meta.copy_evaluation_price) : "",
+        );
+        setCurrency(asText(meta.currency) || "INR");
+        setResponseTimeText(asText(meta.response_time_text));
+        setExamFocus(asText(meta.exam_focus));
+        setStudentsMentored(
+          meta.students_mentored !== undefined && meta.students_mentored !== null ? String(meta.students_mentored) : "",
+        );
+        setSessionsCompleted(
+          meta.sessions_completed !== undefined && meta.sessions_completed !== null ? String(meta.sessions_completed) : "",
+        );
       } catch (error: unknown) {
         if (axios.isAxiosError(error) && error.response?.status === 404) {
           const inferredRole = defaultProfileRole;
@@ -181,6 +206,13 @@ export default function ProfessionalProfileForm() {
           setCallSetupNote("");
           setCopyEvaluationEnabled(inferredRole === "mentor");
           setCopyEvaluationNote("");
+          setMentorshipPrice("");
+          setCopyEvaluationPrice("");
+          setCurrency("INR");
+          setResponseTimeText("");
+          setExamFocus("");
+          setStudentsMentored("");
+          setSessionsCompleted("");
         } else {
           if (active) {
             toast.error("Failed to load profile", { description: toError(error) });
@@ -230,6 +262,13 @@ export default function ProfessionalProfileForm() {
           copy_evaluation_enabled: isMentorProfile ? copyEvaluationEnabled : null,
           copy_evaluation_configured: isMentorProfile ? true : null,
           copy_evaluation_note: isMentorProfile ? toNullableRichText(copyEvaluationNote) : null,
+          mentorship_price: isMentorProfile && mentorshipPrice.trim() ? Number(mentorshipPrice) : 0,
+          copy_evaluation_price: isMentorProfile && copyEvaluationPrice.trim() ? Number(copyEvaluationPrice) : 0,
+          currency: isMentorProfile ? currency.trim().toUpperCase() || "INR" : null,
+          response_time_text: isMentorProfile ? responseTimeText.trim() || null : null,
+          exam_focus: isMentorProfile ? examFocus.trim() || null : null,
+          students_mentored: isMentorProfile && studentsMentored.trim() ? Number(studentsMentored) : null,
+          sessions_completed: isMentorProfile && sessionsCompleted.trim() ? Number(sessionsCompleted) : null,
         },
       };
       await premiumApi.put("/profiles/me", payload);
@@ -242,218 +281,389 @@ export default function ProfessionalProfileForm() {
   };
 
   if (loading || busy) {
-    return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading profile form...</div>;
+    return <div className="rounded-[32px] border border-[#eadcf8] bg-[#fcf7ff] p-6 text-sm text-[#6c6088] shadow-[0_24px_50px_-38px_rgba(84,54,191,0.45)]">Loading profile form...</div>;
   }
 
   if (!isAuthenticated) {
-    return <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">Sign in to edit professional profile.</div>;
+    return <div className="rounded-[32px] border border-[#eadcf8] bg-[#fcf7ff] p-6 text-sm text-[#6c6088] shadow-[0_24px_50px_-38px_rgba(84,54,191,0.45)]">Sign in to edit professional profile.</div>;
   }
 
   if (!canEdit) {
     return (
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6">
-        <h1 className="text-xl font-bold text-amber-900">Profile form is role-restricted</h1>
-        <p className="mt-2 text-sm text-amber-800">
+      <div className="rounded-[32px] border border-[#eadcf8] bg-[#fcf7ff] p-6 shadow-[0_24px_50px_-38px_rgba(84,54,191,0.45)]">
+        <h1 className="text-2xl font-semibold text-[#24113d]">Profile form is role-restricted</h1>
+        <p className="mt-2 text-sm leading-6 text-[#6c6088]">
           This form is for Quiz Master and Mains Mentor roles. Users can still browse mentors and test series.
         </p>
       </div>
     );
   }
 
+  const shellClass = "space-y-5 rounded-[36px] border border-[#ecdffc] bg-[linear-gradient(180deg,#fcf7ff_0%,#f7efff_100%)] p-4 shadow-[0_32px_80px_-40px_rgba(84,54,191,0.35)] md:p-6";
+  const cardClass = "rounded-[30px] border border-[#eadcf8] bg-[#fff9ff]/92 p-5 shadow-[0_24px_50px_-40px_rgba(84,54,191,0.45)]";
+  const titleClass = "text-[1.85rem] font-semibold leading-tight text-[#24113d]";
+  const eyebrowClass = "text-[11px] font-semibold uppercase tracking-[0.24em] text-[#7c5cb7]";
+  const inputClass = "w-full rounded-[18px] border border-[#dbcdf3] bg-white/95 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#4256d0] focus:ring-4 focus:ring-[#e1dcff]";
+  const textareaClass = `${inputClass} min-h-[120px]`;
+  const pillClass = (selected: boolean, tone: "indigo" | "mint" = "indigo") =>
+    `rounded-full border px-4 py-2 text-sm font-semibold transition ${
+      selected
+        ? tone === "mint"
+          ? "border-[#8fe3d5] bg-[#8feee0] text-[#0f6a60]"
+          : "border-[#3f53cd] bg-[#4459cf] text-white shadow-[0_12px_22px_-16px_rgba(68,89,207,0.8)]"
+        : "border-[#d9c9f4] bg-[#efe2ff] text-[#6b52a6]"
+    }`;
+
   return (
-    <div className="space-y-4">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4">
-        <h1 className="text-2xl font-bold text-slate-900">Quiz Master / Mains Mentor Professional Profile</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          These details appear on public professional cards for users. Keep highlights factual and trustworthy.
-        </p>
+    <div className={shellClass}>
+      <section className="rounded-[34px] bg-[linear-gradient(180deg,#faf4ff_0%,#f5ebff_100%)] px-5 py-6 md:px-8">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <p className={eyebrowClass}>MentorHub</p>
+            <h1 className="mt-3 text-[3rem] font-semibold leading-[0.95] tracking-[-0.05em] text-[#2b1847] md:text-[4rem]">
+              Settings &amp; Availability
+            </h1>
+            <p className="mt-4 max-w-xl text-base leading-7 text-[#675b83]">
+              Manage your public mentor presence, scheduling preferences, and learner-facing profile content from one
+              place.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full border border-[#d9c9f4] bg-[#efe2ff] px-4 py-2 text-sm font-semibold text-[#5f4698]">
+              {roleOptionLabel(role)}
+            </span>
+            <span className={`rounded-full border px-4 py-2 text-sm font-semibold ${isPublic ? "border-[#8fe3d5] bg-[#8feee0] text-[#0f6a60]" : "border-[#d9c9f4] bg-[#f2e8ff] text-[#6a54a0]"}`}>
+              {isPublic ? "Public profile" : "Private profile"}
+            </span>
+          </div>
+        </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4">
-        <div className="grid gap-3 md:grid-cols-2">
-          <FormFieldShell label="Profile role">
-            <select
-              value={role}
-              onChange={(event) => {
-                const nextRole = normalizeEditableRole(event.target.value, "mentor");
-                setRole(nextRole);
-                if (nextRole === "mentor") {
-                  setCopyEvaluationEnabled(true);
-                }
-              }}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            >
-              {ROLE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {roleOptionLabel(option)}
-                </option>
-              ))}
-            </select>
-          </FormFieldShell>
-          <FormFieldShell label="Display name">
-            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Display name" />
-          </FormFieldShell>
-          <FormFieldShell label="Headline" className="md:col-span-2">
-            <input value={headline} onChange={(event) => setHeadline(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Headline (e.g. UPSC mentor, 8+ years mentoring)" />
-          </FormFieldShell>
-          <RichTextField
-            label="Professional bio"
-            value={bio}
-            onChange={setBio}
-            className="md:col-span-2"
-            placeholder="Write a crisp public introduction, teaching approach, and credibility summary."
-            helperText="This is the main profile description learners read first."
-          />
-          <FormFieldShell label="Years of experience">
-            <input type="number" min={0} value={yearsExperience} onChange={(event) => setYearsExperience(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Years of experience" />
-          </FormFieldShell>
-          <FormFieldShell label="City">
-            <input value={city} onChange={(event) => setCity(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="City" />
-          </FormFieldShell>
-          <FormFieldShell label="Profile image URL" className="md:col-span-2">
-            <input value={profileImageUrl} onChange={(event) => setProfileImageUrl(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Profile image URL" />
-          </FormFieldShell>
-          <FormFieldShell label="Public contact URL">
-            <input value={contactUrl} onChange={(event) => setContactUrl(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Public contact URL (optional)" />
-          </FormFieldShell>
-          <FormFieldShell label="Public email">
-            <input value={publicEmail} onChange={(event) => setPublicEmail(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Public email (optional)" />
-          </FormFieldShell>
-          <FormFieldShell label="Specialization tags">
-            <textarea value={specializationTags} onChange={(event) => setSpecializationTags(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" rows={4} placeholder="Specialization tags (one per line)" />
-          </FormFieldShell>
-          <FormFieldShell label="Languages">
-            <textarea value={languages} onChange={(event) => setLanguages(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" rows={4} placeholder="Languages (one per line)" />
-          </FormFieldShell>
-          <FormFieldShell label="Highlights shown on cards">
-            <textarea value={highlights} onChange={(event) => setHighlights(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" rows={5} placeholder="Highlights shown on cards (one per line)" />
-          </FormFieldShell>
-          <FormFieldShell label="Credentials">
-            <textarea value={credentials} onChange={(event) => setCredentials(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" rows={5} placeholder="Credentials (one per line)" />
-          </FormFieldShell>
-          <FormFieldShell label="Achievements" className="md:col-span-2">
-            <textarea value={achievements} onChange={(event) => setAchievements(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" rows={4} placeholder="Achievements (one per line)" />
-          </FormFieldShell>
-          <FormFieldShell label="Technical / service specifications" className="md:col-span-2">
-            <textarea value={serviceSpecifications} onChange={(event) => setServiceSpecifications(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" rows={4} placeholder="Technical/service specifications (one per line)" />
-          </FormFieldShell>
-          <FormFieldShell label="Authenticity proof URL" className="md:col-span-2">
-            <input value={authenticityProofUrl} onChange={(event) => setAuthenticityProofUrl(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Authenticity proof URL (official profile, certificate page, etc.)" />
-          </FormFieldShell>
-          <RichTextField
-            label="Verification note"
-            value={authenticityNote}
-            onChange={setAuthenticityNote}
-            className="md:col-span-2"
-            placeholder="Add verification context, credential explanation, or official reference details."
-            helperText="Use this to explain how learners should interpret your proof links and claims."
-          />
-          {isMentorProfile ? (
-            <div className="rounded-md border border-sky-200 bg-sky-50/50 p-3 md:col-span-2">
-              <p className="text-sm font-semibold text-slate-900">Mentorship Call Setup</p>
-              <p className="mt-1 text-xs text-slate-600">
-                Choose how audio and video calls should be opened when learners book mentorship slots or accept offered sessions.
-              </p>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <FormFieldShell label="Default call platform">
-                  <select
-                    value={defaultCallProvider}
-                    onChange={(event) => setDefaultCallProvider(event.target.value as MentorshipCallProvider)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    <option value="custom">Custom link / manual setup</option>
-                    <option value="zoom">Zoom</option>
-                  </select>
-                </FormFieldShell>
-                <FormFieldShell label="Reusable Zoom meeting link">
-                  <input
-                    value={zoomMeetingLink}
-                    onChange={(event) => setZoomMeetingLink(event.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="https://zoom.us/j/..."
-                  />
-                </FormFieldShell>
-                <RichTextField
-                  label="Call setup note"
-                  value={callSetupNote}
-                  onChange={setCallSetupNote}
-                  className="md:col-span-2"
-                  placeholder="Add join instructions, backup rules, or how learners should prepare for audio/video sessions."
-                  helperText="Shown on public mentor surfaces to explain how calls will happen."
-                />
+      <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+        <section className={cardClass}>
+          <p className={eyebrowClass}>Profile Identity</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <FormFieldShell label="Profile role">
+              <select
+                value={role}
+                onChange={(event) => {
+                  const nextRole = normalizeEditableRole(event.target.value, "mentor");
+                  setRole(nextRole);
+                  if (nextRole === "mentor") {
+                    setCopyEvaluationEnabled(true);
+                  }
+                }}
+                className={inputClass}
+              >
+                {ROLE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {roleOptionLabel(option)}
+                  </option>
+                ))}
+              </select>
+            </FormFieldShell>
+
+            <FormFieldShell label="Display name">
+              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} className={inputClass} placeholder="Display name" />
+            </FormFieldShell>
+
+            <FormFieldShell label="Headline" className="md:col-span-2">
+              <input value={headline} onChange={(event) => setHeadline(event.target.value)} className={inputClass} placeholder="Headline (e.g. UPSC mentor, 8+ years mentoring)" />
+            </FormFieldShell>
+
+            <RichTextField
+              label="Professional bio"
+              value={bio}
+              onChange={setBio}
+              className="md:col-span-2"
+              placeholder="Write a crisp public introduction, teaching approach, and credibility summary."
+              helperText="This is the first block learners read on your profile."
+            />
+
+            <FormFieldShell label="Years of experience">
+              <input type="number" min={0} value={yearsExperience} onChange={(event) => setYearsExperience(event.target.value)} className={inputClass} placeholder="Years of experience" />
+            </FormFieldShell>
+
+            <FormFieldShell label="City">
+              <input value={city} onChange={(event) => setCity(event.target.value)} className={inputClass} placeholder="City" />
+            </FormFieldShell>
+          </div>
+        </section>
+
+        <section className={cardClass}>
+          <p className={eyebrowClass}>Automation &amp; Preferences</p>
+          <h2 className={`${titleClass} mt-2 text-[2rem]`}>Learner-facing settings</h2>
+          <p className="mt-2 text-sm leading-6 text-[#675b83]">
+            Keep the mentor experience simple: decide how the profile is shown, how mentorship calls open, and whether
+            direct copy evaluation is available.
+          </p>
+
+          <div className="mt-5 space-y-4">
+            <div className="rounded-[24px] border border-[#e4d6f7] bg-[#f8efff] p-4">
+              <p className={eyebrowClass}>Profile visibility</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setIsPublic(true)} className={pillClass(isPublic, "mint")}>
+                  Public
+                </button>
+                <button type="button" onClick={() => setIsPublic(false)} className={pillClass(!isPublic)}>
+                  Private
+                </button>
               </div>
             </div>
-          ) : null}
-          {isMentorProfile ? (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50/50 p-3 md:col-span-2">
-              <p className="text-sm font-semibold text-slate-900">Copy Evaluation Service Availability</p>
-              <p className="mt-1 text-xs text-slate-600">
-                Control whether learners can send copies directly from your mentor profile for evaluation plus mentorship.
-              </p>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <FormFieldShell label="Service status">
-                  <select
-                    value={copyEvaluationEnabled ? "available" : "unavailable"}
-                    onChange={(event) => setCopyEvaluationEnabled(event.target.value === "available")}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+
+            {isMentorProfile ? (
+              <div className="rounded-[24px] border border-[#e4d6f7] bg-[#f8efff] p-4">
+                <p className={eyebrowClass}>Mentorship call setup</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(["custom", "zoom"] as MentorshipCallProvider[]).map((provider) => (
+                    <button
+                      key={provider}
+                      type="button"
+                      onClick={() => setDefaultCallProvider(provider)}
+                      className={pillClass(defaultCallProvider === provider)}
+                    >
+                      {provider === "zoom" ? "Zoom" : "Custom link"}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-4 space-y-4">
+                  <FormFieldShell label="Reusable meeting link">
+                    <input
+                      value={zoomMeetingLink}
+                      onChange={(event) => setZoomMeetingLink(event.target.value)}
+                      className={inputClass}
+                      placeholder="https://zoom.us/j/... or custom meeting link"
+                    />
+                  </FormFieldShell>
+                  <RichTextField
+                    label="Call setup note"
+                    value={callSetupNote}
+                    onChange={setCallSetupNote}
+                    placeholder="Explain how learners should join, prepare, or recover if the primary link fails."
+                    helperText="This copy appears anywhere the learner sees your session handoff rules."
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {isMentorProfile ? (
+              <div className="rounded-[24px] border border-[#e4d6f7] bg-[#f8efff] p-4">
+                <p className={eyebrowClass}>Copy evaluation</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCopyEvaluationEnabled(true)}
+                    className={pillClass(copyEvaluationEnabled, "mint")}
                   >
-                    <option value="available">Available for copy evaluation</option>
-                    <option value="unavailable">Unavailable for copy evaluation</option>
-                  </select>
-                </FormFieldShell>
-                <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                  {copyEvaluationEnabled
-                    ? "Learners will see the direct copy evaluation form on your public mentor profile."
-                    : "Learners will not see the direct copy evaluation form on your public mentor profile."}
+                    Available
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCopyEvaluationEnabled(false)}
+                    className={pillClass(!copyEvaluationEnabled)}
+                  >
+                    Unavailable
+                  </button>
                 </div>
                 <RichTextField
                   label="Copy evaluation note"
                   value={copyEvaluationNote}
                   onChange={setCopyEvaluationNote}
-                  className="md:col-span-2"
-                  placeholder="Set expectations for evaluation scope, turnaround style, or mentorship follow-up."
-                  helperText="This note appears on your direct copy evaluation panel."
+                  className="mt-4"
+                  placeholder="Set expectations for evaluation scope, turnaround, and follow-up mentorship."
+                  helperText="Learners see this before they submit a copy directly from your public profile."
                 />
               </div>
-            </div>
-          ) : null}
-        </div>
+            ) : null}
 
-        {isMentorProfile ? (
-          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <p className="text-sm font-semibold text-slate-900">Mentorship Operations</p>
-            <p className="mt-1 text-xs text-slate-600">
-              Availability scheduling, mentorship scope, and call records are managed from the mentorship workspace so
-              the mentor-facing flow stays in one place.
-            </p>
-            <p className="mt-1 text-xs text-emerald-700">
-              Direct copy evaluation + mentorship is enabled by default for Mains Mentor profiles unless you turn it off in Mentorship Manage.
-            </p>
-            <Link
-              href="/mentorship/manage"
-              className="mt-3 inline-flex rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-700"
-            >
-              Open Mentorship Manage
-            </Link>
+            {isMentorProfile ? (
+              <div className="rounded-[24px] border border-[#e4d6f7] bg-[#f8efff] p-4">
+                <p className={eyebrowClass}>Pricing &amp; response</p>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <FormFieldShell label="Mentorship only price">
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={mentorshipPrice}
+                      onChange={(event) => setMentorshipPrice(event.target.value)}
+                      className={inputClass}
+                      placeholder="e.g. 1499"
+                    />
+                  </FormFieldShell>
+                  <FormFieldShell label="Evaluation + mentorship price">
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={copyEvaluationPrice}
+                      onChange={(event) => setCopyEvaluationPrice(event.target.value)}
+                      className={inputClass}
+                      placeholder="e.g. 2499"
+                    />
+                  </FormFieldShell>
+                  <FormFieldShell label="Currency">
+                    <input value={currency} onChange={(event) => setCurrency(event.target.value)} className={inputClass} placeholder="INR" />
+                  </FormFieldShell>
+                  <FormFieldShell label="Response time copy">
+                    <input
+                      value={responseTimeText}
+                      onChange={(event) => setResponseTimeText(event.target.value)}
+                      className={inputClass}
+                      placeholder="Usually replies within 2 hours"
+                    />
+                  </FormFieldShell>
+                </div>
+              </div>
+            ) : null}
+
+            {isMentorProfile ? (
+              <div className="rounded-[24px] border border-[#e4d6f7] bg-[#f8efff] p-4">
+                <p className={eyebrowClass}>Public trust stats</p>
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  <FormFieldShell label="Exam focus">
+                    <input value={examFocus} onChange={(event) => setExamFocus(event.target.value)} className={inputClass} placeholder="UPSC GS, Essay, Ethics" />
+                  </FormFieldShell>
+                  <FormFieldShell label="Students mentored">
+                    <input type="number" min={0} value={studentsMentored} onChange={(event) => setStudentsMentored(event.target.value)} className={inputClass} placeholder="1200" />
+                  </FormFieldShell>
+                  <FormFieldShell label="Sessions completed">
+                    <input type="number" min={0} value={sessionsCompleted} onChange={(event) => setSessionsCompleted(event.target.value)} className={inputClass} placeholder="3400" />
+                  </FormFieldShell>
+                </div>
+              </div>
+            ) : null}
+
+            {isMentorProfile ? (
+              <div className="rounded-[24px] border border-[#d6caf3] bg-white/80 p-4">
+                <p className={eyebrowClass}>Availability calendar</p>
+                <p className="mt-2 text-sm leading-6 text-[#675b83]">
+                  Day-wise availability, slot publishing, and learner booking windows are managed in the dedicated
+                  mentorship workspace.
+                </p>
+                <Link
+                  href="/mentorship/manage"
+                  className="mt-4 inline-flex rounded-full border border-[#3f53cd] bg-[#4459cf] px-5 py-3 text-sm font-semibold text-white shadow-[0_12px_22px_-16px_rgba(68,89,207,0.8)]"
+                >
+                  Open availability workspace
+                </Link>
+              </div>
+            ) : null}
           </div>
-        ) : null}
+        </section>
+      </div>
 
-        <label className="mt-4 inline-flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
-          Show this profile publicly
-        </label>
+      <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+        <section className={cardClass}>
+          <p className={eyebrowClass}>Contact &amp; Proof</p>
+          <div className="mt-4 grid gap-4">
+            <FormFieldShell label="Profile image URL">
+              <input value={profileImageUrl} onChange={(event) => setProfileImageUrl(event.target.value)} className={inputClass} placeholder="Profile image URL" />
+            </FormFieldShell>
 
-        <div className="mt-4">
+            <FormFieldShell label="Public contact URL">
+              <input value={contactUrl} onChange={(event) => setContactUrl(event.target.value)} className={inputClass} placeholder="Public contact URL" />
+            </FormFieldShell>
+
+            <FormFieldShell label="Public email">
+              <input value={publicEmail} onChange={(event) => setPublicEmail(event.target.value)} className={inputClass} placeholder="Public email" />
+            </FormFieldShell>
+
+            <FormFieldShell label="Authenticity proof URL">
+              <input value={authenticityProofUrl} onChange={(event) => setAuthenticityProofUrl(event.target.value)} className={inputClass} placeholder="Official profile, certificate page, or proof link" />
+            </FormFieldShell>
+
+            <RichTextField
+              label="Verification note"
+              value={authenticityNote}
+              onChange={setAuthenticityNote}
+              placeholder="Explain the context behind your credentials, proof links, and public trust signals."
+              helperText="Keep this factual and short."
+            />
+          </div>
+        </section>
+
+        <section className={cardClass}>
+          <p className={eyebrowClass}>Public Profile Content</p>
+          <h2 className={`${titleClass} mt-2 text-[2rem]`}>Highlights learners will see</h2>
+          <p className="mt-2 text-sm leading-6 text-[#675b83]">
+            Keep this section clean and scannable. These fields shape the public card, mentor profile summary, and trust
+            layer.
+          </p>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            {achievementRows.slice(0, 3).map((item) => (
+              <span key={item} className="rounded-full border border-[#8fe3d5] bg-[#8feee0] px-3 py-1.5 text-xs font-semibold text-[#0f6a60]">
+                {item}
+              </span>
+            ))}
+            {achievementRows.length === 0 ? (
+              <span className="rounded-full border border-[#d9c9f4] bg-[#efe2ff] px-3 py-1.5 text-xs font-semibold text-[#6b52a6]">
+                Add achievements below
+              </span>
+            ) : null}
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <FormFieldShell label="Specialization tags">
+              <textarea value={specializationTags} onChange={(event) => setSpecializationTags(event.target.value)} className={textareaClass} rows={5} placeholder="One specialization tag per line" />
+            </FormFieldShell>
+
+            <FormFieldShell label="Languages">
+              <textarea value={languages} onChange={(event) => setLanguages(event.target.value)} className={textareaClass} rows={5} placeholder="One language per line" />
+            </FormFieldShell>
+
+            <FormFieldShell label="Highlights shown on cards">
+              <textarea value={highlights} onChange={(event) => setHighlights(event.target.value)} className={textareaClass} rows={5} placeholder="Short highlight per line" />
+            </FormFieldShell>
+
+            <FormFieldShell label="Credentials">
+              <textarea value={credentials} onChange={(event) => setCredentials(event.target.value)} className={textareaClass} rows={5} placeholder="One credential per line" />
+            </FormFieldShell>
+
+            <FormFieldShell label="Achievements" className="md:col-span-2">
+              <textarea value={achievements} onChange={(event) => setAchievements(event.target.value)} className={textareaClass} rows={5} placeholder="One achievement per line" />
+            </FormFieldShell>
+
+            <FormFieldShell label="Technical / service specifications" className="md:col-span-2">
+              <textarea value={serviceSpecifications} onChange={(event) => setServiceSpecifications(event.target.value)} className={textareaClass} rows={5} placeholder="One service specification per line" />
+            </FormFieldShell>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            {specializationRows.slice(0, 4).map((item) => (
+              <span key={item} className="rounded-full border border-[#d9c9f4] bg-[#efe2ff] px-3 py-1.5 text-xs font-semibold text-[#6b52a6]">
+                {item}
+              </span>
+            ))}
+            {languageRows.slice(0, 3).map((item) => (
+              <span key={item} className="rounded-full border border-[#d9c9f4] bg-white px-3 py-1.5 text-xs font-semibold text-[#5f5b73]">
+                {item}
+              </span>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className={`${cardClass} sticky bottom-4`}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className={eyebrowClass}>Save</p>
+            <p className="mt-2 text-sm leading-6 text-[#675b83]">
+              Save all profile, call setup, and public content changes together.
+            </p>
+          </div>
           <button
             type="button"
             onClick={() => void saveProfile()}
             disabled={saving}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            className="inline-flex min-w-[240px] items-center justify-center rounded-full border border-[#3f53cd] bg-[#4459cf] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_12px_22px_-16px_rgba(68,89,207,0.8)] transition disabled:opacity-60"
           >
-            {saving ? "Saving..." : "Save Profile"}
+            {saving ? "Saving..." : "Save All Changes"}
           </button>
         </div>
-      </section>
+      </div>
     </div>
   );
 }

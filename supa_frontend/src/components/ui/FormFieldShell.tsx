@@ -17,8 +17,8 @@ export default function FormFieldShell({
 }: FormFieldShellProps) {
   return (
     <div className={`space-y-2 ${className}`.trim()}>
-      <label className="block text-sm font-semibold text-slate-900">{label}</label>
-      {helperText ? <p className="text-xs leading-5 text-slate-500">{helperText}</p> : null}
+      <label className="block text-sm font-semibold text-[var(--app-text)]">{label}</label>
+      {helperText ? <p className="text-xs leading-5 text-[var(--app-text-muted)]">{helperText}</p> : null}
       {children}
     </div>
   );

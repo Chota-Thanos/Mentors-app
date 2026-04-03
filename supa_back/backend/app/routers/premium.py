@@ -27,6 +27,7 @@ from ..ai_logic import (
     analyze_style_profile,
     evaluate_mains_answer,
     extract_text_from_images,
+    generate_dashboard_performance_analysis,
     generate_quiz_content,
     refine_style_profile,
     generate_mains_questions,
@@ -57,6 +58,10 @@ from ..models import (
     CollectionTestKind,
     CollectionTestQuestion,
     CollectionTestResponse,
+    QuizQuestionComplaintCreate,
+    QuizQuestionComplaintResponse,
+    QuizQuestionComplaintStatus,
+    QuizQuestionComplaintUpdate,
     CollectionTestScoreDetail,
     CollectionTestScoreRequest,
     CollectionTestScoreResponse,
@@ -71,6 +76,7 @@ from ..models import (
     ChallengeLinkCreateRequest,
     ChallengeLinkResponse,
     ChallengeLinkUpdateRequest,
+    PublicChallengeListItemResponse,
     ChallengeScoreResponse,
     ChallengeTestQuestion,
     ChallengeTestResponse,
@@ -141,6 +147,10 @@ DRAFT_QUIZZES_MIGRATION_HINT = (
     "Missing premium_ai_draft_quizzes table. "
     "Run supa_back/migrations/2026-02-14_premium_ai_draft_quizzes.sql in Supabase SQL Editor."
 )
+DRAFT_QUIZZES_OWNERSHIP_MIGRATION_HINT = (
+    "Missing premium_ai_draft_quizzes.author_id ownership column. "
+    "Run supa_back/migrations/2026-03-25_premium_ai_draft_quiz_ownership.sql in Supabase SQL Editor."
+)
 CATEGORY_AI_SOURCES_TABLE = "category_ai_sources"
 CATEGORY_AI_SOURCES_MIGRATION_HINT = (
     "Missing category_ai_sources table. "
@@ -159,6 +169,7 @@ UPLOADED_PDFS_MIGRATION_HINT = (
 )
 CHALLENGE_LINKS_TABLE = "collection_challenge_links"
 CHALLENGE_ATTEMPTS_TABLE = "collection_challenge_attempts"
+CHALLENGE_PUBLIC_TOKEN_RE = re.compile(r"^c(?P<id>\d+)-(?P<prefix>[a-f0-9]{16})$")
 CHALLENGES_MIGRATION_HINT = (
     "Missing challenge tables. "
     "Run supa_back/migrations/2026-02-16_collection_challenges.sql in Supabase SQL Editor."
@@ -167,6 +178,11 @@ USER_AI_QUIZ_HINTS_TABLE = "user_ai_quiz_hints"
 USER_AI_QUIZ_HINTS_MIGRATION_HINT = (
     "Missing user_ai_quiz_hints table. "
     "Run supa_back/migrations/2026-02-16_user_ai_quiz_hints.sql in Supabase SQL Editor."
+)
+QUIZ_COMPLAINTS_TABLE = "quiz_question_complaints"
+QUIZ_COMPLAINTS_MIGRATION_HINT = (
+    "Missing quiz_question_complaints table. "
+    "Run supa_back/migrations/2026-03-24_quiz_question_complaints.sql in Supabase SQL Editor."
 )
 ONBOARDING_REQUESTS_TABLE = "professional_onboarding_requests"
 ONBOARDING_REQUESTS_MIGRATION_HINT = (
@@ -178,6 +194,8 @@ PROFILES_MIGRATION_HINT = (
     "Missing creator_mentor_profiles table. "
     "Run supa_back/migrations/2026-02-23_profiles_and_subscriptions_scaffold.sql in Supabase SQL Editor."
 )
+TEST_SERIES_TABLE = "test_series"
+TEST_SERIES_ENROLLMENTS_TABLE = "test_series_enrollments"
 MIX_PREVIEW_MAX_CONCURRENT_JOBS = max(1, int(os.getenv("MIX_PREVIEW_MAX_CONCURRENT_JOBS", "2")))
 MIX_PREVIEW_JOB_TTL_SECONDS = max(300, int(os.getenv("MIX_PREVIEW_JOB_TTL_SECONDS", "3600")))
 MIX_PREVIEW_TASK_TIMEOUT_SECONDS = max(20, int(os.getenv("MIX_PREVIEW_TASK_TIMEOUT_SECONDS", "120")))
@@ -307,6 +325,17 @@ def _safe_first(query_call: Any) -> Optional[Dict[str, Any]]:
 def _is_missing_table_error(exc: Exception, table_name: str) -> bool:
     error_text = str(exc).lower()
     return "could not find the table" in error_text and table_name.lower() in error_text
+
+
+def _is_missing_column_error(exc: Exception, table_name: str, column_name: str) -> bool:
+    error_text = str(exc).lower()
+    table_token = table_name.lower()
+    column_token = column_name.lower()
+    return (
+        (f"could not find the '{column_token}' column" in error_text and table_token in error_text)
+        or (f'column "{column_token}"' in error_text and "does not exist" in error_text)
+        or (f"{table_token}.{column_token}" in error_text and "does not exist" in error_text)
+    )
 
 
 def _raise_example_analyses_migration_required(exc: Exception) -> None:
@@ -1299,6 +1328,11 @@ def _raise_exams_migration_required(exc: Exception) -> None:
 def _raise_draft_quizzes_migration_required(exc: Exception) -> None:
     logger.warning("premium_ai_draft_quizzes schema check failed: %s", exc)
     raise HTTPException(status_code=503, detail=DRAFT_QUIZZES_MIGRATION_HINT)
+
+
+def _raise_draft_quizzes_ownership_migration_required(exc: Exception) -> None:
+    logger.warning("premium_ai_draft_quizzes ownership schema check failed: %s", exc)
+    raise HTTPException(status_code=503, detail=DRAFT_QUIZZES_OWNERSHIP_MIGRATION_HINT)
 
 
 def _raise_category_ai_sources_migration_required(exc: Exception) -> None:
@@ -3181,6 +3215,30 @@ def _hash_challenge_token(token: str) -> str:
     return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
 
 
+def _challenge_public_token_from_row(row: Dict[str, Any]) -> Optional[str]:
+    try:
+        challenge_id = int(row.get("id") or 0)
+    except (TypeError, ValueError):
+        return None
+    token_hash = str(row.get("token_hash") or "").strip().lower()
+    if challenge_id <= 0 or len(token_hash) < 16 or not re.fullmatch(r"[a-f0-9]+", token_hash):
+        return None
+    return f"c{challenge_id}-{token_hash[:16]}"
+
+
+def _challenge_public_token_parts(token: str) -> Optional[Tuple[int, str]]:
+    match = CHALLENGE_PUBLIC_TOKEN_RE.fullmatch(str(token or "").strip().lower())
+    if not match:
+        return None
+    try:
+        challenge_id = int(match.group("id"))
+    except (TypeError, ValueError):
+        return None
+    if challenge_id <= 0:
+        return None
+    return challenge_id, match.group("prefix")
+
+
 def _challenge_share_path(token: str) -> str:
     return f"/challenge/{token}"
 
@@ -3210,6 +3268,81 @@ def _collection_author_id(collection_row: Dict[str, Any]) -> Optional[str]:
     return author_id or None
 
 
+def _resolve_collection_creator_context(
+    collection_row: Dict[str, Any],
+    supabase: Client,
+) -> Tuple[Optional[int], str]:
+    raw_series_id = collection_row.get("series_id")
+    try:
+        series_id = int(raw_series_id) if raw_series_id is not None else None
+    except (TypeError, ValueError):
+        series_id = None
+    if series_id and series_id > 0:
+        series_row = _first(
+            supabase.table(TEST_SERIES_TABLE)
+            .select("id,provider_user_id")
+            .eq("id", series_id)
+            .limit(1)
+            .execute()
+        )
+        provider_user_id = str((series_row or {}).get("provider_user_id") or "").strip()
+        if provider_user_id:
+            return series_id, provider_user_id
+
+    author_id = _collection_author_id(collection_row) or str(collection_row.get("created_by") or "").strip()
+    if author_id:
+        return series_id, author_id
+    raise HTTPException(status_code=400, detail="This test has no assigned creator.")
+
+
+def _collection_title_map(collection_ids: List[int], supabase: Client) -> Dict[int, str]:
+    normalized_ids = sorted({int(value) for value in collection_ids if int(value) > 0})
+    if not normalized_ids:
+        return {}
+    query = supabase.table("collections").select("id,title")
+    if len(normalized_ids) == 1:
+        rows = _rows(query.eq("id", normalized_ids[0]).execute())
+    else:
+        rows = _rows(query.in_("id", normalized_ids).execute())
+    output: Dict[int, str] = {}
+    for row in rows:
+        try:
+            collection_id = int(row.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if collection_id <= 0:
+            continue
+        output[collection_id] = str(row.get("title") or "").strip()
+    return output
+
+
+def _quiz_complaint_row_view(
+    row: Dict[str, Any],
+    *,
+    collection_title: Optional[str] = None,
+) -> QuizQuestionComplaintResponse:
+    return QuizQuestionComplaintResponse(
+        id=int(row.get("id") or 0),
+        collection_id=int(row.get("collection_id") or 0),
+        collection_title=collection_title or None,
+        series_id=int(row.get("series_id") or 0) or None,
+        creator_user_id=str(row.get("creator_user_id") or "").strip(),
+        user_id=str(row.get("user_id") or "").strip(),
+        attempt_id=int(row.get("attempt_id") or 0),
+        question_item_id=int(row.get("question_item_id") or 0),
+        question_number=int(row.get("question_number") or 0),
+        question_text=str(row.get("question_text") or "").strip(),
+        selected_option=str(row.get("selected_option") or "").strip() or None,
+        correct_answer=str(row.get("correct_answer") or "").strip() or None,
+        complaint_text=str(row.get("complaint_text") or "").strip(),
+        status=QuizQuestionComplaintStatus(str(row.get("status") or QuizQuestionComplaintStatus.RECEIVED.value)),
+        creator_note=str(row.get("creator_note") or "").strip() or None,
+        created_at=str(row.get("created_at") or ""),
+        updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
+        resolved_at=str(row.get("resolved_at")) if row.get("resolved_at") else None,
+    )
+
+
 def _require_collection_owner_or_admin(
     *,
     collection_row: Dict[str, Any],
@@ -3235,7 +3368,8 @@ def _require_collection_owner_or_admin(
 
 
 def _challenge_row_view(row: Dict[str, Any], *, token: Optional[str] = None) -> Dict[str, Any]:
-    share_path = _challenge_share_path(token) if token else None
+    challenge_token = token or _challenge_public_token_from_row(row)
+    share_path = _challenge_share_path(challenge_token) if challenge_token else None
     share_url = _build_public_url(share_path) if share_path else None
     return {
         "id": int(row["id"]),
@@ -3256,25 +3390,75 @@ def _challenge_row_view(row: Dict[str, Any], *, token: Optional[str] = None) -> 
     }
 
 
-def _fetch_challenge_by_token(
+def _latest_live_challenge_row_for_collection(
     *,
-    token: str,
+    collection_id: int,
     supabase: Client,
-    include_inactive: bool = False,
-) -> Dict[str, Any]:
-    token_hash = _hash_challenge_token(token)
+) -> Optional[Dict[str, Any]]:
     try:
-        row = _first(
+        rows = _rows(
             supabase.table(CHALLENGE_LINKS_TABLE)
             .select("*")
-            .eq("token_hash", token_hash)
-            .limit(1)
+            .eq("collection_id", collection_id)
+            .eq("is_active", True)
+            .order("created_at", desc=True)
+            .limit(12)
             .execute()
         )
     except Exception as exc:
         if _is_missing_table_like_error(exc, CHALLENGE_LINKS_TABLE):
             _raise_challenges_migration_required(exc)
         raise
+
+    now = _utc_now()
+    for row in rows:
+        expires_at = _parse_datetime(row.get("expires_at"))
+        if expires_at is not None and expires_at <= now:
+            continue
+        return row
+    return None
+
+
+def _fetch_challenge_by_token(
+    *,
+    token: str,
+    supabase: Client,
+    include_inactive: bool = False,
+) -> Dict[str, Any]:
+    row: Optional[Dict[str, Any]] = None
+    public_token_parts = _challenge_public_token_parts(token)
+    if public_token_parts:
+        challenge_id, token_prefix = public_token_parts
+        try:
+            candidate_row = _first(
+                supabase.table(CHALLENGE_LINKS_TABLE)
+                .select("*")
+                .eq("id", challenge_id)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            if _is_missing_table_like_error(exc, CHALLENGE_LINKS_TABLE):
+                _raise_challenges_migration_required(exc)
+            raise
+        candidate_hash = str((candidate_row or {}).get("token_hash") or "").strip().lower()
+        if candidate_row and candidate_hash.startswith(token_prefix):
+            row = candidate_row
+
+    if not row:
+        token_hash = _hash_challenge_token(token)
+        try:
+            row = _first(
+                supabase.table(CHALLENGE_LINKS_TABLE)
+                .select("*")
+                .eq("token_hash", token_hash)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            if _is_missing_table_like_error(exc, CHALLENGE_LINKS_TABLE):
+                _raise_challenges_migration_required(exc)
+            raise
     if not row:
         raise HTTPException(status_code=404, detail="Challenge link not found.")
 
@@ -3307,6 +3491,35 @@ def _challenge_questions_payload(questions: List[CollectionTestQuestion]) -> Lis
             )
         )
     return output
+
+
+def _public_challenge_row_view(
+    *,
+    challenge_row: Dict[str, Any],
+    collection_row: Dict[str, Any],
+    question_count: int,
+) -> Optional[PublicChallengeListItemResponse]:
+    public_token = _challenge_public_token_from_row(challenge_row)
+    if not public_token:
+        return None
+    share_path = _challenge_share_path(public_token)
+    share_url = _build_public_url(share_path)
+    collection_meta = collection_row.get("meta") if isinstance(collection_row.get("meta"), dict) else {}
+    return PublicChallengeListItemResponse(
+        challenge_id=int(challenge_row.get("id") or 0),
+        challenge_title=str(challenge_row.get("title") or "Challenge"),
+        challenge_description=str(challenge_row.get("description") or "").strip() or None,
+        collection_id=int(collection_row.get("id") or 0),
+        collection_title=str(collection_row.get("title") or "Untitled Test"),
+        collection_description=str(collection_row.get("description") or "").strip() or None,
+        collection_thumbnail_url=str(collection_row.get("thumbnail_url") or "").strip() or None,
+        test_kind=_resolve_collection_test_kind(collection_meta),
+        question_count=max(0, int(question_count or 0)),
+        total_attempts=int(challenge_row.get("total_attempts") or 0),
+        expires_at=str(challenge_row.get("expires_at")) if challenge_row.get("expires_at") else None,
+        share_path=share_path,
+        share_url=share_url,
+    )
 
 
 def _score_expanded_questions(
@@ -6211,7 +6424,12 @@ def _save_draft_quiz(
     quiz_kind: QuizKind,
     payload: SavePremiumDraftRequest,
     supabase: Client,
+    author_id: str,
 ) -> Dict[str, Any]:
+    normalized_author_id = str(author_id or "").strip()
+    if not normalized_author_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
     parsed = payload.parsed_quiz_data or {}
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=400, detail="parsed_quiz_data must be an object.")
@@ -6228,12 +6446,15 @@ def _save_draft_quiz(
             "source_url": payload.source_url,
             "source_pdf_id": payload.source_pdf_id,
             "notes": payload.notes,
+            "author_id": normalized_author_id,
         }
         try:
             return _first(supabase.table(DRAFT_QUIZZES_TABLE).insert(row_data).execute())
         except Exception as exc:
             if _is_missing_table_error(exc, DRAFT_QUIZZES_TABLE):
                 _raise_draft_quizzes_migration_required(exc)
+            if _is_missing_column_error(exc, DRAFT_QUIZZES_TABLE, "author_id"):
+                _raise_draft_quizzes_ownership_migration_required(exc)
             raise
 
     if quiz_kind == QuizKind.PASSAGE and isinstance(parsed.get("passages"), list) and parsed["passages"]:
@@ -6284,28 +6505,49 @@ def _save_draft_quiz(
 @compat_router.post("/premium-ai-quizzes/save-draft/gk", response_model=PremiumAIDraftQuiz)
 def save_premium_gk_draft(
     payload: SavePremiumDraftRequest,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    return _save_draft_quiz(QuizKind.GK, payload, supabase)
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    return _save_draft_quiz(QuizKind.GK, payload, supabase, author_id=user_id)
 
 
 @compat_router.post("/premium-ai-quizzes/save-draft/maths", response_model=PremiumAIDraftQuiz)
 def save_premium_maths_draft(
     payload: SavePremiumDraftRequest,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    return _save_draft_quiz(QuizKind.MATHS, payload, supabase)
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    return _save_draft_quiz(QuizKind.MATHS, payload, supabase, author_id=user_id)
 
 
 @compat_router.post("/premium-ai-quizzes/save-draft/passage", response_model=PremiumAIDraftQuiz)
 def save_premium_passage_draft(
     payload: SavePremiumDraftRequest,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    return _save_draft_quiz(QuizKind.PASSAGE, payload, supabase)
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    return _save_draft_quiz(QuizKind.PASSAGE, payload, supabase, author_id=user_id)
+
+
+def _draft_owner_id(row: Dict[str, Any]) -> Optional[str]:
+    owner_id = str(row.get("author_id") or row.get("user_id") or "").strip()
+    return owner_id or None
+
+
+def _require_draft_owner_or_admin(row: Dict[str, Any], user_ctx: Dict[str, Any]) -> None:
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    if bool(user_ctx.get("is_admin")):
+        return
+
+    owner_id = _draft_owner_id(row)
+    if owner_id and owner_id == user_id:
+        return
+    raise HTTPException(status_code=403, detail="You do not have access to this draft.")
 
 
 @compat_router.get("/premium-ai-quizzes/draft-quizzes", response_model=PremiumAIDraftQuizListResponse)
@@ -6313,23 +6555,36 @@ def list_premium_ai_draft_quizzes(
     content_type: Optional[AISystemInstructionContentType] = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
     try:
         query = supabase.table(DRAFT_QUIZZES_TABLE).select("*").order("created_at", desc=True)
         if content_type is not None:
             query = query.eq("content_type", content_type.value)
+        if not bool(user_ctx.get("is_admin")):
+            query = query.eq("author_id", user_id)
         rows = _rows(query.range(skip, max(skip + limit - 1, skip)).execute())
     except Exception as exc:
         if _is_missing_table_error(exc, DRAFT_QUIZZES_TABLE):
             _raise_draft_quizzes_migration_required(exc)
+        if _is_missing_column_error(exc, DRAFT_QUIZZES_TABLE, "author_id"):
+            _raise_draft_quizzes_ownership_migration_required(exc)
         raise
     items = [_draft_view(row) for row in rows]
     return {"items": items, "total": len(items)}
 
 
-def _get_single_draft_or_404(draft_id: int, expected_kind: Optional[QuizKind], supabase: Client) -> Dict[str, Any]:
+def _get_single_draft_or_404(
+    draft_id: int,
+    expected_kind: Optional[QuizKind],
+    supabase: Client,
+    user_ctx: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     try:
         row = _first(supabase.table(DRAFT_QUIZZES_TABLE).select("*").eq("id", draft_id).limit(1).execute())
     except Exception as exc:
@@ -6341,11 +6596,19 @@ def _get_single_draft_or_404(draft_id: int, expected_kind: Optional[QuizKind], s
     row_kind = str(row.get("quiz_kind") or "").strip().lower()
     if expected_kind is not None and row_kind != expected_kind.value:
         raise HTTPException(status_code=404, detail="Draft not found.")
+    if user_ctx is not None:
+        _require_draft_owner_or_admin(row, user_ctx)
     return row
 
 
-def _update_draft_or_404(draft_id: int, update: PremiumAIDraftQuizUpdate, expected_kind: Optional[QuizKind], supabase: Client) -> Dict[str, Any]:
-    _get_single_draft_or_404(draft_id, expected_kind, supabase)
+def _update_draft_or_404(
+    draft_id: int,
+    update: PremiumAIDraftQuizUpdate,
+    expected_kind: Optional[QuizKind],
+    supabase: Client,
+    user_ctx: Dict[str, Any],
+) -> Dict[str, Any]:
+    _get_single_draft_or_404(draft_id, expected_kind, supabase, user_ctx=user_ctx)
     updates = update.model_dump(exclude_none=True)
     if "category_ids" in updates:
         updates["category_ids"] = _normalize_exam_ids(updates["category_ids"])
@@ -6360,8 +6623,13 @@ def _update_draft_or_404(draft_id: int, update: PremiumAIDraftQuizUpdate, expect
     return _draft_view(row)
 
 
-def _delete_draft_or_404(draft_id: int, expected_kind: Optional[QuizKind], supabase: Client) -> Dict[str, Any]:
-    _get_single_draft_or_404(draft_id, expected_kind, supabase)
+def _delete_draft_or_404(
+    draft_id: int,
+    expected_kind: Optional[QuizKind],
+    supabase: Client,
+    user_ctx: Dict[str, Any],
+) -> Dict[str, Any]:
+    _get_single_draft_or_404(draft_id, expected_kind, supabase, user_ctx=user_ctx)
     try:
         row = _first(supabase.table(DRAFT_QUIZZES_TABLE).delete().eq("id", draft_id).execute())
     except Exception as exc:
@@ -6376,10 +6644,10 @@ def _delete_draft_or_404(draft_id: int, expected_kind: Optional[QuizKind], supab
 @compat_router.get("/premium-ai-quizzes/draft-gk-quizzes/{draft_id}", response_model=PremiumAIDraftQuiz)
 def get_premium_gk_draft(
     draft_id: int,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    row = _get_single_draft_or_404(draft_id, QuizKind.GK, supabase)
+    row = _get_single_draft_or_404(draft_id, QuizKind.GK, supabase, user_ctx=user_ctx)
     return _draft_view(row)
 
 
@@ -6387,28 +6655,28 @@ def get_premium_gk_draft(
 def update_premium_gk_draft(
     draft_id: int,
     update: PremiumAIDraftQuizUpdate,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    return _update_draft_or_404(draft_id, update, QuizKind.GK, supabase)
+    return _update_draft_or_404(draft_id, update, QuizKind.GK, supabase, user_ctx=user_ctx)
 
 
 @compat_router.delete("/premium-ai-quizzes/draft-gk-quizzes/{draft_id}")
 def delete_premium_gk_draft(
     draft_id: int,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    return _delete_draft_or_404(draft_id, QuizKind.GK, supabase)
+    return _delete_draft_or_404(draft_id, QuizKind.GK, supabase, user_ctx=user_ctx)
 
 
 @compat_router.get("/premium-ai-quizzes/draft-maths-quizzes/{draft_id}", response_model=PremiumAIDraftQuiz)
 def get_premium_maths_draft(
     draft_id: int,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    row = _get_single_draft_or_404(draft_id, QuizKind.MATHS, supabase)
+    row = _get_single_draft_or_404(draft_id, QuizKind.MATHS, supabase, user_ctx=user_ctx)
     return _draft_view(row)
 
 
@@ -6416,28 +6684,28 @@ def get_premium_maths_draft(
 def update_premium_maths_draft(
     draft_id: int,
     update: PremiumAIDraftQuizUpdate,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    return _update_draft_or_404(draft_id, update, QuizKind.MATHS, supabase)
+    return _update_draft_or_404(draft_id, update, QuizKind.MATHS, supabase, user_ctx=user_ctx)
 
 
 @compat_router.delete("/premium-ai-quizzes/draft-maths-quizzes/{draft_id}")
 def delete_premium_maths_draft(
     draft_id: int,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    return _delete_draft_or_404(draft_id, QuizKind.MATHS, supabase)
+    return _delete_draft_or_404(draft_id, QuizKind.MATHS, supabase, user_ctx=user_ctx)
 
 
 @compat_router.get("/premium-ai-quizzes/draft-passage-quizzes/{draft_id}", response_model=PremiumAIDraftQuiz)
 def get_premium_passage_draft(
     draft_id: int,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    row = _get_single_draft_or_404(draft_id, QuizKind.PASSAGE, supabase)
+    row = _get_single_draft_or_404(draft_id, QuizKind.PASSAGE, supabase, user_ctx=user_ctx)
     return _draft_view(row)
 
 
@@ -6445,19 +6713,19 @@ def get_premium_passage_draft(
 def update_premium_passage_draft(
     draft_id: int,
     update: PremiumAIDraftQuizUpdate,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    return _update_draft_or_404(draft_id, update, QuizKind.PASSAGE, supabase)
+    return _update_draft_or_404(draft_id, update, QuizKind.PASSAGE, supabase, user_ctx=user_ctx)
 
 
 @compat_router.delete("/premium-ai-quizzes/draft-passage-quizzes/{draft_id}")
 def delete_premium_passage_draft(
     draft_id: int,
-    user_ctx: Dict[str, Any] = Depends(require_admin_user),
+    user_ctx: Dict[str, Any] = Depends(require_quiz_generation_access),
     supabase: Client = Depends(get_supabase_client),
 ):
-    return _delete_draft_or_404(draft_id, QuizKind.PASSAGE, supabase)
+    return _delete_draft_or_404(draft_id, QuizKind.PASSAGE, supabase, user_ctx=user_ctx)
 
 
 @compat_router.post("/premium-ai-quizzes/convert-draft-to-premium-quiz", response_model=ConvertDraftToPremiumQuizResponse)
@@ -6466,7 +6734,7 @@ def convert_draft_to_premium_quiz(
     user_ctx: Dict[str, Any] = Depends(require_admin_user),
     supabase: Client = Depends(get_supabase_client),
 ):
-    row = _get_single_draft_or_404(payload.draft_quiz_id, None, supabase)
+    row = _get_single_draft_or_404(payload.draft_quiz_id, None, supabase, user_ctx=user_ctx)
     view = _draft_view(row)
     quiz_kind = view["quiz_kind"]
     parsed = view["parsed_quiz_data"] or {}
@@ -6488,7 +6756,7 @@ def convert_draft_to_premium_quiz(
         )
         if not created:
             raise HTTPException(status_code=400, detail="Failed to convert passage draft.")
-        _delete_draft_or_404(int(view["id"]), QuizKind.PASSAGE, supabase)
+        _delete_draft_or_404(int(view["id"]), QuizKind.PASSAGE, supabase, user_ctx=user_ctx)
         return {
             "message": "Converted to Premium Passage Quiz",
             "new_quiz_id": int(created["id"]),
@@ -6511,7 +6779,7 @@ def convert_draft_to_premium_quiz(
     )
     if not created:
         raise HTTPException(status_code=400, detail="Failed to convert question draft.")
-    _delete_draft_or_404(int(view["id"]), quiz_kind, supabase)
+    _delete_draft_or_404(int(view["id"]), quiz_kind, supabase, user_ctx=user_ctx)
     return {
         "message": "Converted to Premium Quiz",
         "new_quiz_id": int(created["id"]),
@@ -7204,6 +7472,75 @@ def _resolve_series_id_from_collection_row(collection: Dict[str, Any]) -> Option
     return None
 
 
+def _active_series_enrollment_exists(*, series_id: int, user_id: str, supabase: Client) -> bool:
+    if series_id <= 0 or not str(user_id or "").strip():
+        return False
+    row = _first(
+        supabase.table(TEST_SERIES_ENROLLMENTS_TABLE)
+        .select("id")
+        .eq("series_id", series_id)
+        .eq("user_id", user_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    return row is not None
+
+
+def _is_series_open_access(series_row: Dict[str, Any]) -> bool:
+    if not bool(series_row.get("is_public")) or not bool(series_row.get("is_active", True)):
+        return False
+    access_type = _as_role(series_row.get("access_type")) or ""
+    if access_type == "free":
+        return True
+    return _safe_float(series_row.get("price")) <= 0
+
+
+def _can_access_series_linked_collection(
+    *,
+    collection: Dict[str, Any],
+    user_ctx: Optional[Dict[str, Any]],
+    supabase: Client,
+) -> bool:
+    series_id = _resolve_series_id_from_collection_row(collection)
+    if not series_id:
+        return True
+
+    series_row = _first(
+        supabase.table(TEST_SERIES_TABLE)
+        .select("id,provider_user_id,access_type,price,is_public,is_active")
+        .eq("id", series_id)
+        .limit(1)
+        .execute()
+    )
+    if not series_row:
+        return False
+    if _is_series_open_access(series_row):
+        return True
+    if not user_ctx:
+        return False
+    if _is_admin_or_moderator(user_ctx):
+        return True
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    if not user_id:
+        return False
+    if str(series_row.get("provider_user_id") or "").strip() == user_id:
+        return True
+    return _active_series_enrollment_exists(series_id=series_id, user_id=user_id, supabase=supabase)
+
+
+def _ensure_series_collection_access(
+    *,
+    collection: Dict[str, Any],
+    user_ctx: Optional[Dict[str, Any]],
+    supabase: Client,
+) -> None:
+    if _can_access_series_linked_collection(collection=collection, user_ctx=user_ctx, supabase=supabase):
+        return
+    raise HTTPException(status_code=403, detail="Activate series access before opening this test.")
+
+
 def _expand_mains_collection_questions(
     collection_id: int,
     supabase: Client,
@@ -7260,13 +7597,18 @@ def _expand_mains_collection_questions(
 
 
 @router.get("/collections/{collection_id}/test", response_model=CollectionTestResponse)
-def get_collection_test(collection_id: int, supabase: Client = Depends(get_supabase_client)):
+def get_collection_test(
+    collection_id: int,
+    user_ctx: Optional[Dict[str, Any]] = Depends(get_user_context),
+    supabase: Client = Depends(get_supabase_client),
+):
     collection = _fetch_collection(collection_id, supabase)
     if _resolve_collection_test_kind(collection.get("meta")) == CollectionTestKind.MAINS:
         raise HTTPException(
             status_code=400,
             detail="This is a Mains Test. Use /collections/{collection_id}/mains-test instead.",
         )
+    _ensure_series_collection_access(collection=collection, user_ctx=user_ctx, supabase=supabase)
     questions = _expand_questions(collection_id, supabase)
     return CollectionTestResponse(
         collection_id=collection_id,
@@ -7280,7 +7622,7 @@ def get_collection_test(collection_id: int, supabase: Client = Depends(get_supab
 def score_collection_test(
     collection_id: int,
     payload: CollectionTestScoreRequest,
-    user_id: Optional[str] = Depends(get_user_id),
+    user_ctx: Optional[Dict[str, Any]] = Depends(get_user_context),
     supabase: Client = Depends(get_supabase_client),
 ):
     collection = _fetch_collection(collection_id, supabase)
@@ -7289,6 +7631,8 @@ def score_collection_test(
             status_code=400,
             detail="This is a Mains Test. Use /collections/{collection_id}/mains-test/score instead.",
         )
+    _ensure_series_collection_access(collection=collection, user_ctx=user_ctx, supabase=supabase)
+    user_id = str(user_ctx.get("user_id") or "").strip() if user_ctx else None
     questions = _expand_questions(collection_id, supabase)
     score_response, weak_areas = _score_expanded_questions(
         questions=questions,
@@ -7297,24 +7641,248 @@ def score_collection_test(
     )
 
     # Save attempt if user is authenticated
+    attempt_id: Optional[int] = None
     if user_id:
         try:
             # We save the details as JSON
             details_json = [d.model_dump() for d in score_response.details]
-            supabase.table("user_quiz_attempts").insert({
-                "user_id": user_id,
-                "collection_id": collection_id,
-                "score": score_response.score,
-                "total_questions": len(questions),
-                "correct_answers": score_response.correct_answers,
-                "incorrect_answers": score_response.incorrect_answers,
-                "unanswered": score_response.unanswered,
-                "details": details_json,
-                "weak_areas": list(set(weak_areas)) # De-duplicate
-            }).execute()
+            attempt_row = _first(
+                supabase.table("user_quiz_attempts").insert({
+                    "user_id": user_id,
+                    "collection_id": collection_id,
+                    "score": score_response.score,
+                    "total_questions": len(questions),
+                    "correct_answers": score_response.correct_answers,
+                    "incorrect_answers": score_response.incorrect_answers,
+                    "unanswered": score_response.unanswered,
+                    "details": details_json,
+                    "weak_areas": list(set(weak_areas)) # De-duplicate
+                }).execute()
+            )
+            if attempt_row:
+                attempt_id = int(attempt_row.get("id") or 0) or None
         except Exception as e:
             logger.error(f"Failed to save quiz attempt: {e}")
-    return score_response
+    return score_response.model_copy(update={"attempt_id": attempt_id})
+
+
+@router.post("/collections/{collection_id}/quiz-complaints", response_model=QuizQuestionComplaintResponse)
+def create_collection_quiz_complaint(
+    collection_id: int,
+    payload: QuizQuestionComplaintCreate,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    collection = _fetch_collection(collection_id, supabase)
+    if _resolve_collection_test_kind(collection.get("meta")) == CollectionTestKind.MAINS:
+        raise HTTPException(status_code=400, detail="Quiz complaints are available only for prelims tests.")
+    _ensure_series_collection_access(collection=collection, user_ctx=user_ctx, supabase=supabase)
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    attempt_row = _first(
+        supabase.table("user_quiz_attempts")
+        .select("id,user_id,collection_id,details")
+        .eq("id", payload.attempt_id)
+        .limit(1)
+        .execute()
+    )
+    if not attempt_row:
+        raise HTTPException(status_code=404, detail="Attempt not found.")
+    if str(attempt_row.get("user_id") or "").strip() != user_id:
+        raise HTTPException(status_code=403, detail="You can raise complaints only for your own attempts.")
+    if int(attempt_row.get("collection_id") or 0) != collection_id:
+        raise HTTPException(status_code=400, detail="Attempt does not belong to this test.")
+
+    questions = _expand_questions(collection_id, supabase)
+    question_lookup: Dict[int, Tuple[int, CollectionTestQuestion]] = {
+        int(question.item_id): (index + 1, question)
+        for index, question in enumerate(questions)
+    }
+    question_meta = question_lookup.get(int(payload.question_item_id))
+    if not question_meta:
+        raise HTTPException(status_code=400, detail="Question not found in this test.")
+    question_number, question = question_meta
+
+    details = attempt_row.get("details") if isinstance(attempt_row.get("details"), list) else []
+    selected_option: Optional[str] = None
+    correct_answer: Optional[str] = question.correct_answer
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        if int(detail.get("item_id") or 0) != int(payload.question_item_id):
+            continue
+        selected_option = str(detail.get("selected_option") or "").strip() or None
+        correct_answer = str(detail.get("correct_answer") or question.correct_answer or "").strip() or None
+        break
+
+    complaint_text = str(payload.complaint_text or "").strip()
+    if len(complaint_text) < 8:
+        raise HTTPException(status_code=400, detail="Complaint text must be at least 8 characters long.")
+
+    try:
+        existing = _first(
+            supabase.table(QUIZ_COMPLAINTS_TABLE)
+            .select("id")
+            .eq("attempt_id", payload.attempt_id)
+            .eq("question_item_id", payload.question_item_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        if _is_missing_table_error(exc, QUIZ_COMPLAINTS_TABLE):
+            raise HTTPException(status_code=500, detail=QUIZ_COMPLAINTS_MIGRATION_HINT) from exc
+        raise
+    if existing:
+        raise HTTPException(status_code=409, detail="A complaint already exists for this question in this attempt.")
+
+    series_id, creator_user_id = _resolve_collection_creator_context(collection, supabase)
+    question_text = str(question.question_statement or "").strip()
+    if question.supplementary_statement:
+        question_text = f"{question_text}\n{str(question.supplementary_statement).strip()}".strip()
+
+    now_iso = _utc_now_iso()
+    insert_payload = {
+        "collection_id": collection_id,
+        "series_id": series_id,
+        "attempt_id": int(payload.attempt_id),
+        "creator_user_id": creator_user_id,
+        "user_id": user_id,
+        "question_item_id": int(payload.question_item_id),
+        "question_number": question_number,
+        "question_text": question_text,
+        "selected_option": selected_option,
+        "correct_answer": correct_answer,
+        "complaint_text": complaint_text,
+        "status": QuizQuestionComplaintStatus.RECEIVED.value,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    try:
+        row = _first(supabase.table(QUIZ_COMPLAINTS_TABLE).insert(insert_payload).execute())
+    except Exception as exc:
+        if _is_missing_table_error(exc, QUIZ_COMPLAINTS_TABLE):
+            raise HTTPException(status_code=500, detail=QUIZ_COMPLAINTS_MIGRATION_HINT) from exc
+        raise
+    if not row:
+        raise HTTPException(status_code=400, detail="Failed to create complaint.")
+    return _quiz_complaint_row_view(row, collection_title=str(collection.get("title") or "").strip() or None)
+
+
+@router.get("/collections/{collection_id}/quiz-complaints/me", response_model=List[QuizQuestionComplaintResponse])
+def list_my_collection_quiz_complaints(
+    collection_id: int,
+    attempt_id: Optional[int] = Query(default=None, ge=1),
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    collection = _fetch_collection(collection_id, supabase)
+    if _resolve_collection_test_kind(collection.get("meta")) == CollectionTestKind.MAINS:
+        return []
+    _ensure_series_collection_access(collection=collection, user_ctx=user_ctx, supabase=supabase)
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    try:
+        query = (
+            supabase.table(QUIZ_COMPLAINTS_TABLE)
+            .select("*")
+            .eq("collection_id", collection_id)
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+        )
+        if attempt_id:
+            query = query.eq("attempt_id", attempt_id)
+        rows = _rows(query.execute())
+    except Exception as exc:
+        if _is_missing_table_error(exc, QUIZ_COMPLAINTS_TABLE):
+            raise HTTPException(status_code=500, detail=QUIZ_COMPLAINTS_MIGRATION_HINT) from exc
+        raise
+    collection_title = str(collection.get("title") or "").strip() or None
+    return [_quiz_complaint_row_view(row, collection_title=collection_title) for row in rows]
+
+
+@router.get("/quiz-complaints/creator", response_model=List[QuizQuestionComplaintResponse])
+def list_creator_quiz_complaints(
+    status: Optional[QuizQuestionComplaintStatus] = Query(default=None),
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    if not (_is_admin_or_moderator(user_ctx) or _has_quiz_master_access(user_ctx)):
+        raise HTTPException(status_code=403, detail="Quiz Master access is required.")
+
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    try:
+        query = supabase.table(QUIZ_COMPLAINTS_TABLE).select("*").order("created_at", desc=True)
+        if not _is_admin_or_moderator(user_ctx):
+            query = query.eq("creator_user_id", user_id)
+        if status:
+            query = query.eq("status", status.value)
+        rows = _rows(query.execute())
+    except Exception as exc:
+        if _is_missing_table_error(exc, QUIZ_COMPLAINTS_TABLE):
+            raise HTTPException(status_code=500, detail=QUIZ_COMPLAINTS_MIGRATION_HINT) from exc
+        raise
+
+    title_map = _collection_title_map([int(row.get("collection_id") or 0) for row in rows], supabase)
+    return [
+        _quiz_complaint_row_view(row, collection_title=title_map.get(int(row.get("collection_id") or 0)))
+        for row in rows
+    ]
+
+
+@router.patch("/quiz-complaints/{complaint_id}", response_model=QuizQuestionComplaintResponse)
+def update_quiz_complaint(
+    complaint_id: int,
+    payload: QuizQuestionComplaintUpdate,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    try:
+        row = _first(
+            supabase.table(QUIZ_COMPLAINTS_TABLE)
+            .select("*")
+            .eq("id", complaint_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        if _is_missing_table_error(exc, QUIZ_COMPLAINTS_TABLE):
+            raise HTTPException(status_code=500, detail=QUIZ_COMPLAINTS_MIGRATION_HINT) from exc
+        raise
+    if not row:
+        raise HTTPException(status_code=404, detail="Complaint not found.")
+
+    creator_user_id = str(row.get("creator_user_id") or "").strip()
+    current_user_id = str(user_ctx.get("user_id") or "").strip()
+    if not _is_admin_or_moderator(user_ctx):
+        if not _has_quiz_master_access(user_ctx) or creator_user_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Only the assigned creator can update this complaint.")
+
+    if payload.status is None and payload.creator_note is None:
+        raise HTTPException(status_code=400, detail="Provide a complaint status or creator note.")
+
+    now_iso = _utc_now_iso()
+    updates: Dict[str, Any] = {"updated_at": now_iso}
+    if payload.status is not None:
+        updates["status"] = payload.status.value
+        updates["resolved_at"] = now_iso if payload.status == QuizQuestionComplaintStatus.RESOLVED else None
+    if payload.creator_note is not None:
+        updates["creator_note"] = str(payload.creator_note or "").strip() or None
+
+    updated = _first(
+        supabase.table(QUIZ_COMPLAINTS_TABLE)
+        .update(updates)
+        .eq("id", complaint_id)
+        .execute()
+    )
+    if not updated:
+        raise HTTPException(status_code=400, detail="Failed to update complaint.")
+
+    collection_title = None
+    collection_id = int(updated.get("collection_id") or 0)
+    if collection_id > 0:
+        collection_title = _collection_title_map([collection_id], supabase).get(collection_id)
+    return _quiz_complaint_row_view(updated, collection_title=collection_title)
 
 
 @router.get("/collections/{collection_id}/mains-test", response_model=MainsCollectionTestResponse)
@@ -7324,6 +7892,7 @@ def get_collection_mains_test(
     supabase: Client = Depends(get_supabase_client),
 ):
     collection = _fetch_collection(collection_id, supabase)
+    _ensure_series_collection_access(collection=collection, user_ctx=user_ctx, supabase=supabase)
     declared_kind = _resolve_collection_test_kind(collection.get("meta"))
     questions = _expand_mains_collection_questions(
         collection_id,
@@ -7353,6 +7922,7 @@ async def score_collection_mains_test(
 ):
     user_id = str(user_ctx.get("user_id") or "").strip() or None
     collection = _fetch_collection(collection_id, supabase)
+    _ensure_series_collection_access(collection=collection, user_ctx=user_ctx, supabase=supabase)
     declared_kind = _resolve_collection_test_kind(collection.get("meta"))
     questions = _expand_mains_collection_questions(collection_id, supabase, include_reference_material=True)
     if declared_kind != CollectionTestKind.MAINS and len(questions) == 0:
@@ -7515,8 +8085,31 @@ def create_collection_challenge(
     if not questions:
         raise HTTPException(status_code=400, detail="Collection has no attemptable quiz questions.")
 
-    title = str(payload.title or "").strip() or f"{collection.get('title') or 'Test'} Challenge"
     now = _utc_now()
+    if not bool(collection.get("is_public")) or not bool(collection.get("is_finalized")):
+        try:
+            promoted_collection = _first(
+                supabase.table("collections")
+                .update(
+                    {
+                        "is_public": True,
+                        "is_finalized": True,
+                        "updated_at": now.isoformat(),
+                    }
+                )
+                .eq("id", collection_id)
+                .execute()
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to prepare collection for public challenge: {exc}")
+        if promoted_collection:
+            collection = promoted_collection
+
+    existing_live_row = _latest_live_challenge_row_for_collection(collection_id=collection_id, supabase=supabase)
+    if existing_live_row:
+        return ChallengeLinkResponse(**_challenge_row_view(existing_live_row))
+
+    title = str(payload.title or "").strip() or f"{collection.get('title') or 'Test'} Challenge"
     expires_at: Optional[datetime] = None
     if payload.expires_in_hours is not None:
         expires_at = now + timedelta(hours=int(payload.expires_in_hours))
@@ -7640,6 +8233,90 @@ def update_collection_challenge(
     if not row:
         raise HTTPException(status_code=404, detail="Challenge not found.")
     return ChallengeLinkResponse(**_challenge_row_view(row))
+
+
+@router.get("/challenges/public", response_model=List[PublicChallengeListItemResponse])
+def list_public_challenges(
+    limit: int = Query(default=24, ge=1, le=100),
+    supabase: Client = Depends(get_supabase_client),
+):
+    try:
+        challenge_rows = _rows(
+            supabase.table(CHALLENGE_LINKS_TABLE)
+            .select("*")
+            .eq("is_active", True)
+            .order("created_at", desc=True)
+            .limit(max(limit * 3, limit))
+            .execute()
+        )
+    except Exception as exc:
+        if _is_missing_table_like_error(exc, CHALLENGE_LINKS_TABLE):
+            _raise_challenges_migration_required(exc)
+        raise
+
+    now = _utc_now()
+    active_rows: List[Dict[str, Any]] = []
+    collection_ids: Set[int] = set()
+    seen_collection_ids: Set[int] = set()
+    for row in challenge_rows:
+        expires_at = _parse_datetime(row.get("expires_at"))
+        if expires_at is not None and expires_at <= now:
+            continue
+        try:
+            collection_id = int(row.get("collection_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if collection_id <= 0:
+            continue
+        if collection_id in seen_collection_ids:
+            continue
+        active_rows.append(row)
+        seen_collection_ids.add(collection_id)
+        collection_ids.add(collection_id)
+
+    collection_map: Dict[int, Dict[str, Any]] = {}
+    if collection_ids:
+        collection_query = supabase.table("collections").select("*")
+        if len(collection_ids) == 1:
+            collection_rows = _rows(collection_query.eq("id", next(iter(collection_ids))).execute())
+        else:
+            collection_rows = _rows(collection_query.in_("id", sorted(collection_ids)).execute())
+        for row in collection_rows:
+            try:
+                collection_id = int(row.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if collection_id <= 0:
+                continue
+            collection_map[collection_id] = row
+
+    items: List[PublicChallengeListItemResponse] = []
+    for challenge_row in active_rows:
+        try:
+            collection_id = int(challenge_row.get("collection_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        collection_row = collection_map.get(collection_id)
+        if not collection_row:
+            continue
+        if not bool(collection_row.get("is_public")) or not bool(collection_row.get("is_finalized")):
+            continue
+        collection_meta = collection_row.get("meta") if isinstance(collection_row.get("meta"), dict) else {}
+        if _resolve_collection_test_kind(collection_meta) == CollectionTestKind.MAINS:
+            continue
+        question_count = len(_expand_questions(collection_id, supabase))
+        item = _public_challenge_row_view(
+            challenge_row=challenge_row,
+            collection_row=collection_row,
+            question_count=question_count,
+        )
+        if not item:
+            continue
+        items.append(item)
+        if len(items) >= limit:
+            break
+
+    return items
 
 
 @router.get("/challenge/{token}", response_model=ChallengeTestResponse)
@@ -9741,6 +10418,34 @@ def get_user_dashboard_analytics(
         "purchase_overview": purchase_overview,
     }
 
+
+@router.get("/user/dashboard-ai-analysis")
+async def get_user_dashboard_ai_analysis(
+    limit: int = Query(default=120, ge=20, le=500),
+    scope: str = Query(default="all", pattern="^(all|prelims|mains)$"),
+    ai_provider: str = Query(default="gemini", pattern="^(gemini|openai)$"),
+    ai_model_name: str = Query(default="gemini-3-flash-preview"),
+    supabase: Client = Depends(get_supabase_client),
+    user_id: Optional[str] = Depends(get_user_id),
+):
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    analytics_payload = get_user_dashboard_analytics(limit=limit, supabase=supabase, user_id=user_id)
+    analysis_payload = await generate_dashboard_performance_analysis(
+        analytics_payload,
+        scope=scope,
+        provider=ai_provider,
+        model_name=ai_model_name,
+    )
+
+    return {
+        "generated_at": _utc_now().isoformat(),
+        "analytics_generated_at": analytics_payload.get("generated_at"),
+        "scope": scope,
+        **analysis_payload,
+    }
+
 @router.get("/user/progress")
 def get_user_progress(
     supabase: Client = Depends(get_supabase_client),
@@ -9759,6 +10464,54 @@ def get_user_progress(
         "quiz_attempts": attempts,
         "mains_evaluations": evaluations
     }
+
+@router.get("/user/quiz-attempt-counts")
+def get_user_quiz_attempt_counts(
+    collection_ids: Optional[str] = Query(default=None),
+    supabase: Client = Depends(get_supabase_client),
+    user_id: Optional[str] = Depends(get_user_id),
+):
+    if not user_id:
+         raise HTTPException(status_code=401, detail="Authentication required")
+
+    parsed_collection_ids: List[int] = []
+    seen_collection_ids: Set[int] = set()
+    for raw_value in str(collection_ids or "").split(","):
+        chunk = str(raw_value or "").strip()
+        if not chunk:
+            continue
+        try:
+            collection_id = int(chunk)
+        except (TypeError, ValueError):
+            continue
+        if collection_id <= 0 or collection_id in seen_collection_ids:
+            continue
+        seen_collection_ids.add(collection_id)
+        parsed_collection_ids.append(collection_id)
+
+    if not parsed_collection_ids:
+        return {"counts": {}}
+
+    attempts = _rows(
+        supabase.table("user_quiz_attempts")
+        .select("collection_id")
+        .eq("user_id", user_id)
+        .in_("collection_id", parsed_collection_ids)
+        .execute()
+    )
+
+    counts: Dict[str, int] = {str(collection_id): 0 for collection_id in parsed_collection_ids}
+    for attempt in attempts:
+        try:
+            collection_id = int(attempt.get("collection_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if collection_id <= 0:
+            continue
+        key = str(collection_id)
+        counts[key] = counts.get(key, 0) + 1
+
+    return {"counts": counts}
 
 @router.get("/user/weak-areas")
 def get_user_weak_areas(

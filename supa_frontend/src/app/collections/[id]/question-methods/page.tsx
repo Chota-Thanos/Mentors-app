@@ -4,6 +4,8 @@ import Link from "next/link";
 import AppLayout from "@/components/layouts/AppLayout";
 import MainsQuestionRepositoryStudio from "@/components/mains/MainsQuestionRepositoryStudio";
 import QuestionCreationMethodsView from "@/components/premium/QuestionCreationMethodsView";
+import { canAccessMainsAuthoring, canAccessManualQuizBuilder } from "@/lib/accessControl";
+import { backendRoot } from "@/lib/backendUrl";
 import { createClient } from "@/lib/supabase/server";
 
 interface PageProps {
@@ -16,8 +18,6 @@ export default async function QuestionMethodsPage({ params }: PageProps) {
   if (!Number.isFinite(collectionId) || collectionId <= 0) return notFound();
 
   const supabase = await createClient();
-  const backendRoot = (process.env.NEXT_PUBLIC_SUPA_BACKEND_URL || "http://localhost:8003").replace(/\/$/, "");
-
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -59,6 +59,13 @@ export default async function QuestionMethodsPage({ params }: PageProps) {
 
   if (!resolvedTitle) {
     resolvedTitle = `Test #${collectionId}`;
+  }
+
+  if (resolvedTestKind === "mains" && !canAccessMainsAuthoring(user)) {
+    return redirect(`/collections/${collectionId}`);
+  }
+  if (resolvedTestKind !== "mains" && !canAccessManualQuizBuilder(user)) {
+    return redirect(`/collections/${collectionId}`);
   }
 
   return (

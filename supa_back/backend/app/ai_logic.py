@@ -24,6 +24,7 @@ from .models import (
 from .ai_legacy_prompts import (
     GK_DEFAULT_INSTR, MATHS_DEFAULT_INSTR, PASSAGE_DEFAULT_INSTR,
     EXPLANATION_GUIDANCE, MATHS_EXPLANATION_FORMAT,
+    QUESTION_FIELD_MAPPING_GUARDRAILS,
     _style_profile_system_instructions,
     _style_profile_refine_system_instructions,
     _resolve_example_guidance,
@@ -212,6 +213,7 @@ def _build_system_prompt(
             "If examples are provided, apply the same format constraints to EVERY question in the batch; "
             "do not follow the format only for the first question."
         )
+        system += QUESTION_FIELD_MAPPING_GUARDRAILS
         system += EXPLANATION_GUIDANCE
         system = _append_generation_balance_rules(system)
         system = _append_hardcoded_no_copy_rules(system)
@@ -238,6 +240,7 @@ def _build_system_prompt(
             "If examples are provided, apply the same format constraints to EVERY question in the batch; "
             "do not follow the format only for the first question."
         )
+        system += QUESTION_FIELD_MAPPING_GUARDRAILS
         system += EXPLANATION_GUIDANCE
         system += MATHS_EXPLANATION_FORMAT
         system = _append_generation_balance_rules(system)
@@ -253,8 +256,11 @@ def _build_system_prompt(
                 f"{recent_block}"
             )
         system += (
-            "\n\nPreserve passage text, question wording, and options exactly as given; do not paraphrase. "
-            "Use the provided content as the source of truth. "
+            "\n\nIf the provided content already contains a real passage, preserve passage text, question wording, and options exactly as given; do not paraphrase. "
+            "If the provided content is only a topic, request, or instruction, you MUST first generate a fresh readable passage and then generate the questions from that new passage. "
+            "Never copy instruction-like text into passage_text. "
+            "passage_text must contain real reading-comprehension material, not a command or placeholder. "
+            "Use the provided content as the source of truth for topic and scope. "
             "If explanations are missing or too short, expand them based strictly on the passage (no unsupported facts). "
             "For any question text inside the passage, preserve markers like 'Statement I:' and 'Statement II:' verbatim; "
             "do not rename or remove them. "
@@ -263,6 +269,7 @@ def _build_system_prompt(
             "Strictly follow every instruction and schema field; do not skip or merge required fields. "
             "If examples are provided, apply the same format constraints to EVERY generated question."
         )
+        system += QUESTION_FIELD_MAPPING_GUARDRAILS
         system += EXPLANATION_GUIDANCE
         system += "\nIf the user requests multiple passages, return a JSON array of passage objects."
         system = _append_generation_balance_rules(system)
@@ -380,6 +387,18 @@ def _parse_json_items(text: str) -> List[Dict[str, Any]]:
         if isinstance(payload, list):
             return [item for item in payload if isinstance(item, dict)]
         if isinstance(payload, dict):
+            passages = payload.get("passages")
+            if isinstance(passages, list):
+                return [item for item in passages if isinstance(item, dict)]
+            has_passage_shape = bool(
+                payload.get("passage_text")
+                or payload.get("passage")
+                or payload.get("passage_title")
+                or payload.get("context_text")
+                or payload.get("context")
+            )
+            if has_passage_shape and isinstance(payload.get("questions"), list):
+                return [payload]
             items = payload.get("items") or payload.get("questions") or payload.get("quiz")
             if isinstance(items, list):
                 return [item for item in items if isinstance(item, dict)]
@@ -793,33 +812,6 @@ def _extract_question_statements(question: Dict[str, Any]) -> List[str]:
     return []
 
 
-def _question_contains_statement_markers(text: str) -> bool:
-    if not text:
-        return False
-    return bool(
-        re.search(
-            r"\bstatement\s*(?:\d+|[ivxlcdm]+)\b",
-            str(text),
-            flags=re.IGNORECASE,
-        )
-    )
-
-
-def _looks_like_prompt_text(text: str) -> bool:
-    cleaned = str(text or "").strip()
-    if not cleaned:
-        return False
-    lowered = cleaned.lower()
-    if "?" in cleaned:
-        return True
-    return bool(
-        re.search(
-            r"^(which|what|how many|how much|who|whom|where|when|select|choose|identify|find|determine|correct|true|false)\b",
-            lowered,
-        )
-    )
-
-
 def _build_options_from_template(
     template: List[str],
     answer_value: Any,
@@ -859,9 +851,6 @@ def _enforce_example_format_on_batch(
     spec = example_format_spec or {}
 
     expects_statements = bool(spec.get("expects_statements"))
-    requires_prompt = bool(spec.get("requires_prompt"))
-    requires_lead_in = bool(spec.get("requires_lead_in"))
-    expected_item_count = spec.get("expected_item_count")
     template_is_statement_style = bool(
         example_option_template
         and any("statement i" in str(text).lower() for text in example_option_template)
@@ -873,51 +862,50 @@ def _enforce_example_format_on_batch(
         prompt = str(question.get("question_prompt") or "").strip() or None
         statements = _extract_question_statements(question)
 
-        lead, extracted_statements, extracted_prompt = _split_statement_structure(question_text)
-        if extracted_statements:
-            if not statements:
-                statements = extracted_statements
-            if lead:
-                question_text = lead
-            elif requires_lead_in:
-                question_text = "Consider the following statements:"
-            if not prompt and extracted_prompt:
-                prompt = extracted_prompt
+        question_lead, question_inline_statements, question_inline_prompt = _split_statement_structure(question_text)
+        supplementary_lead, supplementary_inline_statements, supplementary_inline_prompt = _split_statement_structure(supplementary)
+
+        # Only split fields when the source text itself contains an explicit statement block.
+        # Never synthesize generic lead-ins and never move question text into prompt by heuristic.
+        if not statements and question_inline_statements:
+            statements = question_inline_statements
+            if question_lead:
+                question_text = question_lead.strip()
+            if not prompt and question_inline_prompt:
+                prompt = question_inline_prompt.strip() or None
+
+        if expects_statements and not statements and supplementary_inline_statements:
+            statements = supplementary_inline_statements
+            if not prompt and supplementary_inline_prompt:
+                prompt = supplementary_inline_prompt.strip() or None
+
+        if statements and question_inline_statements:
+            if question_lead:
+                question_text = question_lead.strip()
+            if not prompt and question_inline_prompt:
+                prompt = question_inline_prompt.strip() or None
+
+        cleaned_statements: List[str] = []
+        seen_statements = set()
+        for entry in statements:
+            cleaned_entry = str(entry or "").strip()
+            if not cleaned_entry:
+                continue
+            normalized_entry = cleaned_entry.casefold()
+            if normalized_entry in seen_statements:
+                continue
+            seen_statements.add(normalized_entry)
+            cleaned_statements.append(cleaned_entry)
+        statements = cleaned_statements
+
+        if prompt:
+            prompt = prompt.strip() or None
+            if question_text and prompt and prompt.casefold() == question_text.casefold():
+                prompt = None
 
         if expects_statements:
-            if not statements:
-                lead, extracted_statements, extracted_prompt = _split_statement_structure(question_text)
-                if extracted_statements:
-                    statements = extracted_statements
-                    if lead:
-                        question_text = lead
-                    elif requires_lead_in:
-                        question_text = "Consider the following statements:"
-                if not prompt and extracted_prompt:
-                    prompt = extracted_prompt
-
-            if not statements and supplementary:
-                _, extracted_statements, extracted_prompt = _split_statement_structure(supplementary)
-                if extracted_statements:
-                    statements = extracted_statements
-                if not prompt and extracted_prompt:
-                    prompt = extracted_prompt
-
-            if requires_prompt and not prompt:
-                # Do not overwrite a valid question prompt already present in question_text.
-                if question_text and _looks_like_prompt_text(question_text):
-                    prompt = question_text
-                elif example_prompt_template:
-                    prompt = example_prompt_template
-                elif not question_text:
-                    prompt = "Which one of the following is correct in respect of the above statements?"
-
-            if requires_lead_in and not question_text:
-                question_text = "Consider the following statements:"
-
             # Keep statement count flexible; do not hard-truncate to example count.
             # UPSC list-based questions can validly contain varying numbers of statements.
-
             options = question.get("options")
             if not isinstance(options, list):
                 options = []
@@ -930,36 +918,9 @@ def _enforce_example_format_on_batch(
                     )
                     if len(templated_options) >= 4:
                         options = templated_options
-
             question["options"] = options
 
-        if statements:
-            if question_text and prompt and _looks_like_prompt_text(question_text) and not _looks_like_prompt_text(prompt):
-                question_text, prompt = prompt, question_text
-            if question_text and _looks_like_prompt_text(question_text):
-                if not prompt:
-                    prompt = question_text
-                question_text = "Consider the following statements:"
-            elif not question_text:
-                if prompt and not _looks_like_prompt_text(prompt):
-                    question_text = prompt
-                    prompt = None
-                else:
-                    question_text = "Consider the following statements:"
-            if prompt and not _looks_like_prompt_text(prompt) and _looks_like_prompt_text(question_text):
-                question_text, prompt = prompt, question_text
-
-        if statements and _question_contains_statement_markers(question_text):
-            lead_only, _, lead_prompt = _split_statement_structure(question_text)
-            if lead_only:
-                question_text = lead_only
-            elif requires_lead_in:
-                question_text = "Consider the following statements:"
-            if not prompt and lead_prompt:
-                prompt = lead_prompt
-        question_text = question_text.strip()
-
-        question["question_statement"] = question_text
+        question["question_statement"] = question_text.strip()
         question["question_prompt"] = prompt
         question["statements_facts"] = statements
         question["statement_facts"] = statements
@@ -1158,6 +1119,120 @@ def _apply_example_option_template_if_needed(
     return templated
 
 
+def _looks_like_generation_instruction_text(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    normalized = re.sub(r"\s+", " ", text).strip().lower()
+    if len(normalized) > 180:
+        return False
+    instruction_starts = (
+        "create ",
+        "generate ",
+        "write ",
+        "make ",
+        "prepare ",
+        "produce ",
+        "give ",
+        "draft ",
+    )
+    if any(normalized.startswith(prefix) for prefix in instruction_starts) and any(
+        token in normalized for token in (" question", " questions", " quiz", " passage")
+    ):
+        return True
+    if "based questions" in normalized or "based quiz" in normalized:
+        return True
+    return False
+
+
+def _resolve_passage_title(raw: Dict[str, Any], questions_in: List[Any]) -> Optional[str]:
+    candidates: List[str] = []
+    for value in (raw.get("passage_title"), raw.get("title")):
+        cleaned = str(value or "").strip()
+        if cleaned:
+            candidates.append(cleaned)
+    for question in questions_in:
+        if not isinstance(question, dict):
+            continue
+        for value in (question.get("passage_title"), question.get("title")):
+            cleaned = str(value or "").strip()
+            if cleaned:
+                candidates.append(cleaned)
+    for candidate in candidates:
+        if not _looks_like_generation_instruction_text(candidate):
+            return candidate
+    return candidates[0] if candidates else None
+
+
+def _resolve_passage_text(
+    raw: Dict[str, Any],
+    questions_in: List[Any],
+    request: Optional[AIQuizGenerateRequest],
+) -> str:
+    candidates: List[str] = []
+    for value in (
+        raw.get("passage_text"),
+        raw.get("passage"),
+        raw.get("context"),
+        raw.get("context_text"),
+        raw.get("source_text"),
+        raw.get("text"),
+    ):
+        cleaned = str(value or "").strip()
+        if cleaned:
+            candidates.append(cleaned)
+    for question in questions_in:
+        if not isinstance(question, dict):
+            continue
+        for value in (
+            question.get("passage_text"),
+            question.get("passage"),
+            question.get("context"),
+            question.get("context_text"),
+            question.get("source_text"),
+            question.get("text"),
+        ):
+            cleaned = str(value or "").strip()
+            if cleaned:
+                candidates.append(cleaned)
+    request_content = str(request.content or "").strip() if request else ""
+    if request_content and not _looks_like_generation_instruction_text(request_content):
+        candidates.append(request_content)
+    for candidate in candidates:
+        if not _looks_like_generation_instruction_text(candidate):
+            return candidate
+    if request_content:
+        return _build_offline_passage_text(request_content)
+    return ""
+
+
+def _derive_topic_from_generation_instruction(source: str) -> str:
+    cleaned = str(source or "").strip()
+    if not cleaned:
+        return "the topic"
+    cleaned = re.sub(r"(?i)\b(create|generate|write|make|prepare|produce|give|draft)\b", " ", cleaned)
+    cleaned = re.sub(r"(?i)\b\d+\b", " ", cleaned)
+    cleaned = re.sub(r"(?i)\b(passage[- ]based|based|mcq|mcqs|questions?|quiz|quizzes|for|from)\b", " ", cleaned)
+    cleaned = re.sub(r"(?i)\babout\b", " on ", cleaned)
+    cleaned = re.sub(r"(?i)\bon\b", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .:-")
+    return cleaned or "the topic"
+
+
+def _build_offline_passage_text(source: str) -> str:
+    topic = _derive_topic_from_generation_instruction(source)
+    topic_phrase = "a public-affairs theme" if topic == "the topic" else topic
+    return (
+        f"The passage discusses {topic_phrase} through a balanced explanatory lens. "
+        "It shows that major outcomes rarely emerge from a single cause; instead, they develop through the interaction "
+        "of institutions, human decisions, material conditions, and longer historical pressures. "
+        "The author highlights that short-term changes may appear dramatic, but their deeper significance becomes clear "
+        "only when they are linked to broader structural shifts affecting society, economy, and governance. "
+        "The discussion also suggests that any serious evaluation of the theme must distinguish immediate consequences "
+        "from long-term implications, while paying attention to who benefits, who is burdened, and how competing priorities are resolved."
+    )
+
+
 def _normalize_items(
     items: List[Dict[str, Any]],
     instruction_type: AIInstructionType,
@@ -1233,13 +1308,12 @@ def _normalize_items(
                 example_prompt_template,
             )
 
-            passage_text = str(raw.get("passage_text") or raw.get("passage") or request.content if request else "").strip()
-            if not passage_text and request and request.content:
-                passage_text = request.content.strip()[:2000]
+            passage_title = _resolve_passage_title(raw, questions_in)
+            passage_text = _resolve_passage_text(raw, questions_in, request)
             source_reference = str(raw.get("source_reference") or raw.get("source") or "").strip() or None
             normalized_passages.append(
                 {
-                    "passage_title": str(raw.get("passage_title") or "").strip() or None,
+                    "passage_title": passage_title,
                     "passage_text": passage_text,
                     "source_reference": source_reference,
                     "source": source_reference,
@@ -1436,6 +1510,8 @@ def _offline_fallback_quiz_items(request: AIQuizGenerateRequest, error_message: 
             snippet = sentences[idx % len(sentences)]
             questions.append(_build_offline_question(snippet, idx + 1, is_maths=False, error_message=error_message))
         passage_text = " ".join(sentences[: min(8, len(sentences))]).strip()
+        if not passage_text or _looks_like_generation_instruction_text(passage_text):
+            passage_text = _build_offline_passage_text(source)
         return [
             {
                 "passage_title": "Offline Fallback Passage",
@@ -1674,6 +1750,238 @@ async def refine_style_profile(
         return {"style_profile": profile}
     except json.JSONDecodeError:
         return {"style_profile": current_profile}
+
+
+def _dashboard_ai_empty_section(note: str) -> Dict[str, Any]:
+    return {
+        "overview": note,
+        "pattern_summary": note,
+        "strengths": [],
+        "weaknesses": [],
+        "recommendations": [],
+        "momentum": note,
+        "confidence": "low",
+        "sample_size_note": note,
+    }
+
+
+def _dashboard_ai_trim_rows(rows: Any, *, max_items: int = 6) -> List[Dict[str, Any]]:
+    output: List[Dict[str, Any]] = []
+    if not isinstance(rows, list):
+        return output
+    for row in rows[:max_items]:
+        if isinstance(row, dict):
+            output.append(row)
+    return output
+
+
+def _compact_dashboard_section_for_ai(section: Any, *, is_mains: bool) -> Dict[str, Any]:
+    if not isinstance(section, dict):
+        return {}
+
+    compact: Dict[str, Any] = {
+        "label": str(section.get("label") or "").strip(),
+        "activity_count": int(section.get("activity_count") or 0),
+        "question_count": int(section.get("question_count") or 0),
+        "weak_areas": _dashboard_ai_trim_rows(section.get("weak_areas"), max_items=6),
+        "recurring_errors": _dashboard_ai_trim_rows(section.get("recurring_errors"), max_items=6),
+        "trend_7d": _dashboard_ai_trim_rows(section.get("trend_7d"), max_items=7),
+        "trend_30d": _dashboard_ai_trim_rows(section.get("trend_30d"), max_items=30),
+        "performance_groups": {
+            "best": _dashboard_ai_trim_rows((section.get("performance_groups") or {}).get("best"), max_items=5),
+            "average": _dashboard_ai_trim_rows((section.get("performance_groups") or {}).get("average"), max_items=5),
+            "bad": _dashboard_ai_trim_rows((section.get("performance_groups") or {}).get("bad"), max_items=5),
+        },
+    }
+
+    if is_mains:
+        compact.update(
+            {
+                "average_score": float(section.get("average_score") or 0.0),
+                "score_percent": float(section.get("score_percent") or 0.0),
+                "total_score": float(section.get("total_score") or 0.0),
+                "max_total_score": float(section.get("max_total_score") or 0.0),
+                "area_performance": _dashboard_ai_trim_rows(
+                    section.get("area_performance") or section.get("category_performance"),
+                    max_items=8,
+                ),
+            }
+        )
+    else:
+        compact.update(
+            {
+                "accuracy": float(section.get("accuracy") or 0.0),
+                "correct_count": int(section.get("correct_count") or 0),
+                "incorrect_count": int(section.get("incorrect_count") or 0),
+                "unanswered_count": int(section.get("unanswered_count") or 0),
+                "category_performance": _dashboard_ai_trim_rows(section.get("category_performance"), max_items=8),
+            }
+        )
+
+    return compact
+
+
+def _compact_dashboard_snapshot_for_ai(analytics_snapshot: Dict[str, Any], scope: str) -> Dict[str, Any]:
+    sections = analytics_snapshot.get("sections") if isinstance(analytics_snapshot.get("sections"), dict) else {}
+    include_prelims = scope in {"all", "prelims"}
+    include_mains = scope in {"all", "mains"}
+
+    recent_activity = analytics_snapshot.get("recent_activity")
+    compact_activity = []
+    if isinstance(recent_activity, list):
+        for row in recent_activity[:10]:
+            if not isinstance(row, dict):
+                continue
+            compact_activity.append(
+                {
+                    "type": row.get("type"),
+                    "title": row.get("title"),
+                    "score_text": row.get("score_text"),
+                    "accuracy": row.get("accuracy"),
+                    "created_at": row.get("created_at"),
+                }
+            )
+
+    return {
+        "generated_at": analytics_snapshot.get("generated_at"),
+        "summary": analytics_snapshot.get("summary") if isinstance(analytics_snapshot.get("summary"), dict) else {},
+        "recent_activity": compact_activity,
+        "recommendations": analytics_snapshot.get("recommendations") if isinstance(analytics_snapshot.get("recommendations"), list) else [],
+        "prelims": {
+            "gk": _compact_dashboard_section_for_ai(sections.get("gk"), is_mains=False),
+            "maths": _compact_dashboard_section_for_ai(sections.get("maths"), is_mains=False),
+            "passage": _compact_dashboard_section_for_ai(sections.get("passage"), is_mains=False),
+        } if include_prelims else None,
+        "mains": _compact_dashboard_section_for_ai(sections.get("mains"), is_mains=True) if include_mains else None,
+    }
+
+
+async def generate_dashboard_performance_analysis(
+    analytics_snapshot: Dict[str, Any],
+    *,
+    scope: str = "all",
+    provider: str = "gemini",
+    model_name: str = "gemini-3-flash-preview",
+) -> Dict[str, Any]:
+    normalized_scope = str(scope or "all").strip().lower()
+    if normalized_scope not in {"all", "prelims", "mains"}:
+        normalized_scope = "all"
+
+    compact_snapshot = _compact_dashboard_snapshot_for_ai(analytics_snapshot, normalized_scope)
+    system_prompt = (
+        "You are an expert UPSC performance analyst for a student dashboard. "
+        "Your job is to read analytics data and explain performance PATTERNS, not dump raw issue lists. "
+        "Use only the evidence present in the provided snapshot. "
+        "Do not invent topics, causes, or attempts that are not in the data. "
+        "Keep the tone professional, concise, and coaching-oriented.\n\n"
+        "Return strict JSON with this shape:\n"
+        "{\n"
+        '  "global_summary": {"headline": string, "next_best_action": string},\n'
+        '  "prelims": {\n'
+        '    "overview": string,\n'
+        '    "pattern_summary": string,\n'
+        '    "strengths": [{"title": string, "detail": string, "evidence": string}],\n'
+        '    "weaknesses": [{"title": string, "detail": string, "evidence": string}],\n'
+        '    "recommendations": [{"title": string, "detail": string, "evidence": string}],\n'
+        '    "momentum": string,\n'
+        '    "confidence": "high" | "medium" | "low",\n'
+        '    "sample_size_note": string\n'
+        '  } | null,\n'
+        '  "mains": {\n'
+        '    "overview": string,\n'
+        '    "pattern_summary": string,\n'
+        '    "strengths": [{"title": string, "detail": string, "evidence": string}],\n'
+        '    "weaknesses": [{"title": string, "detail": string, "evidence": string}],\n'
+        '    "recommendations": [{"title": string, "detail": string, "evidence": string}],\n'
+        '    "momentum": string,\n'
+        '    "confidence": "high" | "medium" | "low",\n'
+        '    "sample_size_note": string\n'
+        '  } | null\n'
+        "}\n\n"
+        "Rules:\n"
+        "1. Prelims analysis must synthesize across GK, Maths, and Passage rather than repeat weak-area counters.\n"
+        "2. Mains analysis must focus on answer-writing patterns across evaluations, strengths, and recurring weaknesses.\n"
+        "3. Every item in strengths, weaknesses, and recommendations must include evidence with concrete numbers from the snapshot.\n"
+        "4. If sample size is small, explicitly reduce confidence and say the pattern is still emerging.\n"
+        "5. Keep each text field short: one or two sentences max.\n"
+        "6. Avoid generic advice unless it is tied to actual evidence in the snapshot.\n"
+        "7. Do not use markdown, code fences, or extra commentary outside the JSON object."
+    )
+    user_prompt = (
+        f"Scope: {normalized_scope}\n\n"
+        "Student analytics snapshot:\n"
+        f"{json.dumps(compact_snapshot, ensure_ascii=False)}"
+    )
+
+    raw_text = ""
+    fallback_reason: Optional[str] = None
+    normalized_provider = str(provider or "gemini").strip().lower()
+
+    try:
+        if normalized_provider == "gemini" and GEMINI_API_KEY:
+            model = genai.GenerativeModel(model_name)
+            response = await model.generate_content_async(f"{system_prompt}\n\n{user_prompt}")
+            raw_text = response.text or ""
+        elif normalized_provider == "openai" and openai_client:
+            completion = await openai_client.chat.completions.create(
+                model=model_name if "gpt" in model_name else "gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+            )
+            raw_text = completion.choices[0].message.content or ""
+        elif GEMINI_API_KEY:
+            model = genai.GenerativeModel("gemini-3-flash-preview")
+            response = await model.generate_content_async(f"{system_prompt}\n\n{user_prompt}")
+            raw_text = response.text or ""
+            normalized_provider = "gemini"
+            model_name = "gemini-3-flash-preview"
+        elif openai_client:
+            completion = await openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+            )
+            raw_text = completion.choices[0].message.content or ""
+            normalized_provider = "openai"
+            model_name = "gpt-4o"
+        else:
+            fallback_reason = "No AI provider configured for dashboard analysis."
+    except Exception as exc:
+        fallback_reason = str(exc)
+
+    if raw_text:
+        cleaned = _extract_json_blob(raw_text)
+        try:
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, dict):
+                parsed["is_ai_generated"] = True
+                parsed["provider"] = normalized_provider
+                parsed["model"] = model_name
+                parsed["fallback_reason"] = None
+                return parsed
+        except json.JSONDecodeError:
+            fallback_reason = "AI response could not be parsed as JSON."
+
+    prelims_note = "AI analysis is currently unavailable for prelims."
+    mains_note = "AI analysis is currently unavailable for mains."
+    return {
+        "is_ai_generated": False,
+        "provider": normalized_provider if fallback_reason else None,
+        "model": model_name if fallback_reason else None,
+        "fallback_reason": fallback_reason or "AI analysis unavailable.",
+        "global_summary": {
+            "headline": "AI performance analysis is unavailable right now.",
+            "next_best_action": "Retry in a moment or review the underlying metrics until the AI summary is available.",
+        },
+        "prelims": None if normalized_scope == "mains" else _dashboard_ai_empty_section(prelims_note),
+        "mains": None if normalized_scope == "prelims" else _dashboard_ai_empty_section(mains_note),
+    }
 
 async def generate_mains_questions(
     request: MainsAIGenerateRequest,

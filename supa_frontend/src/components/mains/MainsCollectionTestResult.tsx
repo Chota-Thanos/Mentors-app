@@ -61,14 +61,14 @@ export default function MainsCollectionTestResult({ collectionId }: MainsCollect
       <div className="space-y-4 rounded-xl border border-amber-200 bg-amber-50 p-6">
         <h2 className="text-lg font-bold text-amber-900">Result not found</h2>
         <p className="text-sm text-amber-800">
-          This mains flow now stores submissions and mentor review inside the writing desk. Open the desk to see your latest submission status.
+          This mains flow now stores submissions and mentor review on the main test page. Open the test to see your latest submission status.
         </p>
         <div className="flex gap-2">
           <button
-            onClick={() => router.push(`/collections/${collectionId}/mains-test`)}
+            onClick={() => router.push(`/collections/${collectionId}`)}
             className="rounded bg-amber-700 px-4 py-2 text-sm font-semibold text-white"
           >
-            Open Mains Writing Desk
+            Open Test
           </button>
           <button
             onClick={() => router.push(`/collections/${collectionId}`)}
@@ -152,10 +152,10 @@ export default function MainsCollectionTestResult({ collectionId }: MainsCollect
 
       <div className="flex gap-2">
         <button
-          onClick={() => router.push(`/collections/${collectionId}/mains-test`)}
+          onClick={() => router.push(`/collections/${collectionId}`)}
           className="rounded bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
         >
-          Open Mains Writing Desk
+          Open Test
         </button>
         <button
           onClick={() => router.push(`/collections/${collectionId}`)}
