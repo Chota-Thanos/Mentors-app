@@ -116,7 +116,7 @@ const dashboardCopy: Record<DashboardKind, { title: string; subtitle: string }> 
   },
   quiz_master: {
     title: "Quiz Master Dashboard",
-    subtitle: "Prelims-focused test series operations and learner activity.",
+    subtitle: "Prelims-focused programs operations and learner activity.",
   },
   moderator: {
     title: "Moderation Dashboard",
@@ -413,7 +413,7 @@ export default function DashboardPage() {
             premiumApi.get<MentorshipRequest[]>("/mentorship/requests", { params: { scope: "provider" } }),
             premiumApi.get<MentorshipSlot[]>("/mentorship/slots", { params: { include_past: true } }),
             premiumApi.get<MentorshipSession[]>("/mentorship/sessions", { params: { scope: "provider" } }),
-            premiumApi.get<TestSeries[]>("/test-series", {
+            premiumApi.get<TestSeries[]>("/programs", {
               params: { mine_only: true, include_tests: true, include_inactive: true },
             }),
           ]);
@@ -435,7 +435,7 @@ export default function DashboardPage() {
         if (kind === "quiz_master") {
           const [summary, series, trackingPayload, profileDetail] = await Promise.all([
             premiumApi.get<ProviderDashboardSummary>("/provider/dashboard-summary"),
-            premiumApi.get<TestSeries[]>("/test-series", { params: { mine_only: true, include_tests: true, include_inactive: true } }),
+            premiumApi.get<TestSeries[]>("/programs", { params: { mine_only: true, include_tests: true, include_inactive: true } }),
             premiumApi
               .get<LifecycleTrackingPayload>("/lifecycle/tracking", {
                 params: { scope: "provider", limit_cycles: 220, limit_users: 220 },
@@ -458,7 +458,7 @@ export default function DashboardPage() {
             prelimsSeries.slice(0, 24).map(async (seriesRow): Promise<QuizMasterSeriesInsight> => {
               try {
                 const enrollmentResponse = await premiumApi.get<TestSeriesEnrollment[]>(
-                  `/test-series/${seriesRow.id}/enrollments`,
+                  `/programs/${seriesRow.id}/enrollments`,
                 );
                 const enrollmentRows = Array.isArray(enrollmentResponse.data) ? enrollmentResponse.data : [];
                 return {
@@ -847,18 +847,18 @@ export default function DashboardPage() {
       },
       {
         key: "prelims-series",
-        title: "Prelims Test Series",
+        title: "Prelims Programs",
         metric: `${activePrelims} active prelims purchases`,
         detail: activePrelims > 0 ? "Continue your prelims roadmap." : "No active prelims series yet.",
-        href: "/test-series/prelims",
+        href: "/programs/prelims",
         actionLabel: "Browse Prelims",
       },
       {
         key: "mains-series",
-        title: "Mains Test Series",
+        title: "Mains Programs",
         metric: `${activeMains} active mains purchases`,
         detail: activeMains > 0 ? "Continue answer-writing practice." : "No active mains series yet.",
-        href: "/test-series/mains",
+        href: "/programs/mains",
         actionLabel: "Browse Mains",
       },
     ];
@@ -1162,20 +1162,20 @@ export default function DashboardPage() {
                           Valid Until: {series.subscribed_until ? formatDateTime(series.subscribed_until) : "n/a"}
                         </p>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={`/test-series/${series.series_id}`} className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
+                          <Link href={`/programs/${series.series_id}`} className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
                             Open Series
                           </Link>
-                          <Link href={String(series.series_kind || "").toLowerCase() === "mains" ? "/test-series/mains" : "/test-series/prelims"} className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
+                          <Link href={String(series.series_kind || "").toLowerCase() === "mains" ? "/programs/mains" : "/programs/prelims"} className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
                             Browse Similar
                           </Link>
                         </div>
                       </article>
                     ))}
-                    {learnerActiveSeries.length === 0 ? <p className="text-sm text-slate-500">No active test series purchases yet.</p> : null}
+                    {learnerActiveSeries.length === 0 ? <p className="text-sm text-slate-500">No active programs purchases yet.</p> : null}
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Link href="/test-series/prelims" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Browse Prelims Series</Link>
-                    <Link href="/test-series/mains" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Browse Mains Series</Link>
+                    <Link href="/programs/prelims" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Browse Prelims Series</Link>
+                    <Link href="/programs/mains" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Browse Mains Series</Link>
                   </div>
                 </section>
               </>
@@ -1193,7 +1193,7 @@ export default function DashboardPage() {
                   <p className="text-sm text-slate-600">Track pending reviews, learner requests, and today’s consultations from one clean workspace.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Link href="/test-series/create" className="inline-flex items-center rounded-full bg-[#091a4a] px-4 py-2 text-xs font-semibold text-white shadow-sm shadow-[#091a4a]/20">
+                  <Link href="/programs/create" className="inline-flex items-center rounded-full bg-[#091a4a] px-4 py-2 text-xs font-semibold text-white shadow-sm shadow-[#091a4a]/20">
                     Create Mains Series
                   </Link>
                   <Link href="/mains-mentor/ai-mains" className="inline-flex items-center rounded-full border border-indigo-300 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-700">
@@ -1471,8 +1471,8 @@ export default function DashboardPage() {
             <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div><h2 className="text-2xl font-black tracking-tight text-slate-900">Mains Program Workspace</h2></div>
-                <Link href="/test-series" className="inline-flex items-center rounded-full bg-[#091a4a] px-4 py-2 text-xs font-semibold text-white">
-                  Manage Test Series
+                <Link href="/programs" className="inline-flex items-center rounded-full bg-[#091a4a] px-4 py-2 text-xs font-semibold text-white">
+                  Manage Programs
                   <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                 </Link>
               </div>
@@ -1513,10 +1513,10 @@ export default function DashboardPage() {
                         </span>
                       </div>
                       <div className="mt-5 flex flex-wrap gap-2">
-                        <Link href={`/test-series/${series.id}/manage`} className="inline-flex items-center rounded-full bg-[#091a4a] px-4 py-2 text-xs font-semibold text-white">
+                        <Link href={`/programs/${series.id}/manage`} className="inline-flex items-center rounded-full bg-[#091a4a] px-4 py-2 text-xs font-semibold text-white">
                           Manage
                         </Link>
-                        <Link href={`/test-series/${series.id}`} className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700">
+                        <Link href={`/programs/${series.id}`} className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700">
                           Open Series
                         </Link>
                       </div>
@@ -1551,7 +1551,7 @@ export default function DashboardPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-bold text-slate-900">Quiz Master Actions</h2>
                 <div className="flex flex-wrap gap-2">
-                  <Link href="/test-series/create" className="inline-flex items-center rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">
+                  <Link href="/programs/create" className="inline-flex items-center rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">
                     Create Prelims Series
                   </Link>
                   <Link href="/quiz-master/ai-quiz/gk" className="inline-flex items-center rounded-md border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700">
@@ -1560,7 +1560,7 @@ export default function DashboardPage() {
                   <Link href="/quiz-master/complaints" className="inline-flex items-center rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
                     Question Complaints
                   </Link>
-                  <Link href="/test-series/prelims" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+                  <Link href="/programs/prelims" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
                     Browse Prelims
                   </Link>
                   <Link href="/profile/professional" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
@@ -1578,7 +1578,7 @@ export default function DashboardPage() {
             <section className="rounded-2xl border border-slate-200 bg-white p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-bold text-slate-900">Created Prelims Series + Enrollments</h2>
-                <Link href="/test-series" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Manage Test Series</Link>
+                <Link href="/programs" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Manage Programs</Link>
               </div>
               <div className="mt-3 space-y-2">
                 {quizMasterData.seriesInsights.slice(0, 12).map((insight) => (
@@ -1594,8 +1594,8 @@ export default function DashboardPage() {
                       Enrollments: {insight.totalEnrollments} total | {insight.activeEnrollments} active
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <Link href={`/test-series/${insight.series.id}/manage`} className="inline-flex items-center rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">Manage</Link>
-                      <Link href={`/test-series/${insight.series.id}`} className="inline-flex items-center rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">Open</Link>
+                      <Link href={`/programs/${insight.series.id}/manage`} className="inline-flex items-center rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">Manage</Link>
+                      <Link href={`/programs/${insight.series.id}`} className="inline-flex items-center rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">Open</Link>
                     </div>
                   </article>
                 ))}
@@ -1606,7 +1606,7 @@ export default function DashboardPage() {
             <section className="rounded-2xl border border-slate-200 bg-white p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-bold text-slate-900">Issues Raised By Enrolled Students</h2>
-                <Link href="/test-series" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+                <Link href="/programs" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
                   Open Series Workspace
                 </Link>
               </div>
@@ -1650,7 +1650,7 @@ export default function DashboardPage() {
             <section className="rounded-2xl border border-slate-200 bg-white p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-bold text-slate-900">User Lifecycle Tracking</h2>
-                <Link href="/test-series" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Open Test Series Console</Link>
+                <Link href="/programs" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Open Programs Console</Link>
               </div>
               <div className="mt-3 space-y-2">
                 {moderatorData.tracking.user_rows.slice(0, 14).map((row) => (

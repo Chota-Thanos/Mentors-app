@@ -539,7 +539,7 @@ export default function DiscussionRoomView({
     try {
       const endpointPath =
         context.scope_type === "series"
-          ? `/test-series/${context.scope_id}/discussion-request-to-speak`
+          ? `/programs/${context.scope_id}/discussion-request-to-speak`
           : `/tests/${context.scope_id}/discussion-request-to-speak`;
       await premiumApi.post(endpointPath, {});
       await loadSpeakerRequests(context.scope_type, context.scope_id, context.discussion_key);

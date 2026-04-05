@@ -145,7 +145,7 @@ export default function MyResultsView() {
         const [progressRes, mainsRes, enrollmentsRes] = await Promise.all([
           premiumApi.get<UserProgressPayload>("/user/progress"),
           premiumApi.get<UserMainsPerformanceReport>("/users/me/mains-performance-report"),
-          premiumApi.get<TestSeriesEnrollment[]>("/test-series/my/enrollments"),
+          premiumApi.get<TestSeriesEnrollment[]>("/programs/my/enrollments"),
         ]);
         if (!active) return;
 
@@ -216,7 +216,7 @@ export default function MyResultsView() {
         const nextSeriesTitleById: Record<string, string> = {};
         if (uniqueSeriesIds.length > 0) {
           const seriesResponses = await Promise.allSettled(
-            uniqueSeriesIds.map((seriesId) => premiumApi.get<TestSeries>(`/test-series/${seriesId}`)),
+            uniqueSeriesIds.map((seriesId) => premiumApi.get<TestSeries>(`/programs/${seriesId}`)),
           );
           if (!active) return;
           for (const result of seriesResponses) {
@@ -313,7 +313,7 @@ export default function MyResultsView() {
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
         <h1 className="text-2xl font-bold text-slate-900">My Results</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Showing only test-series results and quiz-made test results. Standalone normal quiz attempts are excluded.
+          Showing only programs results and quiz-made test results. Standalone normal quiz attempts are excluded.
         </p>
       </section>
 
@@ -366,7 +366,7 @@ export default function MyResultsView() {
               </article>
             );
           })}
-          {seriesAttempts.length === 0 ? <p className="text-sm text-slate-500">No test-series quiz results yet.</p> : null}
+          {seriesAttempts.length === 0 ? <p className="text-sm text-slate-500">No programs quiz results yet.</p> : null}
         </div>
       </section>
 

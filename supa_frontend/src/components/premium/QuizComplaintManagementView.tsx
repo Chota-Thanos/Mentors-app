@@ -202,7 +202,7 @@ export default function QuizComplaintManagementView() {
           <section className="rounded-2xl border border-rose-200 bg-rose-50 p-6">
             <h2 className="text-lg font-bold text-rose-900">Quiz Master access required</h2>
             <p className="mt-2 text-sm text-rose-800">
-              This page is reserved for creators who manage prelims test series and their question complaints.
+              This page is reserved for creators who manage prelims programs and their question complaints.
             </p>
           </section>
         ) : null}
@@ -292,7 +292,7 @@ export default function QuizComplaintManagementView() {
                           </Link>
                           {complaint.series_id ? (
                             <Link
-                              href={`/test-series/${complaint.series_id}/manage`}
+                              href={`/programs/${complaint.series_id}/manage`}
                               className="inline-flex items-center gap-1 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900"
                             >
                               <MessageSquareWarning className="h-4 w-4" />

@@ -22,8 +22,8 @@ const DASHBOARD_PLUG_RESOLVERS: Partial<Record<string, DashboardPlugResolver>> =
     label: "Open Mentorship",
   }),
   course_enrollment: () => ({
-    href: "/test-series",
-    label: "Browse Test Series",
+    href: "/programs",
+    label: "Browse Programs",
   }),
 };
 

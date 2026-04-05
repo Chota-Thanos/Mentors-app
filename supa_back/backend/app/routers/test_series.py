@@ -102,7 +102,7 @@ from ..models import (
 )
 from ..supabase_client import get_supabase_client
 
-router = APIRouter(prefix="/api/v1/premium", tags=["Premium Test Series"])
+router = APIRouter(prefix="/api/v1/premium", tags=["Premium Programs"])
 
 TEST_SERIES_TABLE = "test_series"
 TEST_SERIES_PROGRAM_ITEMS_TABLE = "test_series_program_items"
@@ -123,7 +123,7 @@ SUBSCRIPTION_PLANS_TABLE = "subscription_plans"
 USER_SUBSCRIPTIONS_TABLE = "user_subscriptions"
 RAZORPAY_ORDERS_URL = "https://api.razorpay.com/v1/orders"
 TEST_SERIES_MIGRATION_HINT = (
-    "Missing Test Series tables. "
+    "Missing Programs tables. "
     "Run supa_back/migrations/2026-02-22_test_series_and_mentorship.sql in Supabase SQL Editor."
 )
 PROFILES_SUBSCRIPTIONS_MIGRATION_HINT = (
@@ -2177,7 +2177,7 @@ def _fetch_series_or_404(series_id: int, supabase: Client) -> Dict[str, Any]:
     except Exception as exc:
         _raise_test_series_migration_required(exc)
     if not row:
-        raise HTTPException(status_code=404, detail="Test series not found.")
+        raise HTTPException(status_code=404, detail="Programs not found.")
     return row
 
 
@@ -2394,7 +2394,7 @@ def _fetch_series_for_test_or_404(test_id: int, supabase: Client) -> tuple[Dict[
     collection = _fetch_collection_or_404(test_id, supabase)
     series_id = _resolve_series_id_from_collection(collection)
     if not series_id:
-        raise HTTPException(status_code=404, detail="Test is not mapped to a test series.")
+        raise HTTPException(status_code=404, detail="Test is not mapped to a programs.")
     series = _fetch_series_or_404(series_id, supabase)
     return series, collection, series_id
 
@@ -2423,7 +2423,7 @@ def _ensure_series_owner_or_admin(series_row: Dict[str, Any], user_ctx: Dict[str
         return user_id
     provider_user_id = str(series_row.get("provider_user_id") or "").strip()
     if provider_user_id != user_id:
-        raise HTTPException(status_code=403, detail="Only the provider can manage this test series.")
+        raise HTTPException(status_code=403, detail="Only the provider can manage this programs.")
     return user_id
 
 
@@ -2597,13 +2597,13 @@ def _series_enrollment_response(row: Dict[str, Any], *, series_id: int, user_id:
 
 
 def _series_payment_description(series_row: Dict[str, Any]) -> str:
-    title = _as_optional_text(series_row.get("title"), max_length=140) or "Test Series"
+    title = _as_optional_text(series_row.get("title"), max_length=140) or "Programs"
     kind = _as_role(series_row.get("series_kind"))
     if kind == TestSeriesKind.MAINS.value:
-        return f"Mains Test Series Access: {title}"
+        return f"Mains Programs Access: {title}"
     if kind == TestSeriesKind.QUIZ.value:
-        return f"Prelims Test Series Access: {title}"
-    return f"Test Series Access: {title}"
+        return f"Prelims Programs Access: {title}"
+    return f"Programs Access: {title}"
 
 
 def _series_payment_currency(series_row: Dict[str, Any]) -> str:
@@ -3922,7 +3922,7 @@ def _entitlement_response(row: Dict[str, Any]) -> MentorshipEntitlementResponse:
         updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
     )
 
-@router.get("/test-series", response_model=List[TestSeriesResponse])
+@router.get("/programs", response_model=List[TestSeriesResponse])
 def list_test_series(
     mine_only: bool = False,
     only_public: bool = False,
@@ -3961,7 +3961,7 @@ def list_test_series(
     return output
 
 
-@router.post("/test-series", response_model=TestSeriesResponse)
+@router.post("/programs", response_model=TestSeriesResponse)
 def create_test_series(
     payload: TestSeriesCreate,
     user_ctx: Dict[str, Any] = Depends(require_series_author_user),
@@ -4007,11 +4007,11 @@ def create_test_series(
     except Exception as exc:
         _raise_test_series_migration_required(exc)
     if not row:
-        raise HTTPException(status_code=400, detail="Failed to create test series.")
+        raise HTTPException(status_code=400, detail="Failed to create programs.")
     return _series_row_to_response(row, test_count=0)
 
 
-@router.get("/test-series/{series_id}", response_model=TestSeriesResponse)
+@router.get("/programs/{series_id}", response_model=TestSeriesResponse)
 def get_test_series(
     series_id: int,
     include_tests: bool = False,
@@ -4020,7 +4020,7 @@ def get_test_series(
 ):
     row = _fetch_series_or_404(series_id, supabase)
     if not _can_view_series(user_ctx=user_ctx, series_row=row, supabase=supabase):
-        raise HTTPException(status_code=403, detail="Access denied for this test series.")
+        raise HTTPException(status_code=403, detail="Access denied for this programs.")
     test_count = 0
     if include_tests:
         tests = _fetch_series_tests(series_id=series_id, supabase=supabase, include_inactive=True)
@@ -4028,7 +4028,7 @@ def get_test_series(
     return _series_row_to_response(row, test_count=test_count)
 
 
-@router.put("/test-series/{series_id}", response_model=TestSeriesResponse)
+@router.put("/programs/{series_id}", response_model=TestSeriesResponse)
 def update_test_series(
     series_id: int,
     payload: TestSeriesUpdate,
@@ -4070,12 +4070,12 @@ def update_test_series(
 
     updated = _first(supabase.table(TEST_SERIES_TABLE).update(updates).eq("id", series_id).execute())
     if not updated:
-        raise HTTPException(status_code=404, detail="Test series not found.")
+        raise HTTPException(status_code=404, detail="Programs not found.")
     tests = _fetch_series_tests(series_id=series_id, supabase=supabase, include_inactive=True)
     return _series_row_to_response(updated, test_count=len(tests))
 
 
-@router.delete("/test-series/{series_id}")
+@router.delete("/programs/{series_id}")
 def delete_test_series(
     series_id: int,
     hard_delete: bool = Query(default=False),
@@ -4089,8 +4089,8 @@ def delete_test_series(
     if hard_delete:
         deleted = _first(supabase.table(TEST_SERIES_TABLE).delete().eq("id", series_id).execute())
         if not deleted:
-            raise HTTPException(status_code=404, detail="Test series not found.")
-        return {"message": "Test series deleted permanently.", "id": series_id}
+            raise HTTPException(status_code=404, detail="Programs not found.")
+        return {"message": "Programs deleted permanently.", "id": series_id}
 
     updated = _first(
         supabase.table(TEST_SERIES_TABLE)
@@ -4099,11 +4099,11 @@ def delete_test_series(
         .execute()
     )
     if not updated:
-        raise HTTPException(status_code=404, detail="Test series not found.")
-    return {"message": "Test series archived.", "id": series_id}
+        raise HTTPException(status_code=404, detail="Programs not found.")
+    return {"message": "Programs archived.", "id": series_id}
 
 
-@router.get("/test-series/{series_id}/tests", response_model=List[TestSeriesTestResponse])
+@router.get("/programs/{series_id}/tests", response_model=List[TestSeriesTestResponse])
 def list_series_tests(
     series_id: int,
     include_inactive: bool = False,
@@ -4112,7 +4112,7 @@ def list_series_tests(
 ):
     series_row = _fetch_series_or_404(series_id, supabase)
     if not _can_view_series(user_ctx=user_ctx, series_row=series_row, supabase=supabase):
-        raise HTTPException(status_code=403, detail="Access denied for this test series.")
+        raise HTTPException(status_code=403, detail="Access denied for this programs.")
 
     tests = _fetch_series_tests(series_id=series_id, supabase=supabase, include_inactive=include_inactive)
     question_counts = _fetch_test_question_counts(
@@ -4127,7 +4127,7 @@ def list_series_tests(
     return output
 
 
-@router.get("/test-series/{series_id}/program-items", response_model=List[TestSeriesProgramItemResponse])
+@router.get("/programs/{series_id}/program-items", response_model=List[TestSeriesProgramItemResponse])
 def list_series_program_items(
     series_id: int,
     include_inactive: bool = False,
@@ -4144,7 +4144,7 @@ def list_series_program_items(
     return [_program_item_row_to_response(row) for row in rows]
 
 
-@router.get("/test-series-discovery/tests", response_model=List[TestSeriesDiscoveryTestResponse])
+@router.get("/programs-discovery/tests", response_model=List[TestSeriesDiscoveryTestResponse])
 def list_discovery_tests(
     test_kind: CollectionTestKind,
     search: Optional[str] = None,
@@ -4256,7 +4256,7 @@ def list_discovery_tests(
     return output
 
 
-@router.get("/test-series-discovery/series", response_model=List[TestSeriesDiscoverySeriesResponse])
+@router.get("/programs-discovery/series", response_model=List[TestSeriesDiscoverySeriesResponse])
 def list_discovery_series(
     series_kind: TestSeriesKind,
     search: Optional[str] = None,
@@ -4265,6 +4265,7 @@ def list_discovery_series(
     min_price: Optional[float] = Query(default=None, ge=0),
     max_price: Optional[float] = Query(default=None, ge=0),
     only_free: bool = False,
+    exam_id: Optional[int] = Query(default=None, ge=1),
     limit: int = Query(default=120, ge=1, le=500),
     user_ctx: Optional[Dict[str, Any]] = Depends(get_user_context),
     supabase: Client = Depends(get_supabase_client),
@@ -4281,6 +4282,19 @@ def list_discovery_series(
         if access_type is not None:
             query = query.eq("access_type", access_type.value)
         series_rows = _rows(query.execute())
+
+        if exam_id is not None and series_rows:
+            series_ids = [int(r.get("id")) for r in series_rows if r.get("id")]
+            if series_ids:
+                exam_mappings = _rows(
+                    supabase.table("test_series_exams")
+                    .select("series_id")
+                    .eq("exam_id", exam_id)
+                    .in_("series_id", series_ids)
+                    .execute()
+                )
+                valid_series_ids = {int(m.get("series_id")) for m in exam_mappings}
+                series_rows = [r for r in series_rows if int(r.get("id")) in valid_series_ids]
     except Exception as exc:
         _raise_test_series_migration_required(exc)
 
@@ -4364,7 +4378,7 @@ def list_discovery_series(
     return output
 
 
-@router.post("/test-series/{series_id}/tests", response_model=TestSeriesTestResponse)
+@router.post("/programs/{series_id}/tests", response_model=TestSeriesTestResponse)
 def create_series_test(
     series_id: int,
     payload: TestSeriesTestCreate,
@@ -4428,7 +4442,7 @@ def create_series_test(
     return _collection_row_to_test_response(shaped_row, series_id=resolved_series_id)
 
 
-@router.post("/test-series/{series_id}/program-items", response_model=TestSeriesProgramItemResponse)
+@router.post("/programs/{series_id}/program-items", response_model=TestSeriesProgramItemResponse)
 def create_series_program_item(
     series_id: int,
     payload: TestSeriesProgramItemCreate,
@@ -4549,7 +4563,7 @@ def _build_discussion_call_context(
     )
 
 
-@router.post("/test-series/{series_id}/discussion-context", response_model=DiscussionCallContextResponse)
+@router.post("/programs/{series_id}/discussion-context", response_model=DiscussionCallContextResponse)
 def get_series_discussion_context(
     series_id: int,
     user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
@@ -4730,7 +4744,7 @@ def _create_discussion_speaker_request(
         _raise_discussion_speaker_requests_migration_required(exc)
 
 
-@router.post("/test-series/{series_id}/discussion-request-to-speak", response_model=DiscussionSpeakerRequestResponse)
+@router.post("/programs/{series_id}/discussion-request-to-speak", response_model=DiscussionSpeakerRequestResponse)
 def request_series_discussion_speaker_access(
     series_id: int,
     payload: DiscussionSpeakerRequestCreate,
@@ -4941,7 +4955,7 @@ def update_series_test(
     return _collection_row_to_test_response(shaped_row, series_id=series_id)
 
 
-@router.put("/test-series/program-items/{item_id}", response_model=TestSeriesProgramItemResponse)
+@router.put("/programs/program-items/{item_id}", response_model=TestSeriesProgramItemResponse)
 def update_series_program_item(
     item_id: int,
     payload: TestSeriesProgramItemUpdate,
@@ -5007,7 +5021,7 @@ def delete_series_test(
     return {"message": "Test archived.", "id": test_id}
 
 
-@router.delete("/test-series/program-items/{item_id}")
+@router.delete("/programs/program-items/{item_id}")
 def delete_series_program_item(
     item_id: int,
     hard_delete: bool = Query(default=False),
@@ -5131,7 +5145,7 @@ def delete_test_item(
     return {"message": "Item removed from test.", "id": collection_item_id}
 
 
-@router.post("/test-series/{series_id}/enroll", response_model=TestSeriesEnrollmentResponse)
+@router.post("/programs/{series_id}/enroll", response_model=TestSeriesEnrollmentResponse)
 def enroll_in_test_series(
     series_id: int,
     payload: EnrollRequest,
@@ -5160,11 +5174,11 @@ def enroll_in_test_series(
     }
     row = _first(supabase.table(TEST_SERIES_ENROLLMENTS_TABLE).insert(insert_payload).execute())
     if not row:
-        raise HTTPException(status_code=400, detail="Could not enroll in test series.")
+        raise HTTPException(status_code=400, detail="Could not enroll in programs.")
     return _series_enrollment_response(row, series_id=series_id, user_id=user_id)
 
 
-@router.post("/test-series/{series_id}/payment/order", response_model=TestSeriesRazorpayOrderResponse)
+@router.post("/programs/{series_id}/payment/order", response_model=TestSeriesRazorpayOrderResponse)
 def create_test_series_payment_order(
     series_id: int,
     payload: TestSeriesEnrollmentPaymentCreate,
@@ -5267,7 +5281,7 @@ def create_test_series_payment_order(
     )
 
 
-@router.post("/test-series/{series_id}/payment/verify", response_model=TestSeriesEnrollmentResponse)
+@router.post("/programs/{series_id}/payment/verify", response_model=TestSeriesEnrollmentResponse)
 def verify_test_series_payment(
     series_id: int,
     payload: TestSeriesEnrollmentPaymentVerify,
@@ -5345,7 +5359,7 @@ def verify_test_series_payment(
         raise HTTPException(status_code=400, detail="Could not activate series enrollment.")
     return _series_enrollment_response(updated, series_id=series_id, user_id=user_id)
 
-@router.get("/test-series/{series_id:int}/enrollments", response_model=List[TestSeriesEnrollmentResponse])
+@router.get("/programs/{series_id:int}/enrollments", response_model=List[TestSeriesEnrollmentResponse])
 def list_series_enrollments(
     series_id: int,
     user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
@@ -5365,7 +5379,7 @@ def list_series_enrollments(
     return [_series_enrollment_response(row, series_id=series_id, user_id=str(row.get("user_id") or "")) for row in rows]
 
 
-@router.get("/test-series/my/enrollments", response_model=List[TestSeriesEnrollmentResponse])
+@router.get("/programs/my/enrollments", response_model=List[TestSeriesEnrollmentResponse])
 def list_my_series_enrollments(
     user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
     supabase: Client = Depends(get_supabase_client),
@@ -7277,7 +7291,7 @@ def create_mentorship_request(
         resolved_provider_id = _resolve_series_handler_user_id(series_row)
         resolved_series_id = int(series_row.get("id") or payload.series_id)
         if not _can_access_series_content(user_ctx=user_ctx, series_row=series_row, supabase=supabase):
-            raise HTTPException(status_code=403, detail="You do not have access to this test series.")
+            raise HTTPException(status_code=403, detail="You do not have access to this programs.")
         checked_submission_row = _latest_checked_submission_for_user(
             user_id=user_id,
             series_id=resolved_series_id,
@@ -7296,7 +7310,7 @@ def create_mentorship_request(
         resolved_series_id = series_id
         resolved_test_id = payload.test_id
         if not _can_access_series_content(user_ctx=user_ctx, series_row=series_row, supabase=supabase):
-            raise HTTPException(status_code=403, detail="You do not have access to this test series.")
+            raise HTTPException(status_code=403, detail="You do not have access to this programs.")
         checked_submission_row = _latest_checked_submission_for_user(
             user_id=user_id,
             test_id=payload.test_id,
@@ -7459,12 +7473,12 @@ def create_mentorship_request(
         if not resolved_series_id:
             raise HTTPException(
                 status_code=400,
-                detail="This Mains Mentor accepts requests only for selected test series.",
+                detail="This Mains Mentor accepts requests only for selected programs.",
             )
         if available_series_ids and int(resolved_series_id) not in set(available_series_ids):
             raise HTTPException(
                 status_code=400,
-                detail="This Mains Mentor is currently not available for the selected test series.",
+                detail="This Mains Mentor is currently not available for the selected programs.",
             )
 
     requested_at_iso = _utc_now_iso()

@@ -21,9 +21,10 @@ import {
 } from "@/lib/outputLanguage";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/context/AuthContext";
+import { useExamContext } from "@/context/ExamContext";
 import { hasGenerationSubscription, hasQuizMasterGenerationSubscription, isQuizMasterLike } from "@/lib/accessControl";
 import MiniRichTextInput from "@/components/ui/MiniRichTextInput";
-import ExamCategorySelector from "@/components/premium/ExamCategorySelector";
+import CategorySelector from "@/components/premium/ExamCategorySelector";
 import type {
   AIProvider,
   PremiumPreviewMixJobCreateRequest,
@@ -619,7 +620,6 @@ type SharedGeneratorSettings = {
   selected_analysis_id?: string;
   mix_entries?: FormatMixEntry[];
   use_category_source?: boolean;
-  selected_exam_id?: number | null;
   selected_category_ids?: number[];
 };
 
@@ -828,6 +828,7 @@ export default function AIUserStudio({
   showQuizKindSwitcher = false,
 }: AIUserStudioProps) {
   const { user, isAuthenticated } = useAuth();
+  const { globalExamId, globalExamName } = useExamContext();
   const searchParams = useSearchParams();
   const quizMasterMode = mode === "quiz_master";
   const currentUserId = String(user?.id || "").trim();
@@ -868,7 +869,6 @@ export default function AIUserStudio({
   const [showAdvancedFormatControls, setShowAdvancedFormatControls] = useState(false);
   const [questionStyleTab, setQuestionStyleTab] = useState<"existing" | "own">("existing");
   const [useCategorySource, setUseCategorySource] = useState(false);
-  const [selectedExamId, setSelectedExamId] = useState<number | null>(null);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [categoryNameById, setCategoryNameById] = useState<Record<number, string>>({});
   const [mixJobTasks, setMixJobTasks] = useState<MixJobTask[]>([]);
@@ -981,11 +981,6 @@ export default function AIUserStudio({
       persistOutputLanguage(normalizedLanguage);
     }
     setUseCategorySource(Boolean(saved.use_category_source));
-    setSelectedExamId(
-      typeof saved.selected_exam_id === "number" && Number.isFinite(saved.selected_exam_id)
-        ? saved.selected_exam_id
-        : null,
-    );
     setSelectedCategoryIds(normalizeCategoryIds(saved.selected_category_ids));
     setAnalysisTagL1Filter(saved.analysis_tag_l1_filter || "");
     setAnalysisTagL2Filter(saved.analysis_tag_l2_filter || "");
@@ -1009,10 +1004,6 @@ export default function AIUserStudio({
   useEffect(() => {
     let active = true;
     const loadCategoryNames = async () => {
-      if (!selectedExamId) {
-        if (active) setCategoryNameById({});
-        return;
-      }
       try {
         const quizType = `premium_${quizKind}`;
         const response = await axios.get<PremiumCategory[]>(
@@ -1020,7 +1011,7 @@ export default function AIUserStudio({
           {
             params: {
               hierarchical: true,
-              exam_id: selectedExamId,
+              exam_id: globalExamId || undefined,
             },
           },
         );
@@ -1037,7 +1028,7 @@ export default function AIUserStudio({
     return () => {
       active = false;
     };
-  }, [quizKind, selectedExamId]);
+  }, [quizKind, globalExamId]);
 
   useEffect(() => {
     if (!sharedSettingsHydrated) return;
@@ -1055,7 +1046,6 @@ export default function AIUserStudio({
       desired_question_count: desiredQuestionCount,
       output_language: outputLanguage,
       use_category_source: useCategorySource,
-      selected_exam_id: selectedExamId,
       selected_category_ids: selectedCategoryIds,
       analysis_tag_l1_filter: analysisTagL1Filter,
       analysis_tag_l2_filter: analysisTagL2Filter,
@@ -1073,7 +1063,6 @@ export default function AIUserStudio({
     desiredQuestionCount,
     outputLanguage,
     selectedCategoryIds,
-    selectedExamId,
     exampleQuestion,
     exampleQuestionsInput,
     mixEntries,
@@ -1153,11 +1142,15 @@ export default function AIUserStudio({
 
   const filteredAnalyses = useMemo(() => {
     return analyses.filter((item) => {
+      // If a global exam is selected, we should ideally restrict to that exam.
+      // Since styles currently use 'Tag Level 1' for exam identifiers (e.g. 'upsc'), we match there.
+      const examMatch = !globalExamName || normalizeTag(item.tag_level1) === normalizeTag(globalExamName);
+      
       const l1Match = !analysisTagL1Filter || normalizeTag(item.tag_level1) === normalizeTag(analysisTagL1Filter);
       const l2Match = !analysisTagL2Filter || normalizeTag(item.tag_level2) === normalizeTag(analysisTagL2Filter);
-      return l1Match && l2Match;
+      return examMatch && l1Match && l2Match;
     });
-  }, [analyses, analysisTagL1Filter, analysisTagL2Filter]);
+  }, [analyses, analysisTagL1Filter, analysisTagL2Filter, globalExamName]);
 
   useEffect(() => {
     if (filteredAnalyses.length === 0) {
@@ -3119,7 +3112,7 @@ export default function AIUserStudio({
       {quizMasterMode ? (
         <RoleWorkspaceSidebar
           title="Quiz Master"
-          subtitle="Prelims authoring, parser lanes, and test-series management in one workspace."
+          subtitle="Prelims authoring, parser lanes, and programs management in one workspace."
           sections={quizMasterWorkspaceSections}
         />
       ) : null}
@@ -3750,11 +3743,10 @@ export default function AIUserStudio({
                   </p>
                   {useCategorySource ? (
                     <div className="rounded-md border border-sky-200 bg-white p-3">
-                      <ExamCategorySelector
+                      <CategorySelector
                         quizKind={quizKind}
-                        selectedExamId={selectedExamId}
+                        examId={globalExamId}
                         selectedCategoryIds={selectedCategoryIds}
-                        onExamChange={setSelectedExamId}
                         onCategoryIdsChange={setSelectedCategoryIds}
                       />
                     </div>
@@ -4618,7 +4610,7 @@ export default function AIUserStudio({
                           : "border-emerald-200 bg-emerald-50 text-emerald-700"
                           }`}>
                           {targetCollectionMissing
-                            ? "Target Prelims Test ID is missing in URL. Open this workspace from Test Series -> Add Quiz."
+                            ? "Target Prelims Test ID is missing in URL. Open this workspace from Programs -> Add Quiz."
                             : `Bound to Prelims Test #${requestedCollectionId}. Selected quizzes will be added only to this test.`}
                         </p>
                       ) : null}

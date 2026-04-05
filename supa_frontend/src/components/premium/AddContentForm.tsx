@@ -8,7 +8,7 @@ import axios from "axios";
 
 import { premiumApi } from "@/lib/premiumApi";
 import type { PremiumContentItem, QuizKind } from "@/types/premium";
-import ExamCategorySelector from "@/components/premium/ExamCategorySelector";
+import CategorySelector from "@/components/premium/ExamCategorySelector";
 
 interface AddContentFormProps {
   collectionId: string;
@@ -99,12 +99,10 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
 
   const [existingQuizzes, setExistingQuizzes] = useState<PremiumContentItem[]>([]);
   const [selectedContentIds, setSelectedContentIds] = useState<number[]>([]);
-  const [existingFilterExamId, setExistingFilterExamId] = useState<number | null>(null);
   const [existingFilterCategoryIds, setExistingFilterCategoryIds] = useState<number[]>([]);
 
   const [questionDraft, setQuestionDraft] = useState<QuizQuestionDraft>(EMPTY_QUESTION);
   const [titlePrefix, setTitlePrefix] = useState("");
-  const [selectedExamId, setSelectedExamId] = useState<number | null>(null);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
 
   const [passageTitle, setPassageTitle] = useState("");
@@ -123,7 +121,6 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
       setIsLoading(true);
       try {
         const params: Record<string, number> = {};
-        if (existingFilterExamId) params.exam_id = existingFilterExamId;
         if (existingFilterCategoryIds.length === 1) params.category_id = existingFilterCategoryIds[0];
 
         const response = await premiumApi.get<PremiumContentItem[]>(`/quizzes/${quizKind}`, { params });
@@ -146,15 +143,15 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
       }
     };
     loadExisting();
-  }, [mode, quizKind, existingFilterExamId, existingFilterCategoryIds]);
+  }, [mode, quizKind, existingFilterCategoryIds]);
 
   useEffect(() => {
     setSelectedCategoryIds([]);
-  }, [quizKind, selectedExamId]);
+  }, [quizKind]);
 
   useEffect(() => {
     setExistingFilterCategoryIds([]);
-  }, [quizKind, existingFilterExamId]);
+  }, [quizKind]);
 
   useEffect(() => {
     if (selectedContentIds.length === 0) return;
@@ -203,10 +200,6 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
       toast.error("option_a to option_d are required");
       return;
     }
-    if (!selectedExamId) {
-      toast.error("Select exam first");
-      return;
-    }
     if (selectedCategoryIds.length === 0) {
       toast.error("Select at least one category");
       return;
@@ -228,7 +221,7 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
       await premiumApi.post(`/quizzes/${quizKind}/bulk`, {
         title_prefix: titlePrefix || `${quizTitle} Quiz`,
         collection_id: Number(collectionId),
-        exam_id: selectedExamId,
+        exam_id: null,
         items: [
           {
             question_statement: questionDraft.question_statement,
@@ -283,10 +276,6 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
       toast.error("passage_text is required");
       return;
     }
-    if (!selectedExamId) {
-      toast.error("Select exam first");
-      return;
-    }
     if (selectedCategoryIds.length === 0) {
       toast.error("Select at least one category");
       return;
@@ -303,7 +292,7 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
         premium_passage_category_ids: selectedCategoryIds,
         alpha_cat_ids: passageAlphaIds,
         collection_id: Number(collectionId),
-        exam_id: selectedExamId,
+        exam_id: null,
         questions: passageQuestions.map((question) => ({
           question_statement: question.question_statement,
           supp_question_statement: question.supp_question_statement || null,
@@ -377,12 +366,10 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
       {mode === "existing" ? (
         <div className="space-y-4">
           <div className="rounded border border-blue-200 bg-blue-50 p-3">
-            <p className="mb-2 text-sm font-semibold text-slate-800">Filter posted quizzes by exam/category</p>
-            <ExamCategorySelector
+            <p className="mb-2 text-sm font-semibold text-slate-800">Filter posted quizzes by category</p>
+            <CategorySelector
               quizKind={quizKind}
-              selectedExamId={existingFilterExamId}
               selectedCategoryIds={existingFilterCategoryIds}
-              onExamChange={setExistingFilterExamId}
               onCategoryIdsChange={setExistingFilterCategoryIds}
             />
           </div>
@@ -433,11 +420,9 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
                 ? "Maths posting fields: category, prompt, options, explanation."
                 : "Quiz posting fields."}
           </div>
-          <ExamCategorySelector
+          <CategorySelector
             quizKind={quizKind}
-            selectedExamId={selectedExamId}
             selectedCategoryIds={selectedCategoryIds}
-            onExamChange={setSelectedExamId}
             onCategoryIdsChange={setSelectedCategoryIds}
           />
           <input
@@ -539,11 +524,9 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
 
       {mode === "post" && quizKind === "passage" ? (
         <div className="space-y-4">
-          <ExamCategorySelector
+          <CategorySelector
             quizKind={quizKind}
-            selectedExamId={selectedExamId}
             selectedCategoryIds={selectedCategoryIds}
-            onExamChange={setSelectedExamId}
             onCategoryIdsChange={setSelectedCategoryIds}
           />
           <input

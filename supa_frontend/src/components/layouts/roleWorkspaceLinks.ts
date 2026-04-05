@@ -31,17 +31,17 @@ export function getQuizMasterWorkspaceSections(currentUserId?: string | null): R
 
   return [
     {
-      title: "Series Control",
+      title: "Program Control",
       links: [
         {
           href: "/dashboard",
           label: "Dashboard",
-          description: "Track prelims series activity, enrollments, reviews, and learner issues.",
+          description: "Track prelims program activity, enrollments, reviews, and learner issues.",
         },
         {
-          href: "/test-series",
-          label: "Manage Series",
-          description: "Manage created prelims series, attached tests, pricing, and access state.",
+          href: "/programs",
+          label: "Manage Programs",
+          description: "Manage created prelims programs, attached tests, pricing, and access state.",
         },
         {
           href: "/quiz-master/complaints",
@@ -49,9 +49,9 @@ export function getQuizMasterWorkspaceSections(currentUserId?: string | null): R
           description: "Review learner complaints raised from prelims result pages and resolve them.",
         },
         {
-          href: "/test-series/create",
-          label: "Create Test Series",
-          description: "Create a new prelims-focused test series for your catalog.",
+          href: "/programs/create",
+          label: "Create Program",
+          description: "Create a new prelims-focused program for your catalog.",
         },
       ],
     },
@@ -102,14 +102,14 @@ export function getMainsMentorWorkspaceSections(currentUserId?: string | null): 
           description: "Monitor bookings, sessions, mentorship cycles, and created mains series.",
         },
         {
-          href: "/test-series",
-          label: "Manage Series",
-          description: "Manage mains series, tests, access configuration, and delivery flow.",
+          href: "/programs",
+          label: "Manage Programs",
+          description: "Manage mains programs, tests, access configuration, and delivery flow.",
         },
         {
-          href: "/test-series/create",
-          label: "Create Test Series",
-          description: "Create a new mains-focused test series for answer writing programs.",
+          href: "/programs/create",
+          label: "Create Program",
+          description: "Create a new mains-focused program for answer writing workflows.",
         },
         {
           href: "/mentorship/manage",

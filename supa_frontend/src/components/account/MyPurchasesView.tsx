@@ -40,7 +40,7 @@ export default function MyPurchasesView() {
       try {
         const [subscriptionRes, enrollmentRes] = await Promise.all([
           premiumApi.get<UserSubscriptionStatus>("/subscriptions/me"),
-          premiumApi.get<TestSeriesEnrollment[]>("/test-series/my/enrollments"),
+          premiumApi.get<TestSeriesEnrollment[]>("/programs/my/enrollments"),
         ]);
         if (!active) return;
 
@@ -55,7 +55,7 @@ export default function MyPurchasesView() {
         }
 
         const responses = await Promise.allSettled(
-          uniqueSeriesIds.map((seriesId) => premiumApi.get<TestSeries>(`/test-series/${seriesId}`)),
+          uniqueSeriesIds.map((seriesId) => premiumApi.get<TestSeries>(`/programs/${seriesId}`)),
         );
         if (!active) return;
 
@@ -146,10 +146,10 @@ export default function MyPurchasesView() {
           {activeEnrollments.length === 0 ? <p className="text-sm text-slate-500">No active series purchases yet.</p> : null}
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Link href="/test-series/prelims" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+          <Link href="/programs/prelims" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
             Browse Prelims Series
           </Link>
-          <Link href="/test-series/mains" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+          <Link href="/programs/mains" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
             Browse Mains Series
           </Link>
         </div>

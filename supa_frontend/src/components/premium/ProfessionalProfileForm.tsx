@@ -293,7 +293,7 @@ export default function ProfessionalProfileForm() {
       <div className="rounded-[32px] border border-[#eadcf8] bg-[#fcf7ff] p-6 shadow-[0_24px_50px_-38px_rgba(84,54,191,0.45)]">
         <h1 className="text-2xl font-semibold text-[#24113d]">Profile form is role-restricted</h1>
         <p className="mt-2 text-sm leading-6 text-[#6c6088]">
-          This form is for Quiz Master and Mains Mentor roles. Users can still browse mentors and test series.
+          This form is for Quiz Master and Mains Mentor roles. Users can still browse mentors and programs.
         </p>
       </div>
     );

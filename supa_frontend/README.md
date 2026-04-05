@@ -16,7 +16,7 @@ npm run dev
 
 ### Learner
 
-- series-first test series catalog
+- series-first programs catalog
 - prelims test runner and result review
 - quiz complaints from result page
 - learner view for prelims discussion videos and live classes
@@ -50,7 +50,7 @@ npm run dev
 
 ## Important Frontend Pages
 
-- `src/app/test-series/create/page.tsx`
+- `src/app/programs/create/page.tsx`
 - `src/components/premium/TestSeriesManageView.tsx`
 - `src/components/premium/TestSeriesConsole.tsx`
 - `src/components/premium/TestSeriesDetailView.tsx`

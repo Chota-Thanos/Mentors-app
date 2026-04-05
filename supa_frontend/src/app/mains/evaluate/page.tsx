@@ -789,7 +789,7 @@ export default function MainsEvaluationPage() {
         if (!Number.isFinite(collectionId) || collectionId <= 0) {
             toast.error(
                 requireSpecificTargetCollection
-                    ? "Target Mains Test ID is missing in URL. Open this workspace from Test Series -> Add Questions."
+                    ? "Target Mains Test ID is missing in URL. Open this workspace from Programs -> Add Questions."
                     : "Select a valid Mains Test first.",
             );
             return;
@@ -1516,7 +1516,7 @@ export default function MainsEvaluationPage() {
                                                             : "border-indigo-200 bg-indigo-50/50 text-indigo-800"
                                                             }`}>
                                                             {targetCollectionMissing
-                                                                ? "Target Mains Test ID is missing in URL. Open this workspace from Test Series -> Add Questions."
+                                                                ? "Target Mains Test ID is missing in URL. Open this workspace from Programs -> Add Questions."
                                                                 : `Bound to Mains Test #${requestedCollectionId}. Selected questions will be added only to this test.`}
                                                         </p>
                                                     ) : null}

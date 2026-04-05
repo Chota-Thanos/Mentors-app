@@ -9,14 +9,12 @@ import { toast } from "sonner";
 import AppLayout from "@/components/layouts/AppLayout";
 import RoleWorkspaceSidebar from "@/components/layouts/RoleWorkspaceSidebar";
 import { getMainsMentorWorkspaceSections, getQuizMasterWorkspaceSections } from "@/components/layouts/roleWorkspaceLinks";
-import DiscussionConfigEditor from "@/components/premium/DiscussionConfigEditor";
 import HistoryBackButton from "@/components/ui/HistoryBackButton";
 import RichTextField from "@/components/ui/RichTextField";
 import { useAuth } from "@/context/AuthContext";
 import { isAdminLike, isMainsMentorLike, isQuizMasterLike } from "@/lib/accessControl";
 import { premiumApi } from "@/lib/premiumApi";
 import { toNullableRichText } from "@/lib/richText";
-import { getDiscussionDraftFromMeta, mergeDiscussionIntoMeta } from "@/lib/testSeriesDiscussion";
 import type { TestSeries, TestSeriesCreatePayload } from "@/types/premium";
 
 const emptySeriesForm: TestSeriesCreatePayload = {
@@ -100,10 +98,6 @@ export default function CreateTestSeriesPage() {
 
     const [seriesForm, setSeriesForm] = useState<TestSeriesCreatePayload>(emptySeriesForm);
     const [savingSeries, setSavingSeries] = useState(false);
-    const finalDiscussion = useMemo(
-        () => getDiscussionDraftFromMeta(seriesForm.meta, "final_discussion"),
-        [seriesForm.meta],
-    );
     const isPrelimsBuilder = String(seriesForm.series_kind || "").trim().toLowerCase() !== "mains";
     const workspaceSections = useMemo(
         () =>
@@ -128,14 +122,14 @@ export default function CreateTestSeriesPage() {
                     },
                     {
                         icon: <PlayCircle className="h-5 w-5 text-emerald-700" />,
-                        title: "Post-test Discussion",
-                        description: "Attach a recorded discussion or a live class slot to every important mock without leaving the series workflow.",
+                        title: "Add Program Materials",
+                        description: "Attach PDF materials or scheduled lecture slots to mock tests without leaving the series workflow.",
                         tone: "emerald" as const,
                     },
                     {
                         icon: <Sparkles className="h-5 w-5 text-amber-700" />,
-                        title: "Series Wrap-up",
-                        description: "Add one final discussion block for the full program so learners know what closes the series after the last test.",
+                        title: "Series Add-ons",
+                        description: "Add live classes or PDF materials directly to the series to build a complete program.",
                         tone: "amber" as const,
                     },
                     {
@@ -160,8 +154,8 @@ export default function CreateTestSeriesPage() {
                     },
                     {
                         icon: <CircleHelp className="h-5 w-5 text-amber-700" />,
-                        title: "Discussion & Support",
-                        description: "Configure the closing discussion and operational support before you open the program to learners.",
+                        title: "Program Items",
+                        description: "Configure PDFs, lecture blocks and operational support before you open the program to learners.",
                         tone: "amber" as const,
                     },
                 ],
@@ -171,7 +165,7 @@ export default function CreateTestSeriesPage() {
     useEffect(() => {
         if (loading) return;
         if (!isAuthenticated || !canBuildSeries) {
-            router.push("/test-series");
+            router.push("/programs");
         }
     }, [loading, isAuthenticated, canBuildSeries, router]);
 
@@ -199,13 +193,13 @@ export default function CreateTestSeriesPage() {
                 title,
                 description: toNullableRichText(seriesForm.description || ""),
             };
-            const response = await premiumApi.post<TestSeries>("/test-series", payload);
+            const response = await premiumApi.post<TestSeries>("/programs", payload);
             const createdSeriesId = Number(response.data?.id || 0);
-            toast.success("Test series created successfully!");
+            toast.success("Programs created successfully!");
             if (Number.isFinite(createdSeriesId) && createdSeriesId > 0) {
-                router.push(`/test-series/${createdSeriesId}/manage`);
+                router.push(`/programs/${createdSeriesId}/manage`);
             } else {
-                router.push("/test-series");
+                router.push("/programs");
             }
         } catch (error: unknown) {
             toast.error("Failed to create series", { description: toError(error) });
@@ -237,8 +231,8 @@ export default function CreateTestSeriesPage() {
                 <div className="min-w-0 flex-1 space-y-6">
                     <div className="rounded-[32px] border border-slate-200 bg-[radial-gradient(circle_at_top_right,_rgba(224,231,255,0.9),_transparent_34%),linear-gradient(180deg,_#ffffff,_#f8fafc)] p-6 shadow-sm sm:p-8">
                         <HistoryBackButton
-                            fallbackHref="/test-series"
-                            label="Back to test series"
+                            fallbackHref="/programs"
+                            label="Back to programs"
                             className="inline-flex items-center text-sm font-semibold text-slate-500 transition-colors hover:text-slate-800"
                             iconClassName="mr-1 h-4 w-4"
                         />
@@ -249,7 +243,7 @@ export default function CreateTestSeriesPage() {
                                     {isPrelimsBuilder ? "Prelims Expert Role" : "Series Builder"}
                                 </p>
                                 <h1 className="mt-3 text-4xl font-black tracking-[-0.04em] text-slate-950 sm:text-5xl">
-                                    {isPrelimsBuilder ? "Create Prelims Program" : "Create New Test Series"}
+                                    {isPrelimsBuilder ? "Create Prelims Program" : "Create New Programs"}
                                 </h1>
                                 <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
                                     {isPrelimsBuilder
@@ -335,7 +329,7 @@ export default function CreateTestSeriesPage() {
 
                                 <div className="grid gap-5 md:grid-cols-2">
                                     <div className="space-y-1.5">
-                                        <label className="text-sm font-bold text-slate-800">Test Series Format</label>
+                                        <label className="text-sm font-bold text-slate-800">Programs Format</label>
                                         <select
                                             value={seriesForm.series_kind || seriesKindOptions[0]?.value || "quiz"}
                                             onChange={(event) => setSeriesForm((prev) => ({ ...prev, series_kind: event.target.value as "mains" | "quiz" | "hybrid" }))}
@@ -398,17 +392,6 @@ export default function CreateTestSeriesPage() {
                                     helperText="This becomes the main learner-facing description for the series."
                                 />
 
-                                <DiscussionConfigEditor
-                                    heading="End-of-series discussion"
-                                    hint="Use this for a final discussion after learners complete the full series. You can publish a recorded discussion video or a scheduled live Agora class."
-                                    value={finalDiscussion}
-                                    onChange={(discussion) =>
-                                        setSeriesForm((prev) => ({
-                                            ...prev,
-                                            meta: mergeDiscussionIntoMeta(prev.meta || {}, "final_discussion", discussion),
-                                        }))
-                                    }
-                                />
                             </div>
                         </section>
 

@@ -192,42 +192,26 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
     return map;
   }, [data]);
 
-  if (busy) {
-    return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading mentorship request...</div>;
-  }
-
-  const request = (data?.requests || []).find((row) => row.id === requestId) || null;
-  if (!request) {
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-6">
-        <h1 className="text-xl font-semibold text-slate-900">Mentorship request not found</h1>
-        <p className="mt-2 text-sm text-slate-600">This request is not present in your current learner workspace.</p>
-        <Link href="/my-purchases" className="mt-4 inline-flex rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-          Back to My Purchases
-        </Link>
-      </div>
-    );
-  }
-
-  const session = sessionByRequestId[String(request.id)] || null;
-  const submission = request.submission_id ? data?.submissionsById[String(request.submission_id)] || null : null;
-  const series = request.series_id ? data?.seriesById[String(request.series_id)] || null : null;
-  const cycle = cycleByRequestId[String(request.id)] || null;
-  const mentorName = data?.mentorNameByUserId[request.provider_user_id] || request.provider_user_id;
-  const offeredSlotCount = Math.max(requestOfferedSlotIds(request).length, request.booking_open ? 1 : 0, cycle?.booking_open ? 1 : 0);
-  const currentStatus = mentorshipCurrentStatusLabel(request, session, submission, offeredSlotCount);
-  const nextAction = mentorshipNextActionLabel(request, session, submission, offeredSlotCount);
-  const steps = buildMentorshipWorkflowSteps({ request, session, submission, offeredSlotCount });
+  const request = useMemo(() => (data?.requests || []).find((row) => row.id === requestId) || null, [data?.requests, requestId]);
+  const session = sessionByRequestId[String(request?.id || "")] || null;
+  const submission = request?.submission_id ? data?.submissionsById[String(request.submission_id)] || null : null;
+  const series = request?.series_id ? data?.seriesById[String(request.series_id)] || null : null;
+  const cycle = cycleByRequestId[String(request?.id || "")] || null;
+  const mentorName = request?.provider_user_id ? data?.mentorNameByUserId[request.provider_user_id] || request.provider_user_id : "";
+  const offeredSlotCount = request ? Math.max(requestOfferedSlotIds(request).length, request.booking_open ? 1 : 0, cycle?.booking_open ? 1 : 0) : 0;
+  const currentStatus = request ? mentorshipCurrentStatusLabel(request, session, submission, offeredSlotCount) : "";
+  const nextAction = request ? mentorshipNextActionLabel(request, session, submission, offeredSlotCount) : "";
+  const steps = request ? buildMentorshipWorkflowSteps({ request, session, submission, offeredSlotCount }) : [];
   const canJoinCallNow = Boolean(session?.join_available && (session.status === "scheduled" || session.status === "live"));
-  const offeredSlots = offeredSlotsForRequest(request, providerSlots).filter(isFutureSlot);
+  const offeredSlots = request ? offeredSlotsForRequest(request, providerSlots).filter(isFutureSlot) : [];
   const bookableSlots = (offeredSlots.length > 0 ? offeredSlots : providerSlots.filter(isFutureSlot)).slice(0, 10);
-  const canCancelRequest = !["cancelled", "rejected", "expired", "completed"].includes(request.status) && session?.status !== "live";
-  const canDeleteRequest = ["cancelled", "rejected", "expired", "completed"].includes(request.status) && session?.status !== "live";
+  const canCancelRequest = request && !["cancelled", "rejected", "expired", "completed"].includes(request.status) && session?.status !== "live";
+  const canDeleteRequest = request && ["cancelled", "rejected", "expired", "completed"].includes(request.status) && session?.status !== "live";
   const autoPayRequested = searchParams.get("autopay") === "1";
   const returnToUrl = searchParams.get("return_to");
 
   const handleSendMessage = async () => {
-    if (!messageBody.trim()) return;
+    if (!request || !messageBody.trim()) return;
     setChatBusy(true);
     try {
       const response = await premiumApi.post<MentorshipMessage>(`/mentorship/requests/${request.id}/messages`, { body: messageBody.trim() });
@@ -241,6 +225,7 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
   };
 
   const handlePaymentVerified = useCallback(async (response: RazorpaySuccessResponse) => {
+    if (!request) return;
     await premiumApi.post(`/mentorship/requests/${request.id}/payment/verify`, {
       ...response,
       payment_method: "razorpay",
@@ -252,9 +237,10 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
         window.location.assign(returnToUrl);
       }, 900);
     }
-  }, [load, request.id, returnToUrl]);
+  }, [load, request, returnToUrl]);
 
   const handlePay = useCallback(async () => {
+    if (!request) return;
     setPaymentBusy(true);
     try {
       if (request.payment_amount <= 0) {
@@ -305,16 +291,17 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
       toast.error("Failed to complete payment", { description: toError(error) });
       setPaymentBusy(false);
     }
-  }, [handlePaymentVerified, load, request.id, request.payment_amount]);
+  }, [handlePaymentVerified, load, request]);
 
   useEffect(() => {
-    if (!autoPayRequested || autoPayAttemptedRef.current || paymentBusy) return;
+    if (!request || !autoPayRequested || autoPayAttemptedRef.current || paymentBusy) return;
     if (request.status !== "accepted" || request.payment_status === "paid") return;
     autoPayAttemptedRef.current = true;
     void handlePay();
-  }, [autoPayRequested, handlePay, paymentBusy, request.payment_status, request.status]);
+  }, [autoPayRequested, handlePay, paymentBusy, request]);
 
   const handleBookSlot = async (slotId: number) => {
+    if (!request) return;
     setSlotBusyId(slotId);
     try {
       await premiumApi.post(`/mentorship/requests/${request.id}/accept-slot`, { slot_id: slotId });
@@ -328,7 +315,7 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
   };
 
   const handleCancelRequest = async () => {
-    if (!canCancelRequest) return;
+    if (!request || !canCancelRequest) return;
     if (typeof window !== "undefined" && !window.confirm("Cancel this mentorship request?")) return;
     setRequestActionBusy("cancel");
     try {
@@ -343,7 +330,7 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
   };
 
   const handleDeleteRequest = async () => {
-    if (!canDeleteRequest) return;
+    if (!request || !canDeleteRequest) return;
     if (typeof window !== "undefined" && !window.confirm("Delete this mentorship request from your workspace?")) return;
     setRequestActionBusy("delete");
     try {
@@ -357,6 +344,22 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
       setRequestActionBusy(null);
     }
   };
+
+  if (busy) {
+    return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading mentorship request...</div>;
+  }
+
+  if (!request) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6">
+        <h1 className="text-xl font-semibold text-slate-900">Mentorship request not found</h1>
+        <p className="mt-2 text-sm text-slate-600">This request is not present in your current learner workspace.</p>
+        <Link href="/my-purchases" className="mt-4 inline-flex rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+          Back to My Purchases
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

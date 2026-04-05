@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import axios from 'axios'
 
 import AppLayout from '@/components/layouts/AppLayout'
-import ExamCategorySelector from '@/components/premium/ExamCategorySelector'
+import CategorySelector from '@/components/premium/ExamCategorySelector'
 import { useAuth } from '@/context/AuthContext'
 import { canAccessManualQuizBuilder, hasQuizMasterGenerationSubscription } from '@/lib/accessControl'
 import { legacyPremiumAiApi } from '@/lib/legacyPremiumAiApi'
@@ -323,7 +323,6 @@ function CreatePremiumQuizPageContent() {
   }, [searchParams])
 
   const [quizKind, setQuizKind] = useState<QuizKind>('gk')
-  const [selectedExamId, setSelectedExamId] = useState<number | null>(null)
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([])
 
   const [draft, setDraft] = useState<Omit<PendingBase, 'client_id'>>(EMPTY_DRAFT)
@@ -451,11 +450,6 @@ function CreatePremiumQuizPageContent() {
   }
 
   const requireCommonSelection = () => {
-    if (!selectedExamId) {
-      toast.error('Please select an exam first.')
-      setFeedback('error', 'Select an exam before adding or submitting questions.')
-      return false
-    }
     if (selectedCategoryIds.length === 0) {
       toast.error('Please select at least one category.')
       setFeedback('error', 'Select at least one category before adding or submitting questions.')
@@ -676,7 +670,6 @@ function CreatePremiumQuizPageContent() {
     try {
       const payload = {
         title_prefix: titlePrefix.trim() || `${quizKind.toUpperCase()} Quiz`,
-        exam_id: selectedExamId,
         ...(targetCollectionId ? { collection_id: targetCollectionId } : {}),
         items: pendingQuestions.map((item) => ({
           question_statement: item.question_statement,
@@ -751,7 +744,6 @@ function CreatePremiumQuizPageContent() {
         category_ids: selectedCategoryIds,
         premium_passage_category_ids: selectedCategoryIds,
         alpha_cat_ids: parseIdsCsv(passageAlphaCatIdsCsv),
-        exam_id: selectedExamId,
         ...(targetCollectionId ? { collection_id: targetCollectionId } : {}),
         questions: pendingPassageQuestions.map((item) => ({
           question_statement: item.question_statement,
@@ -843,11 +835,9 @@ function CreatePremiumQuizPageContent() {
             ))}
           </div>
 
-          <ExamCategorySelector
+          <CategorySelector
             quizKind={quizKind}
-            selectedExamId={selectedExamId}
             selectedCategoryIds={selectedCategoryIds}
-            onExamChange={setSelectedExamId}
             onCategoryIdsChange={setSelectedCategoryIds}
           />
         </div>

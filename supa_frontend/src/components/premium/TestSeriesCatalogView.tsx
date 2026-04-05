@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
+import { useExamContext } from "@/context/ExamContext";
 import { premiumApi } from "@/lib/premiumApi";
 import { richTextToPlainText } from "@/lib/richText";
 import type {
@@ -314,7 +315,7 @@ function SeriesCard({
   return (
     <article className="border-b border-slate-200 p-4 last:border-b-0 sm:p-5">
       <div className="grid gap-4 grid-cols-[112px_minmax(0,1fr)] sm:grid-cols-[140px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)_170px]">
-        <Link href={`/test-series/${series.id}`} className="relative block h-[112px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100 sm:h-[140px] lg:h-[160px]">
+        <Link href={`/programs/${series.id}`} className="relative block h-[112px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100 sm:h-[140px] lg:h-[160px]">
           {cover ? (
             <Image
               src={cover}
@@ -338,7 +339,7 @@ function SeriesCard({
         </Link>
 
         <div className="min-w-0">
-          <Link href={`/test-series/${series.id}`} className="block">
+          <Link href={`/programs/${series.id}`} className="block">
             <h3 className="text-lg font-black leading-6 text-slate-900 transition hover:text-violet-700 sm:text-xl">
               {series.title}
             </h3>
@@ -383,7 +384,7 @@ function SeriesCard({
 
           <div className="flex w-full flex-col gap-2">
             <Link
-              href={`/test-series/${series.id}`}
+              href={`/programs/${series.id}`}
               className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-violet-700 px-4 text-sm font-bold text-violet-700 transition hover:bg-violet-50"
             >
               Open series
@@ -402,7 +403,7 @@ function SeriesCard({
 
       <div className="mt-4 lg:hidden">
         <Link
-          href={`/test-series/${series.id}`}
+          href={`/programs/${series.id}`}
           className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-violet-700 px-4 text-sm font-bold text-violet-700 transition hover:bg-violet-50"
         >
           Open series
@@ -418,6 +419,7 @@ export default function TestSeriesCatalogView({
   description,
 }: TestSeriesCatalogViewProps) {
   const { isAuthenticated } = useAuth();
+  const { globalExamId } = useExamContext();
   const [seriesRows, setSeriesRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -448,14 +450,17 @@ export default function TestSeriesCatalogView({
         if (onlyFree) params.only_free = true;
         if (minPrice.trim()) params.min_price = Number(minPrice);
         if (maxPrice.trim()) params.max_price = Number(maxPrice);
+        
+        // Pass the global exam context to backend
+        if (globalExamId !== null) params.exam_id = globalExamId;
 
-        const response = await premiumApi.get<TestSeriesDiscoverySeries[]>("/test-series-discovery/series", { params });
+        const response = await premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", { params });
         if (!active) return;
         setSeriesRows(Array.isArray(response.data) ? response.data : []);
       } catch (error: unknown) {
         if (!active) return;
         setSeriesRows([]);
-        toast.error("Failed to load test series", { description: toError(error) });
+        toast.error("Failed to load programs", { description: toError(error) });
       } finally {
         if (active) setLoading(false);
       }
@@ -466,7 +471,7 @@ export default function TestSeriesCatalogView({
     return () => {
       active = false;
     };
-  }, [accessType, categoryId, isMains, maxPrice, minPrice, onlyFree, search]);
+  }, [accessType, categoryId, isMains, maxPrice, minPrice, onlyFree, search, globalExamId]);
 
   const categoryOptions = useMemo(() => {
     const map = new Map<number, string>();

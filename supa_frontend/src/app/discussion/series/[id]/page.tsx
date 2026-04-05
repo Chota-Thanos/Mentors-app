@@ -10,8 +10,8 @@ export default function SeriesDiscussionPage() {
 
   return (
     <DiscussionRoomView
-      endpoint={`/test-series/${seriesId}/discussion-context`}
-      backHref={`/test-series/${seriesId}`}
+      endpoint={`/programs/${seriesId}/discussion-context`}
+      backHref={`/programs/${seriesId}`}
       titleFallback={`Series Discussion #${seriesId}`}
     />
   );

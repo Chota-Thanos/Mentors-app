@@ -32,7 +32,7 @@ const baseSteps: Array<Omit<LifecycleStepState, "status" | "value">> = [
   {
     key: "discover",
     label: "Discover Series",
-    description: "Browse the test series and understand the roadmap.",
+    description: "Browse the programs and understand the roadmap.",
   },
   {
     key: "enrolled",

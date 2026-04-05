@@ -11,7 +11,7 @@ Project-wide overview: [`../README.md`](../README.md)
 - `backend/app/main.py`: FastAPI entry point
 - `backend/app/models.py`: Pydantic models
 - `backend/app/routers/premium.py`: collections, quiz test runner, results, complaints, AI routes
-- `backend/app/routers/test_series.py`: test series, mentorship, Zoom integration, prelims discussion/live-class logic
+- `backend/app/routers/test_series.py`: programs, mentorship, Zoom integration, prelims discussion/live-class logic
 - `backend/app/ai_logic.py`: AI provider logic and parsing behavior
 - `backend/app/ai_legacy_prompts.py`: legacy prompt instructions used by some parser paths
 
@@ -46,7 +46,7 @@ uvicorn app.main:app --reload --port 8002
 - stricter mains field mapping
 - non-destructive normalization of parsed question parts
 
-### Test Series
+### Programs
 
 - series CRUD
 - series test CRUD

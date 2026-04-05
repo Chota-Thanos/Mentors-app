@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 
 import { UserNav } from "@/components/layouts/UserNav";
 import { useAuth } from "@/context/AuthContext";
+import { useExamContext } from "@/context/ExamContext";
 import {
   canAccessMainsAuthoring,
   canAccessManualQuizBuilder,
@@ -97,6 +98,7 @@ function MobileSection({
 
 export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolean } = {}) {
   const { user } = useAuth();
+  const { exams, globalExamId, globalExamName, setGlobalExamId, showOnboarding } = useExamContext();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const adminLike = isAdminLike(user);
@@ -140,8 +142,8 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
   const seriesLinks = useMemo(
     () =>
       dedupeLinks([
-        { href: "/test-series/prelims", label: "Prelims Test Series" },
-        { href: "/test-series/mains", label: "Mains Test Series" },
+        { href: "/programs/prelims", label: "Prelims Programs" },
+        { href: "/programs/mains", label: "Mains Programs" },
         { href: "/mentors", label: "Mains Mentors" },
         { href: "/collections", label: "My Tests" },
       ]),
@@ -161,7 +163,7 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
     }
 
     if (adminLike && (canPrelimsAuthor || canMainsAuthor)) {
-      links.push({ href: "/test-series", label: "Series Console" });
+      links.push({ href: "/programs", label: "Series Console" });
     }
     if ((adminLike || moderatorLike) && canMentorshipActions) {
       links.push({ href: "/mentorship/manage", label: "Mentorship Queue" });
@@ -213,7 +215,7 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
             Dashboard
           </Link>
           <DesktopDropdown label="AI Tools" links={aiLinks} />
-          <DesktopDropdown label="Test Series" links={seriesLinks} />
+          <DesktopDropdown label="Programs" links={seriesLinks} />
           {workspaceLinks.length > 0 ? <DesktopDropdown label="Workspace" links={workspaceLinks} /> : null}
           <DesktopDropdown label="Account" links={accountLinks} />
         </nav>
@@ -227,7 +229,21 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <div className="hidden sm:block">
+            <select
+              value={globalExamId ?? "all"}
+              onChange={(e) => setGlobalExamId(e.target.value === "all" ? null : Number(e.target.value))}
+              className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              <option value="all">All Items</option>
+              {exams.map((ex) => (
+                <option key={ex.id} value={ex.id}>
+                  {ex.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <UserNav />
         </div>
       </div>
@@ -244,12 +260,47 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
               ]}
             />
             <MobileSection title="AI Tools" links={aiLinks} onNavigate={closeMobile} />
-            <MobileSection title="Test Series" links={seriesLinks} onNavigate={closeMobile} />
+            <MobileSection title="Programs" links={seriesLinks} onNavigate={closeMobile} />
             <MobileSection title="Workspace" links={workspaceLinks} onNavigate={closeMobile} />
             <MobileSection title="Account" links={accountLinks} onNavigate={closeMobile} />
           </nav>
         </div>
       ) : null}
+
+      {showOnboarding && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-[24px] bg-white p-6 shadow-xl">
+            <h2 className="mb-2 text-xl font-bold text-slate-800">Select Exam Preference</h2>
+            <p className="mb-6 text-sm text-slate-600">
+              Personalize your content feed by selecting an exam context, or choose to see everything.
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => setGlobalExamId(null)}
+                className="w-full rounded-2xl border border-slate-300 p-3 text-left transition hover:bg-slate-50"
+              >
+                <div className="font-semibold text-slate-800">All Items</div>
+                <div className="text-xs text-slate-500">View content for all exams combined</div>
+              </button>
+              {exams.map((ex) => (
+                <button
+                  key={ex.id}
+                  onClick={() => setGlobalExamId(ex.id)}
+                  className="w-full rounded-2xl border border-slate-300 p-3 text-left transition hover:bg-slate-50"
+                >
+                  <div className="font-semibold text-slate-800">{ex.name}</div>
+                  <div className="text-xs text-slate-500">Only show content tagged for {ex.name}</div>
+                </button>
+              ))}
+            </div>
+            {globalExamId !== null && (
+              <div className="mt-4 flex justify-end">
+                <button onClick={() => setGlobalExamId(globalExamId)} className="app-btn-primary rounded-xl px-4 py-2 text-sm font-semibold">Done</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </header>
   );
 }

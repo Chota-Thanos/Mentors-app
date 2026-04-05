@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Edit3, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import ExamCategorySelector from "@/components/premium/ExamCategorySelector";
+import CategorySelector from "@/components/premium/ExamCategorySelector";
 import { useAuth } from "@/context/AuthContext";
 import { hasQuizMasterGenerationSubscription } from "@/lib/accessControl";
 import { legacyPremiumAiApi } from "@/lib/legacyPremiumAiApi";
@@ -487,7 +487,6 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
 
   const [tab, setTab] = useState<TabKey>("manual");
   const [quizKind, setQuizKind] = useState<QuizKind>("gk");
-  const [selectedExamId, setSelectedExamId] = useState<number | null>(null);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
 
   const [manualForm, setManualForm] = useState<DraftForm>(EMPTY_FORM);
@@ -726,18 +725,13 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
           ? row
           : {
               ...row,
-              exam_id: selectedExamId ?? row.exam_id,
               category_ids: selectedCategoryIds.length > 0 ? [...selectedCategoryIds] : row.category_ids,
             },
       ),
     );
-  }, [quizKind, selectedCategoryIds, selectedExamId]);
+  }, [quizKind, selectedCategoryIds]);
 
   const ensureMetadataSelection = (): boolean => {
-    if (!selectedExamId) {
-      toast.error("Select exam first.");
-      return false;
-    }
     if (selectedCategoryIds.length === 0) {
       toast.error("Select at least one category.");
       return false;
@@ -753,7 +747,7 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
       source_method: sourceMethod,
       selected: true,
       quiz_kind: quizKind,
-      exam_id: selectedExamId,
+      exam_id: null,
       category_ids: [...selectedCategoryIds],
     }));
     setDrafts((prev) => [...rows, ...prev]);
@@ -774,7 +768,7 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
       setDrafts((prev) =>
         prev.map((row) =>
           row.local_id === editingDraftId
-            ? { ...row, ...manualForm, quiz_kind: quizKind, exam_id: selectedExamId, category_ids: [...selectedCategoryIds] }
+            ? { ...row, ...manualForm, quiz_kind: quizKind, exam_id: null, category_ids: [...selectedCategoryIds] }
             : row,
         ),
       );
@@ -923,7 +917,6 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
     let failed = 0;
 
     for (const row of target) {
-      const effectiveExamId = row.quiz_kind === quizKind && selectedExamId ? selectedExamId : row.exam_id;
       const effectiveCategoryIds =
         row.quiz_kind === quizKind && selectedCategoryIds.length > 0
           ? [...selectedCategoryIds]
@@ -939,7 +932,7 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
                 passage_text: row.passage_text,
                 source_reference: row.source_reference || null,
                 source: row.source_reference || null,
-                exam_id: effectiveExamId,
+                exam_id: null,
                 category_ids: effectiveCategoryIds,
                 premium_passage_category_ids: effectiveCategoryIds,
                 alpha_cat_ids: parseIdsCsv(row.alpha_cat_ids_csv),
@@ -995,7 +988,7 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
                 explanation_text: row.explanation || null,
                 source_reference: row.source_reference || null,
                 source: row.source_reference || null,
-                exam_id: effectiveExamId,
+                exam_id: null,
                 category_ids: effectiveCategoryIds,
                 premium_gk_category_ids: row.quiz_kind === "gk" ? effectiveCategoryIds : [],
                 premium_maths_category_ids: row.quiz_kind === "maths" ? effectiveCategoryIds : [],
@@ -1050,11 +1043,9 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
           ))}
         </div>
 
-        <ExamCategorySelector
+        <CategorySelector
           quizKind={quizKind}
-          selectedExamId={selectedExamId}
           selectedCategoryIds={selectedCategoryIds}
-          onExamChange={setSelectedExamId}
           onCategoryIdsChange={setSelectedCategoryIds}
         />
 
@@ -1408,9 +1399,6 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
                       onClick={() => {
                         setTab("manual");
                         setQuizKind(row.quiz_kind);
-                        if (!selectedExamId && row.exam_id) {
-                          setSelectedExamId(row.exam_id);
-                        }
                         if (selectedCategoryIds.length === 0 && row.category_ids.length > 0) {
                           setSelectedCategoryIds([...row.category_ids]);
                         }

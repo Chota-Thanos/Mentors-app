@@ -21,12 +21,12 @@ const ROLE_OPTIONS: Array<{ value: ProfessionalOnboardingDesiredRole; label: str
   {
     value: "creator",
     label: "Quiz Master",
-    hint: "Create and publish Prelims tests and Prelims test series after approval.",
+    hint: "Create and publish Prelims tests and Prelims programs after approval.",
   },
   {
     value: "mentor",
     label: "Mains Mentor",
-    hint: "Create Mains test series and run mentorship workflows after approval.",
+    hint: "Create Mains programs and run mentorship workflows after approval.",
   },
 ];
 

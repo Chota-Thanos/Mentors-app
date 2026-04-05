@@ -186,7 +186,7 @@ export default function ProfessionalPublicProfileView({
     if (seriesId && (!detail.mentorship_available_series_ids.length || detail.mentorship_available_series_ids.includes(seriesId))) {
       return null;
     }
-    return "This mentor accepts requests only from supported test-series flows.";
+    return "This mentor accepts requests only from supported programs flows.";
   }, [detail, existingActiveRequest, seriesId]);
 
 

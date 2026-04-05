@@ -22,8 +22,8 @@ export default function PremiumWorkspacePage() {
             <Link href="/collections/create" className="rounded border border-slate-200 px-4 py-3 text-sm font-medium hover:bg-slate-50">
               Create Prelims Test
             </Link>
-            <Link href="/test-series" className="rounded border border-slate-200 px-4 py-3 text-sm font-medium hover:bg-slate-50">
-              Test Series Console
+            <Link href="/programs" className="rounded border border-slate-200 px-4 py-3 text-sm font-medium hover:bg-slate-50">
+              Programs Console
             </Link>
             <Link href="/mentorship/manage" className="rounded border border-slate-200 px-4 py-3 text-sm font-medium hover:bg-slate-50">
               Mentorship Management

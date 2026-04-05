@@ -107,7 +107,7 @@ export async function loadLearnerMentorshipOrders(): Promise<LearnerMentorshipOr
   );
 
   const [seriesById, testsById, submissionsById, mentorNameByUserId] = await Promise.all([
-    fetchRecordMap(seriesIds, async (id) => (await premiumApi.get<TestSeries>(`/test-series/${id}`)).data),
+    fetchRecordMap(seriesIds, async (id) => (await premiumApi.get<TestSeries>(`/programs/${id}`)).data),
     fetchRecordMap(testIds, async (id) => (await premiumApi.get<TestSeriesTest>(`/tests/${id}`)).data),
     fetchRecordMap(submissionIds, async (id) => (await premiumApi.get<MainsCopySubmission>(`/copy-submissions/${id}`)).data),
     fetchMentorNameMap(providerUserIds),

@@ -144,10 +144,6 @@ export default function TestSeriesConsole() {
     () => seriesRows.find((item) => item.id === selectedSeriesId) || null,
     [selectedSeriesId, seriesRows],
   );
-  const finalDiscussion = useMemo(
-    () => getDiscussionDraftFromMeta(seriesForm.meta, "final_discussion"),
-    [seriesForm.meta],
-  );
   const activeTestDiscussion = useMemo(
     () => getDiscussionDraftFromMeta(testForm.meta, "test_discussion"),
     [testForm.meta],
@@ -208,11 +204,11 @@ export default function TestSeriesConsole() {
           }
           : { only_public: true, include_tests: true };
       const [response, mineResponse] = await Promise.all([
-        premiumApi.get<TestSeries[]>("/test-series", { params }),
+        premiumApi.get<TestSeries[]>("/programs", { params }),
         mode === "provider" || !isAuthenticated
           ? Promise.resolve<{ data: TestSeries[] } | null>(null)
           : premiumApi
-            .get<TestSeries[]>("/test-series", {
+            .get<TestSeries[]>("/programs", {
               params: { mine_only: true, include_tests: true, include_inactive: true },
             })
             .catch(() => null),
@@ -246,7 +242,7 @@ export default function TestSeriesConsole() {
         return scopedRows.length > 0 ? scopedRows[0].id : null;
       });
     } catch (error: unknown) {
-      toast.error("Failed to load test series", { description: toError(error) });
+      toast.error("Failed to load programs", { description: toError(error) });
       setSeriesRows([]);
       setSelectedSeriesId(null);
     } finally {
@@ -256,7 +252,7 @@ export default function TestSeriesConsole() {
 
   const loadSeriesTests = async (seriesId: number) => {
     try {
-      const response = await premiumApi.get<TestSeriesTest[]>(`/test-series/${seriesId}/tests`, {
+      const response = await premiumApi.get<TestSeriesTest[]>(`/programs/${seriesId}/tests`, {
         params: { include_inactive: mode === "provider" },
       });
       const rows = Array.isArray(response.data) ? response.data : [];
@@ -428,7 +424,7 @@ export default function TestSeriesConsole() {
           title,
           description: toNullableRichText(seriesForm.description || ""),
         };
-        await premiumApi.put(`/test-series/${editingSeriesId}`, payload);
+        await premiumApi.put(`/programs/${editingSeriesId}`, payload);
         toast.success("Series updated");
       } else {
         const payload: TestSeriesCreatePayload = {
@@ -436,7 +432,7 @@ export default function TestSeriesConsole() {
           title,
           description: toNullableRichText(seriesForm.description || ""),
         };
-        const response = await premiumApi.post<TestSeries>("/test-series", payload);
+        const response = await premiumApi.post<TestSeries>("/programs", payload);
         if (response.data?.id) {
           setSelectedSeriesId(response.data.id);
         }
@@ -453,10 +449,10 @@ export default function TestSeriesConsole() {
   };
 
   const removeSeries = async (seriesId: number) => {
-    const ok = window.confirm("Archive this test series?");
+    const ok = window.confirm("Archive this programs?");
     if (!ok) return;
     try {
-      await premiumApi.delete(`/test-series/${seriesId}`);
+      await premiumApi.delete(`/programs/${seriesId}`);
       toast.success("Series archived");
       await loadSeries();
       if (canBuildSeries) await loadProviderSummary();
@@ -520,7 +516,7 @@ export default function TestSeriesConsole() {
           title,
           description: toNullableRichText(testForm.description || ""),
         };
-        await premiumApi.post(`/test-series/${selectedSeriesId}/tests`, payload);
+        await premiumApi.post(`/programs/${selectedSeriesId}/tests`, payload);
         toast.success("Test created");
       }
       resetTestForm();
@@ -553,12 +549,12 @@ export default function TestSeriesConsole() {
       const requiresOnlinePayment = String(accessType || "").toLowerCase() !== "free" && Number(price || 0) > 0;
       if (requiresOnlinePayment) {
         if (typeof window !== "undefined") {
-          window.location.assign(`/test-series/${seriesId}?autobuy=1`);
+          window.location.assign(`/programs/${seriesId}?autobuy=1`);
           return;
         }
       }
-      await premiumApi.post(`/test-series/${seriesId}/enroll`, { access_source: "self_service" });
-      toast.success("Enrolled in test series");
+      await premiumApi.post(`/programs/${seriesId}/enroll`, { access_source: "self_service" });
+      toast.success("Enrolled in programs");
       await loadSeries();
     } catch (error: unknown) {
       toast.error("Enrollment failed", { description: toError(error) });
@@ -588,7 +584,7 @@ export default function TestSeriesConsole() {
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 to-slate-700 p-6 text-white">
-        <h1 className="text-2xl font-bold">Test Series & Mentorship Hub</h1>
+        <h1 className="text-2xl font-bold">Programs & Mentorship Hub</h1>
         <p className="mt-2 text-sm text-slate-100/90">
           Mobile-friendly workspace for Prelims and Mains operations, with role-based access for Quiz Masters and Mains Mentors.
         </p>
@@ -684,9 +680,9 @@ export default function TestSeriesConsole() {
                 <>
                   <>
                     <div className="flex items-center justify-between mb-4">
-                      <p className="text-sm font-semibold text-slate-900">{editingSeriesId ? "Edit Test Series" : "Test Series Console"}</p>
+                      <p className="text-sm font-semibold text-slate-900">{editingSeriesId ? "Edit Programs" : "Programs Console"}</p>
                       {!editingSeriesId && (
-                        <Link href="/test-series/create" className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+                        <Link href="/programs/create" className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
                           <Plus className="h-4 w-4" />
                           Create New
                         </Link>
@@ -707,19 +703,6 @@ export default function TestSeriesConsole() {
                           placeholder="Describe the series structure, learner outcome, and how the series is intended to be used."
                           helperText="This becomes the public description across the series experience."
                         />
-                        {String(seriesForm.series_kind || "").trim().toLowerCase() === "quiz" ? (
-                          <DiscussionConfigEditor
-                            heading="End-of-series discussion"
-                            hint="Publish a final discussion for the whole prelims series. You can attach a recorded explanation or schedule a live Agora class."
-                            value={finalDiscussion}
-                            onChange={(discussion) =>
-                              setSeriesForm((prev) => ({
-                                ...prev,
-                                meta: mergeDiscussionIntoMeta(prev.meta || {}, "final_discussion", discussion),
-                              }))
-                            }
-                          />
-                        ) : null}
                         <input
                           value={seriesForm.cover_image_url || ""}
                           onChange={(event) => setSeriesForm((prev) => ({ ...prev, cover_image_url: event.target.value }))}
@@ -788,7 +771,7 @@ export default function TestSeriesConsole() {
                   </>
                 </>
               ) : (
-                <p className="text-xs text-amber-700">Read-only mode. Quiz Master, Mains Mentor, or admin role is required to create or edit test series.</p>
+                <p className="text-xs text-amber-700">Read-only mode. Quiz Master, Mains Mentor, or admin role is required to create or edit programs.</p>
               )}
 
               <div className="border-t border-slate-200 pt-4">
@@ -808,10 +791,10 @@ export default function TestSeriesConsole() {
                         <p className="text-xs text-slate-500">{series.test_count} tests</p>
                       </button>
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                        <Link href={`/test-series/${series.id}`} className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px]">
+                        <Link href={`/programs/${series.id}`} className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px]">
                           Detail
                         </Link>
-                        <Link href={`/test-series/${series.id}/manage`} className="rounded border border-indigo-300 bg-white px-2 py-1 text-[11px] text-indigo-700">
+                        <Link href={`/programs/${series.id}/manage`} className="rounded border border-indigo-300 bg-white px-2 py-1 text-[11px] text-indigo-700">
                           Manage
                         </Link>
                       </div>
@@ -835,10 +818,10 @@ export default function TestSeriesConsole() {
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Link href={`/test-series/${selectedSeries.id}`} className="rounded-md border border-slate-300 px-3 py-2 text-sm">
+                      <Link href={`/programs/${selectedSeries.id}`} className="rounded-md border border-slate-300 px-3 py-2 text-sm">
                         Learner View
                       </Link>
-                      <Link href={`/test-series/${selectedSeries.id}/manage`} className="rounded-md border border-indigo-300 px-3 py-2 text-sm text-indigo-700">
+                      <Link href={`/programs/${selectedSeries.id}/manage`} className="rounded-md border border-indigo-300 px-3 py-2 text-sm text-indigo-700">
                         Dedicated Manage
                       </Link>
                       {canBuildSeries ? (
@@ -1051,7 +1034,7 @@ export default function TestSeriesConsole() {
                   <h2 className="text-lg font-bold text-slate-900">{series.title}</h2>
                   <p className="mt-1 text-sm text-slate-600">{richTextToPlainText(series.description || "") || "No description."}</p>
                   <div className="mt-2 flex items-center gap-2">
-                    <Link href={`/test-series/${series.id}`} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs">
+                    <Link href={`/programs/${series.id}`} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs">
                       Open Detail
                     </Link>
                     {isAuthenticated ? (
@@ -1099,7 +1082,7 @@ export default function TestSeriesConsole() {
             })}
             {!seriesLoading && seriesRows.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-sm text-slate-500">
-                No public test series available yet.
+                No public programs available yet.
               </div>
             ) : null}
           </div>

@@ -36,7 +36,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   {
     title: "Tests",
     links: [
-      { label: "Test Series Console", href: "/test-series", description: "Unified mains/quiz test series + copy check + mentorship" },
+      { label: "Programs Console", href: "/programs", description: "Unified mains/quiz programs + copy check + mentorship" },
       { label: "Mentorship Manage", href: "/mentorship/manage", description: "Manage mentorship slots, requests, and sessions" },
       { label: "Tests", href: "/collections", description: "Browse and manage Prelims and Mains tests" },
       { label: "Create Prelims Test", href: "/collections/create", description: "Create a quiz-based prelims test" },

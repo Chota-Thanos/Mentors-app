@@ -229,7 +229,7 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
 
   const submitAttempt = async () => {
     if (!payload.series_id) {
-      toast.error("This mains paper is not linked to a test series yet.");
+      toast.error("This mains paper is not linked to a programs yet.");
       return;
     }
 
@@ -461,7 +461,7 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
               </div>
             ) : !payload.series_id ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                Evaluation is available only after this paper is linked to a mains test series.
+                Evaluation is available only after this paper is linked to a mains programs.
               </div>
             ) : (
               <>
@@ -700,7 +700,7 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
               </div>
             ) : !payload.series_id ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                Mentorship opens only for mains papers linked to a test series.
+                Mentorship opens only for mains papers linked to a programs.
               </div>
             ) : !latestSubmission ? (
               <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">

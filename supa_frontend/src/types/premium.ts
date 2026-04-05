@@ -822,6 +822,7 @@ export interface TestSeriesTestCreatePayload {
   title: string;
   description?: string | null;
   test_kind?: "prelims" | "mains";
+  test_label?: string;
   thumbnail_url?: string | null;
   is_public?: boolean;
   is_premium?: boolean;
@@ -835,6 +836,7 @@ export interface TestSeriesTestUpdatePayload {
   title?: string;
   description?: string | null;
   test_kind?: "prelims" | "mains";
+  test_label?: string;
   thumbnail_url?: string | null;
   is_public?: boolean;
   is_premium?: boolean;

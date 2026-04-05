@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Manrope, Noto_Sans_Devanagari, Noto_Serif_Devanagari, Source_Serif_4 } from "next/font/google";
 import { Toaster } from "@/components/ui/toaster"
 import { AuthProvider } from "@/context/AuthContext"
+import { ExamProvider } from "@/context/ExamContext"
 import "./globals.css";
 
 const manrope = Manrope({
@@ -45,8 +46,10 @@ export default function RootLayout({
         className={`${manrope.variable} ${sourceSerif.variable} ${hindiSerif.variable} ${hindiSans.variable} font-sans antialiased`}
       >
         <AuthProvider>
-          {children}
-          <Toaster />
+          <ExamProvider>
+            {children}
+            <Toaster />
+          </ExamProvider>
         </AuthProvider>
       </body>
     </html>

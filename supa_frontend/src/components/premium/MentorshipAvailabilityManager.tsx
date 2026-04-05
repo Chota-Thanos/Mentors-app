@@ -337,7 +337,7 @@ export default function MentorshipAvailabilityManager({
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
               Choose <span className="font-semibold text-slate-800">Open</span> if learners can bring any issue. Choose{" "}
               <span className="font-semibold text-slate-800">Series-only</span> if requests should stay restricted to selected
-              test-series flows.
+              programs flows.
             </div>
           </FormFieldShell>
           <RichTextField
@@ -426,7 +426,7 @@ export default function MentorshipAvailabilityManager({
 
         {availabilityMode === "series_only" ? (
           <div className="mt-4 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Allowed Test Series</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Allowed Programs</p>
             <div className="grid gap-2 md:grid-cols-2">
               {seriesRows.map((row) => (
                 <label key={row.id} className="inline-flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700">

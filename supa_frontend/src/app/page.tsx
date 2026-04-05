@@ -21,7 +21,7 @@ export default function Home() {
               Master UPSC Preparation with <span className="text-indigo-600">one connected workspace</span>
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
-              Browse test series, track performance, and use the mentorship flow without turning the main home into a mentor directory.
+              Browse programs, track performance, and use the mentorship flow without turning the main home into a mentor directory.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-x-6">
               <Link
@@ -31,13 +31,13 @@ export default function Home() {
                 Go to Dashboard
               </Link>
               <Link
-                href="/test-series/prelims"
+                href="/programs/prelims"
                 className="w-full rounded-xl border border-slate-300 bg-white px-8 py-4 text-center text-sm font-bold text-slate-900 shadow-sm transition-all hover:scale-[1.01] sm:w-auto"
               >
                 Prelims Programs
               </Link>
               <Link
-                href="/test-series/mains"
+                href="/programs/mains"
                 className="w-full rounded-xl border border-slate-300 bg-white px-8 py-4 text-center text-sm font-bold text-slate-900 shadow-sm transition-all hover:scale-[1.01] sm:w-auto"
               >
                 Mains Programs
@@ -72,10 +72,10 @@ export default function Home() {
                 Access curated prelims and mains series, then move into mentorship when you need expert review.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
-                <Link href="/test-series/prelims" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                <Link href="/programs/prelims" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
                   Prelims Programs
                 </Link>
-                <Link href="/test-series/mains" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                <Link href="/programs/mains" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
                   Mains Programs
                 </Link>
               </div>

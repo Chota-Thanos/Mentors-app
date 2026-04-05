@@ -96,7 +96,7 @@ export default async function QuestionMethodsPage({ params }: PageProps) {
               </div>
             </div>
             <p className="mt-3 rounded bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              This page follows the same add/manage workflow used from the test-series manage screen, but is bound to the current mains test.
+              This page follows the same add/manage workflow used from the programs manage screen, but is bound to the current mains test.
             </p>
           </section>
 

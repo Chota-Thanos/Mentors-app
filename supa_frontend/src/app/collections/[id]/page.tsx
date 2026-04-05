@@ -151,7 +151,7 @@ export default async function CollectionDetailPage({ params }: PageProps) {
   const mainsPayload = isMainsTest
     ? buildMainsPayload(Number(id), String(collection?.title || `Test ${id}`), linkedSeriesId, contentItems)
     : null;
-  const backFallbackHref = linkedSeriesId > 0 ? `/test-series/${linkedSeriesId}` : "/collections";
+  const backFallbackHref = linkedSeriesId > 0 ? `/programs/${linkedSeriesId}` : "/collections";
   const backLabel = linkedSeriesId > 0 ? "Back to Series" : "Back to Tests";
 
   return (

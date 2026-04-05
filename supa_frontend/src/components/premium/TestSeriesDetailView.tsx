@@ -120,9 +120,9 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
     setLoading(true);
     try {
       const [seriesRes, testsRes, itemsRes] = await Promise.all([
-        premiumApi.get<TestSeries>(`/test-series/${seriesId}`),
-        premiumApi.get<TestSeriesTest[]>(`/test-series/${seriesId}/tests`),
-        premiumApi.get<TestSeriesProgramItem[]>(`/test-series/${seriesId}/program-items`),
+        premiumApi.get<TestSeries>(`/programs/${seriesId}`),
+        premiumApi.get<TestSeriesTest[]>(`/programs/${seriesId}/tests`),
+        premiumApi.get<TestSeriesProgramItem[]>(`/programs/${seriesId}/program-items`),
       ]);
       const nextSeries = seriesRes.data;
       const nextTests = Array.isArray(testsRes.data) ? testsRes.data : [];
@@ -132,7 +132,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
       setProgramItems(nextProgramItems);
 
       if (isAuthenticated) {
-        const enrollmentsPromise = premiumApi.get<TestSeriesEnrollment[]>("/test-series/my/enrollments");
+        const enrollmentsPromise = premiumApi.get<TestSeriesEnrollment[]>("/programs/my/enrollments");
         const nextIsMainsSeries = String(nextSeries?.series_kind || "").trim().toLowerCase() === "mains";
 
         if (nextIsMainsSeries) {
@@ -185,7 +185,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
         setQuizAttemptCountsByTest(null);
       }
     } catch (error: unknown) {
-      toast.error("Failed to load test series details", { description: toError(error) });
+      toast.error("Failed to load programs details", { description: toError(error) });
       setSeries(null);
       setTests([]);
       setProgramItems([]);
@@ -243,7 +243,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
     try {
       const requiresOnlinePayment = !seriesIsFree && Number(series.price || 0) > 0;
       if (requiresOnlinePayment) {
-        const orderResponse = await premiumApi.post<TestSeriesPaymentOrder>(`/test-series/${seriesId}/payment/order`, {
+        const orderResponse = await premiumApi.post<TestSeriesPaymentOrder>(`/programs/${seriesId}/payment/order`, {
           access_source: "self_service",
           payment_method: "razorpay",
         });
@@ -269,7 +269,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
           },
           handler: async (response: RazorpaySuccessResponse) => {
             try {
-              await premiumApi.post(`/test-series/${seriesId}/payment/verify`, {
+              await premiumApi.post(`/programs/${seriesId}/payment/verify`, {
                 ...response,
                 access_source: "self_service",
                 payment_method: "razorpay",
@@ -297,7 +297,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
         return;
       }
 
-      await premiumApi.post(`/test-series/${seriesId}/enroll`, { access_source: "self_service" });
+      await premiumApi.post(`/programs/${seriesId}/enroll`, { access_source: "self_service" });
       toast.success("Enrollment completed");
       await loadBase();
       if (typeof window !== "undefined" && isSafeMobileReturnUrl(returnToUrl)) {
@@ -319,26 +319,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
     void enroll();
   }, [enroll, enrolling, hasSeriesAccess, isAuthenticated, searchParams, series]);
 
-  if (loading) {
-    return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading test series...</div>;
-  }
-
-  if (!series) {
-    return <div className="rounded-xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">Test series not found or inaccessible.</div>;
-  }
-
-  const fallbackHref =
-    series.series_kind === "mains"
-      ? "/test-series/mains"
-      : series.series_kind === "quiz"
-        ? "/test-series/prelims"
-        : "/test-series";
-  const sortedTests = [...tests].sort((left, right) => {
-    const leftOrder = Number.isFinite(left.series_order) ? Number(left.series_order) : Number.MAX_SAFE_INTEGER;
-    const rightOrder = Number.isFinite(right.series_order) ? Number(right.series_order) : Number.MAX_SAFE_INTEGER;
-    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
-    return left.id - right.id;
-  });
+  // Must be declared before early returns to satisfy Rules of Hooks
   const sortedProgramEntries = useMemo<ProgramEntry[]>(() => {
     const testEntries: ProgramEntry[] = tests.map((test) => ({
       entry_type: "test",
@@ -362,6 +343,28 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
       return left.entry_key.localeCompare(right.entry_key);
     });
   }, [programItems, tests]);
+
+  if (loading) {
+    return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading programs...</div>;
+  }
+
+  if (!series) {
+    return <div className="rounded-xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">Programs not found or inaccessible.</div>;
+  }
+
+  const fallbackHref =
+    series.series_kind === "mains"
+      ? "/programs/mains"
+      : series.series_kind === "quiz"
+        ? "/programs/prelims"
+        : "/programs";
+  const sortedTests = [...tests].sort((left, right) => {
+    const leftOrder = Number.isFinite(left.series_order) ? Number(left.series_order) : Number.MAX_SAFE_INTEGER;
+    const rightOrder = Number.isFinite(right.series_order) ? Number(right.series_order) : Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    return left.id - right.id;
+  });
+  // sortedProgramEntries is now declared above the early returns (Rules of Hooks)
   const firstTest = sortedTests[0] || null;
   const firstTestHref = firstTest
     ? firstTest.test_kind === "mains"
@@ -479,7 +482,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
     <div className="space-y-6">
       <HistoryBackButton
         fallbackHref={fallbackHref}
-        label="Back to Test Series"
+        label="Back to Programs"
         className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
         iconClassName="h-4 w-4"
       />
@@ -561,7 +564,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                   </Link>
                 ) : null}
                 {canOpenManageView ? (
-                  <Link href={`/test-series/${seriesId}/manage`} className="rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700">
+                  <Link href={`/programs/${seriesId}/manage`} className="rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700">
                     {manageViewLabel}
                   </Link>
                 ) : null}

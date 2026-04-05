@@ -106,11 +106,11 @@ export default function MainsCollectionTestRunner({
             </p>
             <div className="flex flex-wrap items-center gap-3 text-xs">
               {payload.series_id ? (
-                <Link href={`/test-series/${payload.series_id}`} className="inline-flex items-center gap-1 font-semibold text-indigo-700 hover:text-indigo-900">
+                <Link href={`/programs/${payload.series_id}`} className="inline-flex items-center gap-1 font-semibold text-indigo-700 hover:text-indigo-900">
                   Open linked series
                 </Link>
               ) : (
-                <p className="text-amber-700">This paper is not linked to a test series yet, so learner submissions are disabled.</p>
+                <p className="text-amber-700">This paper is not linked to a programs yet, so learner submissions are disabled.</p>
               )}
             </div>
           </div>
