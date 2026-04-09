@@ -5,14 +5,12 @@ import AppLayout from '@/components/layouts/AppLayout'
 import UserCollectionBuilder from '@/components/premium/UserCollectionBuilder'
 
 interface CreateCollectionPageProps {
-    searchParams?: Promise<{ test_kind?: string }> | { test_kind?: string }
+    searchParams?: Promise<{ test_kind?: string }>
 }
 
 export default async function CreateCollectionPage({ searchParams }: CreateCollectionPageProps) {
     const supabase = await createClient()
-    const params = searchParams
-        ? ("then" in searchParams ? await searchParams : searchParams)
-        : undefined
+    const params: { test_kind?: string } = (await searchParams) || {}
     const requestedKind = String(params?.test_kind || "").trim().toLowerCase()
 
     // 1. Check if Admin

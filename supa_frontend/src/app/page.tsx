@@ -824,7 +824,10 @@ function MinimalCreatorHome({
           premiumApi.get<TestSeries[]>("/programs", {
             params: { mine_only: true, include_tests: true, include_inactive: true },
           }),
-          premiumApi.get<{ active_enrollments?: number }>("/provider/dashboard-summary").catch(() => ({ data: {} })),
+          // Preserve the response shape so Promise.all does not widen `data` to `{}`.
+          premiumApi.get<{ active_enrollments?: number }>("/provider/dashboard-summary").catch(() => ({
+            data: { active_enrollments: 0 } as { active_enrollments?: number },
+          })),
           kind === "mains_mentor"
             ? premiumApi.get<MentorshipRequest[]>("/mentorship/requests", {
                 params: { scope: "provider" },

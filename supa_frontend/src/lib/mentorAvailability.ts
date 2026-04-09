@@ -102,10 +102,10 @@ export const mentorshipModeLabel = (mode: MentorshipMode): string =>
   mode === "audio" ? "Audio" : "Video";
 
 export const mentorshipCallProviderLabel = (callProvider: MentorshipCallProvider): string =>
-  callProvider === "zoom"
-    ? "Zoom"
-    : callProvider === "zoom_video_sdk"
+  callProvider === "zoom_video_sdk"
       ? "Agora Room"
+      : callProvider === "zoom"
+        ? "Legacy External Link"
       : "Custom Link";
 
 export const mentorshipCallLabel = (

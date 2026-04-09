@@ -62,9 +62,13 @@ const normalizeExamIds = (value: unknown): number[] => {
 const asText = (value: unknown): string => (typeof value === "string" ? value : "");
 const normalizeCallProvider = (value: unknown, zoomMeetingLink?: unknown): MentorshipCallProvider => {
   const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "zoom") return "zoom";
-  if (typeof zoomMeetingLink === "string" && zoomMeetingLink.trim()) return "zoom";
-  return "custom";
+  if (normalized === "zoom_video_sdk") return "zoom_video_sdk";
+  if (normalized === "custom") return "custom";
+  if (normalized === "zoom") {
+    return typeof zoomMeetingLink === "string" && zoomMeetingLink.trim() ? "custom" : "zoom_video_sdk";
+  }
+  if (typeof zoomMeetingLink === "string" && zoomMeetingLink.trim()) return "custom";
+  return "zoom_video_sdk";
 };
 
 const normalizeEditableRole = (
@@ -135,7 +139,7 @@ export default function ProfessionalProfileForm() {
   const [selectedExamIds, setSelectedExamIds] = useState<number[]>([]);
   const [studentsMentored, setStudentsMentored] = useState("");
   const [sessionsCompleted, setSessionsCompleted] = useState("");
-  const [defaultCallProvider, setDefaultCallProvider] = useState<MentorshipCallProvider>("custom");
+  const [defaultCallProvider, setDefaultCallProvider] = useState<MentorshipCallProvider>("zoom_video_sdk");
   const [zoomMeetingLink, setZoomMeetingLink] = useState("");
   const [callSetupNote, setCallSetupNote] = useState("");
   const [isPublic, setIsPublic] = useState(true);
@@ -254,7 +258,7 @@ export default function ProfessionalProfileForm() {
           if (!active) return;
           setRole(inferredRole);
           setDisplayName(String(userEmail).split("@")[0] || "");
-          setDefaultCallProvider("custom");
+          setDefaultCallProvider("zoom_video_sdk");
           setZoomMeetingLink("");
           setCallSetupNote("");
           setCopyEvaluationEnabled(inferredRole === "mentor");
@@ -471,24 +475,24 @@ export default function ProfessionalProfileForm() {
               <div className="rounded-[24px] border border-[#e4d6f7] bg-[#f8efff] p-4">
                 <p className={eyebrowClass}>Mentorship call setup</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {(["custom", "zoom"] as MentorshipCallProvider[]).map((provider) => (
+                  {(["custom", "zoom_video_sdk"] as MentorshipCallProvider[]).map((provider) => (
                     <button
                       key={provider}
                       type="button"
                       onClick={() => setDefaultCallProvider(provider)}
                       className={pillClass(defaultCallProvider === provider)}
                     >
-                      {provider === "zoom" ? "Zoom" : "Custom link"}
+                      {provider === "zoom_video_sdk" ? "Agora room" : "Custom link"}
                     </button>
                   ))}
                 </div>
                 <div className="mt-4 space-y-4">
-                  <FormFieldShell label="Reusable meeting link">
+                  <FormFieldShell label="Reusable custom meeting link">
                     <input
                       value={zoomMeetingLink}
                       onChange={(event) => setZoomMeetingLink(event.target.value)}
                       className={inputClass}
-                      placeholder="https://zoom.us/j/... or custom meeting link"
+                      placeholder="https://meet.google.com/... or any external call link"
                     />
                   </FormFieldShell>
                   <RichTextField

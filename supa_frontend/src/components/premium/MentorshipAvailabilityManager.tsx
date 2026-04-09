@@ -27,7 +27,6 @@ import MentorAvailabilityCalendar from "@/components/premium/MentorAvailabilityC
 import FormFieldShell from "@/components/ui/FormFieldShell";
 import RichTextContent from "@/components/ui/RichTextContent";
 import RichTextField from "@/components/ui/RichTextField";
-import { ZoomConnectionStatusCard } from "@/components/premium/ZoomConnectionStatusCard";
 
 const WEEKDAY_OPTIONS = [
   { value: 1, label: "Mon" },
@@ -117,14 +116,18 @@ export default function MentorshipAvailabilityManager({
         setDisplayName(String(profile?.display_name || "").trim());
         setAvailabilityMode(String(meta.mentorship_availability_mode || "").toLowerCase() === "open" ? "open" : "series_only");
         setOpenScopeNote(String(meta.mentorship_open_scope_note || ""));
-        const resolvedDefaultCallProvider =
-          String(meta.mentorship_default_call_provider || "").trim().toLowerCase() === "zoom_video_sdk"
-            ? "zoom_video_sdk"
-            : String(meta.mentorship_default_call_provider || "").trim().toLowerCase() === "zoom"
-            ? "zoom"
-            : typeof meta.mentorship_zoom_meeting_link === "string" && meta.mentorship_zoom_meeting_link.trim()
-              ? "zoom"
-              : "zoom_video_sdk";
+        const rawDefaultCallProvider = String(meta.mentorship_default_call_provider || "").trim().toLowerCase();
+        const hasLegacyMeetingLink = typeof meta.mentorship_zoom_meeting_link === "string" && meta.mentorship_zoom_meeting_link.trim();
+        const resolvedDefaultCallProvider: MentorshipCallProvider =
+          rawDefaultCallProvider === "custom"
+            ? "custom"
+            : rawDefaultCallProvider === "zoom_video_sdk"
+              ? "zoom_video_sdk"
+              : rawDefaultCallProvider === "zoom"
+                ? (hasLegacyMeetingLink ? "custom" : "zoom_video_sdk")
+                : hasLegacyMeetingLink
+                  ? "custom"
+                  : "zoom_video_sdk";
         setDefaultCallProvider(resolvedDefaultCallProvider);
         setSlotCallProvider(resolvedDefaultCallProvider);
         setZoomMeetingLink(String(meta.mentorship_zoom_meeting_link || ""));
@@ -240,13 +243,9 @@ export default function MentorshipAvailabilityManager({
   };
 
   const publishAvailability = async () => {
-    const resolvedMeetingLink = slotCallProvider === "zoom"
+    const resolvedMeetingLink = slotCallProvider === "custom"
       ? meetingLink.trim() || zoomMeetingLink.trim()
       : meetingLink.trim();
-    if (slotCallProvider === "zoom" && !resolvedMeetingLink) {
-      toast.error("Add a Zoom meeting link before publishing Zoom slots.");
-      return;
-    }
 
     const payload: MentorshipSlotBatchCreatePayload = buildSlotBatchPayload({
       startDate,
@@ -318,10 +317,6 @@ export default function MentorshipAvailabilityManager({
           </Link>
         </div>
 
-        <div className="mt-4">
-          <ZoomConnectionStatusCard />
-        </div>
-
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <FormFieldShell label="Availability mode">
             <select
@@ -367,23 +362,17 @@ export default function MentorshipAvailabilityManager({
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               >
                 <option value="custom">Custom link / manual setup</option>
-                <option value="zoom">Zoom Meeting (Auto Generated)</option>
                 <option value="zoom_video_sdk">Agora In-App Room</option>
               </select>
             </FormFieldShell>
             {defaultCallProvider === "custom" && (
-              <FormFieldShell label="Reusable meeting link">
+              <FormFieldShell label="Reusable custom meeting link">
                 <input
                   value={zoomMeetingLink}
                   onChange={(event) => setZoomMeetingLink(event.target.value)}
                   className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="https://zoom.us/j/... or Google Meet link"
+                  placeholder="https://meet.google.com/... or any external call link"
                 />
-              </FormFieldShell>
-            )}
-            {defaultCallProvider === "zoom" && (
-              <FormFieldShell label="Zoom Integration">
-                <p className="text-xs text-slate-500 mb-2">Each booking will automatically create a new Zoom meeting on your connected account.</p>
               </FormFieldShell>
             )}
             {defaultCallProvider === "zoom_video_sdk" && (
@@ -396,7 +385,7 @@ export default function MentorshipAvailabilityManager({
               value={callSetupNote}
               onChange={setCallSetupNote}
               className="md:col-span-2"
-              placeholder="Explain how learners should join, what to do if Zoom fails, or whether audio-only sessions are also handled on Zoom."
+              placeholder="Explain how learners should join, fallback steps, and whether audio-only sessions are supported."
               helperText="Shown as part of the mentor-facing call setup context."
             />
           </div>
@@ -484,7 +473,6 @@ export default function MentorshipAvailabilityManager({
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             >
               <option value="custom">Custom link / manual setup</option>
-              <option value="zoom">Zoom Meeting (Auto Generated)</option>
               <option value="zoom_video_sdk">Agora In-App Room</option>
             </select>
           </FormFieldShell>
