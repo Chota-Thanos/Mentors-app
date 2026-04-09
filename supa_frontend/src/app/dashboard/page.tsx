@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import LearnerMentorshipDashboardPanel from "@/components/account/LearnerMentorshipDashboardPanel";
+import LearnerPerformanceAudit from "@/components/dashboard/LearnerPerformanceAudit";
 import AppLayout from "@/components/layouts/AppLayout";
 import RoleWorkspaceSidebar from "@/components/layouts/RoleWorkspaceSidebar";
 import {
@@ -30,7 +30,6 @@ import { getUserRole, isMentorLike, isModeratorLike, isProviderLike } from "@/li
 import { premiumApi } from "@/lib/premiumApi";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type {
-  DashboardAnalyticsPayload,
   LifecycleTrackingIssue,
   LifecycleTrackingPayload,
   MentorshipRequest,
@@ -75,15 +74,6 @@ interface ModeratorDashboardData {
   tracking: LifecycleTrackingPayload;
 }
 
-interface LearnerHighlightCard {
-  key: string;
-  title: string;
-  metric: string;
-  detail: string;
-  href: string;
-  actionLabel: string;
-}
-
 interface MentorLearnerDirectoryEntry {
   name: string;
   email: string;
@@ -108,7 +98,7 @@ const QUIZ_MASTER_ROLES = new Set(["provider", "institute", "creator", "quiz_mas
 const dashboardCopy: Record<DashboardKind, { title: string; subtitle: string }> = {
   learner: {
     title: "Performance Evaluation",
-    subtitle: "Track mentorship requests, review prep analytics, and focus on the next improvement area.",
+    subtitle: "Marks-focused performance across AI content and program content, with category-wise drill-down.",
   },
   mains_mentor: {
     title: "Mains Mentor Dashboard",
@@ -375,7 +365,6 @@ export default function DashboardPage() {
   const [loadingData, setLoadingData] = useState(false);
   const [error, setError] = useState("");
 
-  const [analytics, setAnalytics] = useState<DashboardAnalyticsPayload | null>(null);
   const [mentorData, setMentorData] = useState<MentorDashboardData | null>(null);
   const [quizMasterData, setQuizMasterData] = useState<QuizMasterDashboardData | null>(null);
   const [moderatorData, setModeratorData] = useState<ModeratorDashboardData | null>(null);
@@ -396,9 +385,7 @@ export default function DashboardPage() {
     const run = async () => {
       try {
         if (kind === "learner") {
-          const response = await premiumApi.get<DashboardAnalyticsPayload>("/user/dashboard-analytics");
           if (!active) return;
-          setAnalytics(response.data);
           setMentorData(null);
           setQuizMasterData(null);
           setModeratorData(null);
@@ -426,7 +413,6 @@ export default function DashboardPage() {
             sessions: Array.isArray(sessions.data) ? sessions.data : [],
             mainsSeries: allSeries.filter((row) => String(row.series_kind || "").toLowerCase() !== "quiz"),
           });
-          setAnalytics(null);
           setQuizMasterData(null);
           setModeratorData(null);
           return;
@@ -483,7 +469,6 @@ export default function DashboardPage() {
             tracking: trackingPayload,
             profileDetail,
           });
-          setAnalytics(null);
           setMentorData(null);
           setModeratorData(null);
           return;
@@ -502,7 +487,6 @@ export default function DashboardPage() {
           pendingOnboarding: Array.isArray(onboarding.data) ? onboarding.data : [],
           tracking: tracking.data || emptyLifecycleTracking,
         });
-        setAnalytics(null);
         setMentorData(null);
         setQuizMasterData(null);
       } catch (err: unknown) {
@@ -514,7 +498,6 @@ export default function DashboardPage() {
           moderator: "Failed to load moderator dashboard.",
         };
         setError(toError(err, fallback[kind]));
-        setAnalytics(null);
         setMentorData(null);
         setQuizMasterData(null);
         setModeratorData(null);
@@ -799,129 +782,6 @@ export default function DashboardPage() {
       (row) => row.technical_issue_count > 0 || row.delay_count > 0 || row.issues.length > 0,
     ) ?? [];
 
-  const learnerPurchaseOverview = analytics?.purchase_overview;
-  const learnerActiveSeries = learnerPurchaseOverview?.active_series ?? [];
-
-  const learnerWeakestSection = useMemo(() => {
-    if (!analytics) return null;
-    const rows = (["gk", "maths", "passage"] as const)
-      .map((type) => {
-        const section = analytics.sections[type];
-        return {
-          type,
-          label: section.label,
-          accuracy: Number(section.accuracy || 0),
-          questionCount: Number(section.question_count || 0),
-        };
-      })
-      .filter((row) => row.questionCount > 0);
-    if (rows.length === 0) return null;
-    rows.sort((a, b) => a.accuracy - b.accuracy);
-    return rows[0];
-  }, [analytics]);
-
-  const learnerPageHighlights = useMemo<LearnerHighlightCard[]>(() => {
-    if (!analytics) return [];
-
-    const activeEnrollments = Number(learnerPurchaseOverview?.active_enrollments || 0);
-    const activePrelims = Number(learnerPurchaseOverview?.active_prelims_enrollments || 0);
-    const activeMains = Number(learnerPurchaseOverview?.active_mains_enrollments || 0);
-    const latestActivity = analytics.recent_activity[0] || null;
-
-    const highlights: LearnerHighlightCard[] = [
-      {
-        key: "results",
-        title: "My Results",
-        metric: `${analytics.summary.total_quiz_attempts} quiz attempts | ${analytics.summary.total_mains_evaluations} mains`,
-        detail: `Overall quiz accuracy ${analytics.summary.overall_quiz_accuracy.toFixed(1)}%`,
-        href: "/my-results",
-        actionLabel: "Open Results",
-      },
-      {
-        key: "purchases",
-        title: "My Purchases",
-        metric: `${activeEnrollments} active series access`,
-        detail: `${activePrelims} prelims | ${activeMains} mains`,
-        href: "/my-purchases",
-        actionLabel: "Open Purchases",
-      },
-      {
-        key: "prelims-series",
-        title: "Prelims Programs",
-        metric: `${activePrelims} active prelims purchases`,
-        detail: activePrelims > 0 ? "Continue your prelims roadmap." : "No active prelims series yet.",
-        href: "/programs/prelims",
-        actionLabel: "Browse Prelims",
-      },
-      {
-        key: "mains-series",
-        title: "Mains Programs",
-        metric: `${activeMains} active mains purchases`,
-        detail: activeMains > 0 ? "Continue answer-writing practice." : "No active mains series yet.",
-        href: "/programs/mains",
-        actionLabel: "Browse Mains",
-      },
-    ];
-
-    if (learnerWeakestSection) {
-      highlights.push({
-        key: "weakest-section",
-        title: "Focus Section",
-        metric: `${learnerWeakestSection.label} at ${learnerWeakestSection.accuracy.toFixed(1)}%`,
-        detail: "Open section detail and target weak topics.",
-        href: `/dashboard/${learnerWeakestSection.type}`,
-        actionLabel: "Open Detail",
-      });
-    } else if (latestActivity) {
-      highlights.push({
-        key: "latest-activity",
-        title: "Latest Activity",
-        metric: latestActivity.title,
-        detail: `${latestActivity.type.toUpperCase()} | ${latestActivity.score_text}`,
-        href: "/my-results",
-        actionLabel: "View Activity",
-      });
-    }
-
-    return highlights;
-  }, [analytics, learnerPurchaseOverview, learnerWeakestSection]);
-
-  const learnerQuizSectionRows = useMemo(() => {
-    if (!analytics) return [];
-    return (["gk", "maths", "passage"] as const)
-      .map((type) => {
-        const section = analytics.sections[type];
-        return {
-          type,
-          label: section.label,
-          attempts: Number(section.activity_count || 0),
-          questions: Number(section.question_count || 0),
-          accuracy: Number(section.accuracy || 0),
-        };
-      })
-      .filter((row) => row.attempts > 0 || row.questions > 0);
-  }, [analytics]);
-
-  const learnerQuizRecommendations = useMemo(() => {
-    if (!analytics) return [];
-    const lines: string[] = [];
-    if (learnerWeakestSection) {
-      const weakest = analytics.sections[learnerWeakestSection.type];
-      lines.push(...(weakest.recommendations || []).slice(0, 2));
-    }
-    const globalQuizLines = analytics.recommendations.filter((line) => !String(line).toLowerCase().includes("mains"));
-    lines.push(...globalQuizLines.slice(0, 2));
-    return Array.from(new Set(lines.filter((line) => String(line).trim()))).slice(0, 4);
-  }, [analytics, learnerWeakestSection]);
-
-  const learnerMainsRecommendations = useMemo(() => {
-    if (!analytics) return [];
-    const mainsLines = analytics.sections.mains.recommendations || [];
-    if (mainsLines.length > 0) return mainsLines.slice(0, 4);
-    const globalMainsLines = analytics.recommendations.filter((line) => String(line).toLowerCase().includes("mains"));
-    return globalMainsLines.slice(0, 4);
-  }, [analytics]);
-
   const roleWorkspaceSidebar =
     kind === "quiz_master" ? (
       <RoleWorkspaceSidebar
@@ -971,216 +831,7 @@ export default function DashboardPage() {
         ) : null}
 
         {!loading && isAuthenticated && kind === "learner" ? (
-          <>
-            <LearnerMentorshipDashboardPanel />
-
-            {error ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                Prep analytics are unavailable right now. Your mentorship request dashboard is still live.
-              </div>
-            ) : null}
-
-            {analytics ? (
-              <>
-                <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                  <section className="rounded-2xl border border-slate-200 bg-white p-6">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-lg font-bold text-slate-900">Quiz Highlights + Recommendations</h2>
-                  <Link href="/my-results" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
-                    Open Results
-                  </Link>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
-                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Quiz Attempts</p>
-                    <p className="mt-1 text-2xl font-black text-slate-900">{analytics.summary.total_quiz_attempts}</p>
-                  </article>
-                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Overall Accuracy</p>
-                    <p className="mt-1 text-2xl font-black text-slate-900">{analytics.summary.overall_quiz_accuracy.toFixed(1)}%</p>
-                  </article>
-                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Total Questions</p>
-                    <p className="mt-1 text-2xl font-black text-slate-900">{analytics.summary.overall_quiz_questions}</p>
-                  </article>
-                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Correct</p>
-                    <p className="mt-1 text-2xl font-black text-emerald-700">{analytics.summary.overall_quiz_correct}</p>
-                  </article>
-                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Incorrect</p>
-                    <p className="mt-1 text-2xl font-black text-rose-700">{analytics.summary.overall_quiz_incorrect}</p>
-                  </article>
-                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Unanswered</p>
-                    <p className="mt-1 text-2xl font-black text-amber-700">{analytics.summary.overall_quiz_unanswered}</p>
-                  </article>
-                </div>
-
-                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Section Accuracy</p>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    {learnerQuizSectionRows.map((row) => (
-                      <div key={row.type} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                        <p className="text-sm font-semibold text-slate-800">{row.label}</p>
-                        <p className="text-xs text-slate-600">
-                          Attempts {row.attempts} | Questions {row.questions}
-                        </p>
-                        <p className="text-sm font-bold text-slate-900">{row.accuracy.toFixed(1)}%</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <h3 className="text-sm font-semibold text-slate-900">Quiz Recommendations</h3>
-                  <div className="mt-2 space-y-2 text-sm text-slate-700">
-                    {learnerQuizRecommendations.map((line, idx) => (
-                      <p key={`quiz-rec-${idx}`}>{idx + 1}. {line}</p>
-                    ))}
-                    {learnerQuizRecommendations.length === 0 ? <p>No quiz recommendation available yet.</p> : null}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Link href="/dashboard/gk" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">GK Detail</Link>
-                    <Link href="/dashboard/maths" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Maths Detail</Link>
-                    <Link href="/dashboard/passage" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Passage Detail</Link>
-                  </div>
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-slate-200 bg-white p-6">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-lg font-bold text-slate-900">Mains Highlights + Recommendations</h2>
-                  <Link href="/dashboard/mains" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
-                    Open Mains Detail
-                  </Link>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Mains Evaluations</p>
-                    <p className="mt-1 text-2xl font-black text-slate-900">{analytics.summary.total_mains_evaluations}</p>
-                  </article>
-                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Average Score</p>
-                    <p className="mt-1 text-2xl font-black text-slate-900">{analytics.summary.overall_mains_average_score.toFixed(2)}/10</p>
-                  </article>
-                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Total Marks</p>
-                    <p className="mt-1 text-2xl font-black text-slate-900">
-                      {analytics.sections.mains.total_score.toFixed(1)}/{analytics.sections.mains.max_total_score.toFixed(1)}
-                    </p>
-                  </article>
-                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Score Percent</p>
-                    <p className="mt-1 text-2xl font-black text-slate-900">{analytics.sections.mains.score_percent.toFixed(1)}%</p>
-                  </article>
-                </div>
-
-                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <h3 className="text-sm font-semibold text-slate-900">Mains Weak Areas</h3>
-                  <div className="mt-2 space-y-2 text-sm text-slate-700">
-                    {(analytics.sections.mains.weak_areas || []).slice(0, 4).map((area, idx) => (
-                      <p key={`mains-weak-${idx}`}>{idx + 1}. {area.name} ({area.count})</p>
-                    ))}
-                    {(analytics.sections.mains.weak_areas || []).length === 0 ? <p>No recurring weak mains area yet.</p> : null}
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <h3 className="text-sm font-semibold text-slate-900">Mains Recommendations</h3>
-                  <div className="mt-2 space-y-2 text-sm text-slate-700">
-                    {learnerMainsRecommendations.map((line, idx) => (
-                      <p key={`mains-rec-${idx}`}>{idx + 1}. {line}</p>
-                    ))}
-                    {learnerMainsRecommendations.length === 0 ? <p>No mains recommendation available yet.</p> : null}
-                  </div>
-                </div>
-                  </section>
-                </section>
-
-                <section className="rounded-2xl border border-slate-200 bg-white p-6">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-lg font-bold text-slate-900">Major Highlights Across Pages</h2>
-                    <div className="flex flex-wrap gap-2">
-                      <Link href="/my-results" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">My Results</Link>
-                      <Link href="/my-purchases" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">My Purchases</Link>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {learnerPageHighlights.map((item) => (
-                      <article key={item.key} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-sm font-bold text-slate-900">{item.title}</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-800">{item.metric}</p>
-                        <p className="mt-1 text-xs text-slate-600">{item.detail}</p>
-                        <Link href={item.href} className="mt-3 inline-flex items-center rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
-                          {item.actionLabel}
-                        </Link>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="rounded-2xl border border-slate-200 bg-white p-6">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-lg font-bold text-slate-900">Purchase Overview</h2>
-                    <Link href="/my-purchases" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
-                      Open Full Purchases
-                    </Link>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Total Purchases</p>
-                      <p className="mt-1 text-xl font-black text-slate-900">{Number(learnerPurchaseOverview?.total_enrollments || 0)}</p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Active</p>
-                      <p className="mt-1 text-xl font-black text-slate-900">{Number(learnerPurchaseOverview?.active_enrollments || 0)}</p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Prelims</p>
-                      <p className="mt-1 text-xl font-black text-slate-900">{Number(learnerPurchaseOverview?.active_prelims_enrollments || 0)}</p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Mains</p>
-                      <p className="mt-1 text-xl font-black text-slate-900">{Number(learnerPurchaseOverview?.active_mains_enrollments || 0)}</p>
-                    </div>
-                  </div>
-                  <div className="mt-4 space-y-2">
-                    {learnerActiveSeries.slice(0, 8).map((series) => (
-                      <article key={`${series.enrollment_id}-${series.series_id}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="font-semibold text-slate-800">{series.title}</p>
-                          <span className="text-xs text-slate-500">{formatSeriesKindLabel(series.series_kind)} Series</span>
-                        </div>
-                        <p className="text-xs text-slate-600">
-                          {String(series.access_type || "subscription").toUpperCase()} | Provider {series.provider_display_name || series.provider_user_id || "n/a"}
-                        </p>
-                        <p className="text-xs text-slate-600">
-                          Source: {series.access_source} | Price: {Number(series.price || 0) > 0 ? `Rs. ${Number(series.price || 0).toFixed(2)}` : "Included"}
-                        </p>
-                        <p className="text-xs text-slate-600">
-                          Valid Until: {series.subscribed_until ? formatDateTime(series.subscribed_until) : "n/a"}
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={`/programs/${series.series_id}`} className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
-                            Open Series
-                          </Link>
-                          <Link href={String(series.series_kind || "").toLowerCase() === "mains" ? "/programs/mains" : "/programs/prelims"} className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
-                            Browse Similar
-                          </Link>
-                        </div>
-                      </article>
-                    ))}
-                    {learnerActiveSeries.length === 0 ? <p className="text-sm text-slate-500">No active programs purchases yet.</p> : null}
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Link href="/programs/prelims" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Browse Prelims Series</Link>
-                    <Link href="/programs/mains" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Browse Mains Series</Link>
-                  </div>
-                </section>
-              </>
-            ) : null}
-          </>
+          <LearnerPerformanceAudit />
         ) : null}
 
         {!loading && isAuthenticated && !error && kind === "mains_mentor" && mentorData ? (

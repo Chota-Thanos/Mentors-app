@@ -11011,6 +11011,628 @@ def _build_mains_section_recommendations(section: Dict[str, Any]) -> List[str]:
     return recommendations[:4]
 
 
+def _performance_metric_stats_template(*, is_quiz: bool) -> Dict[str, Any]:
+    if is_quiz:
+        return {
+            "question_count": 0,
+            "correct_count": 0,
+            "incorrect_count": 0,
+            "unanswered_count": 0,
+        }
+    return {
+        "question_count": 0,
+        "total_score": 0.0,
+        "max_total_score": 0.0,
+    }
+
+
+def _accumulate_quiz_performance_stats(stats: Dict[str, Any], outcome: str) -> None:
+    stats["question_count"] = _safe_int(stats.get("question_count")) + 1
+    if outcome == "correct":
+        stats["correct_count"] = _safe_int(stats.get("correct_count")) + 1
+        return
+    if outcome == "incorrect":
+        stats["incorrect_count"] = _safe_int(stats.get("incorrect_count")) + 1
+        return
+    stats["unanswered_count"] = _safe_int(stats.get("unanswered_count")) + 1
+
+
+def _accumulate_mains_performance_stats(stats: Dict[str, Any], *, score: float, max_score: float) -> None:
+    stats["question_count"] = _safe_int(stats.get("question_count")) + 1
+    stats["total_score"] = _safe_float(stats.get("total_score")) + max(0.0, score)
+    stats["max_total_score"] = _safe_float(stats.get("max_total_score")) + max(0.0, max_score)
+
+
+def _build_quiz_performance_summary(stats: Dict[str, Any]) -> Dict[str, Any]:
+    total_questions = max(0, _safe_int(stats.get("question_count")))
+    correct_count = max(0, _safe_int(stats.get("correct_count")))
+    incorrect_count = max(0, _safe_int(stats.get("incorrect_count")))
+    unanswered_count = max(0, _safe_int(stats.get("unanswered_count")))
+    attempted_questions = correct_count + incorrect_count
+    percentage = round((float(correct_count) / float(total_questions)) * 100.0, 2) if total_questions else 0.0
+    return {
+        "total_questions": total_questions,
+        "attempted_questions": attempted_questions,
+        "correct_count": correct_count,
+        "incorrect_count": incorrect_count,
+        "unanswered_count": unanswered_count,
+        "percentage": percentage,
+    }
+
+
+def _build_mains_performance_summary(stats: Dict[str, Any]) -> Dict[str, Any]:
+    total_questions = max(0, _safe_int(stats.get("question_count")))
+    total_score = round(max(0.0, _safe_float(stats.get("total_score"))), 2)
+    max_total_score = round(max(0.0, _safe_float(stats.get("max_total_score"))), 2)
+    percentage = round((total_score / max_total_score) * 100.0, 2) if max_total_score > 0 else 0.0
+    return {
+        "total_questions": total_questions,
+        "total_score": total_score,
+        "max_total_score": max_total_score,
+        "percentage": percentage,
+    }
+
+
+def _performance_proficiency_label(percentage: float) -> str:
+    if percentage >= 85.0:
+        return "Advanced"
+    if percentage >= 70.0:
+        return "Stable"
+    if percentage >= 55.0:
+        return "Developing"
+    return "Needs Focus"
+
+
+def _fetch_category_hierarchy_nodes(
+    *,
+    table_name: str,
+    supabase: Client,
+) -> Dict[int, Dict[str, Any]]:
+    rows = _safe_rows(
+        supabase.table(table_name)
+        .select("id, name, parent_id")
+        .eq("is_active", True)
+        .order("name")
+        .limit(4000)
+    )
+    nodes: Dict[int, Dict[str, Any]] = {}
+    for row in rows:
+        category_id = _safe_int(row.get("id"), -1)
+        if category_id <= 0:
+            continue
+        parent_raw = row.get("parent_id")
+        try:
+            parent_id = int(parent_raw) if parent_raw is not None else None
+        except (TypeError, ValueError):
+            parent_id = None
+        nodes[category_id] = {
+            "id": category_id,
+            "name": str(row.get("name") or f"Category {category_id}"),
+            "parent_id": parent_id,
+        }
+    return nodes
+
+
+def _resolve_category_root_and_second(
+    category_id: int,
+    *,
+    nodes: Dict[int, Dict[str, Any]],
+) -> Tuple[int, int]:
+    if category_id <= 0 or category_id not in nodes:
+        return 0, 0
+
+    path: List[int] = []
+    visited: Set[int] = set()
+    current = category_id
+    while current > 0 and current not in visited and current in nodes:
+        visited.add(current)
+        path.append(current)
+        parent_id = nodes[current].get("parent_id")
+        if parent_id is None or parent_id not in nodes:
+            break
+        current = int(parent_id)
+
+    if not path:
+        return 0, 0
+
+    root_id = path[-1]
+    second_level_id = path[-2] if len(path) >= 2 else root_id
+    return root_id, second_level_id
+
+
+def _resolve_category_hierarchy_pairs(
+    category_ids: List[int],
+    *,
+    nodes: Dict[int, Dict[str, Any]],
+) -> List[Tuple[int, int]]:
+    resolved_pairs: List[Tuple[int, int]] = []
+    seen: Set[Tuple[int, int]] = set()
+    for category_id in _normalize_exam_ids(category_ids):
+        root_id, second_level_id = _resolve_category_root_and_second(category_id, nodes=nodes)
+        pair = (root_id, second_level_id)
+        if pair in seen:
+            continue
+        seen.add(pair)
+        resolved_pairs.append(pair)
+    return resolved_pairs or [(0, 0)]
+
+
+def _mains_question_text_from_content_data(data: Dict[str, Any]) -> str:
+    return str(
+        data.get("question_text")
+        or data.get("question_statement")
+        or data.get("question")
+        or ""
+    ).strip()
+
+
+def _collection_performance_source_kind(collection_row: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(collection_row, dict):
+        return "ai"
+    return "program" if (_resolve_series_id_from_collection_row(collection_row) or 0) > 0 else "ai"
+
+
+def _build_performance_category_analysis(
+    *,
+    category_name: str,
+    content_label: str,
+    source_kind: str,
+    is_quiz: bool,
+    subcategories: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    sorted_rows = sorted(
+        subcategories,
+        key=lambda row: (-_safe_float(row.get("percentage")), -_safe_int(row.get("total_questions")), str(row.get("name") or "").lower()),
+    )
+    if not sorted_rows:
+        return {
+            "title": f"{category_name} AI Analysis",
+            "summary": f"No sub-category performance has been recorded for {category_name} yet.",
+            "points": [
+                f"Attempt more {content_label.lower()} items inside {category_name} to activate analysis.",
+            ],
+        }
+
+    strongest = sorted_rows[0]
+    weakest = min(
+        sorted_rows,
+        key=lambda row: (_safe_float(row.get("percentage")), -_safe_int(row.get("total_questions")), str(row.get("name") or "").lower()),
+    )
+    source_label = "AI-based" if source_kind == "ai" else "program-based"
+
+    if is_quiz:
+        summary = (
+            f"{source_label.capitalize()} {content_label} performance in {category_name} is strongest in "
+            f"{strongest.get('name')} at {_safe_float(strongest.get('percentage')):.1f}%, while "
+            f"{weakest.get('name')} is currently the biggest marks-leak zone."
+        )
+        points = [
+            f"Best conversion is in {strongest.get('name')} with {max(0, _safe_int(strongest.get('correct_count')))} correct answers.",
+            f"Rework {weakest.get('name')}: incorrect {max(0, _safe_int(weakest.get('incorrect_count')))}, unanswered {max(0, _safe_int(weakest.get('unanswered_count')))}.",
+        ]
+    else:
+        summary = (
+            f"{source_label.capitalize()} mains performance in {category_name} shows the best marks conversion in "
+            f"{strongest.get('name')} at {_safe_float(strongest.get('percentage')):.1f}%, while "
+            f"{weakest.get('name')} needs the most correction work."
+        )
+        points = [
+            f"Highest return is {strongest.get('name')} with {_safe_float(strongest.get('total_score')):.1f}/{_safe_float(strongest.get('max_total_score')):.1f}.",
+            f"Priority repair area is {weakest.get('name')} where the current score is {_safe_float(weakest.get('total_score')):.1f}/{_safe_float(weakest.get('max_total_score')):.1f}.",
+        ]
+
+    if strongest.get("name") != weakest.get("name"):
+        points.append(
+            f"Bridge the gap by borrowing the answer pattern from {strongest.get('name')} and applying it to {weakest.get('name')} next."
+        )
+    return {
+        "title": f"{category_name} AI Analysis",
+        "summary": summary,
+        "points": points[:3],
+    }
+
+
+def _build_user_performance_audit_bundle(
+    *,
+    user_id: str,
+    supabase: Client,
+    limit: int,
+) -> Dict[str, Any]:
+    attempts = _safe_rows(
+        supabase.table("user_quiz_attempts")
+        .select("id, collection_id, details, created_at")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    evaluations = _safe_rows(
+        supabase.table("user_mains_evaluations")
+        .select("id, question_id, question_text, score, max_score, created_at")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+
+    quiz_nodes = _fetch_category_hierarchy_nodes(table_name="categories", supabase=supabase)
+    mains_nodes = _fetch_category_hierarchy_nodes(table_name=MAINS_CATEGORIES_TABLE, supabase=supabase)
+    quiz_name_map = {0: "Uncategorized", **{category_id: str(node.get("name") or f"Category {category_id}") for category_id, node in quiz_nodes.items()}}
+    mains_name_map = {0: "Uncategorized", **{category_id: str(node.get("name") or f"Mains Category {category_id}") for category_id, node in mains_nodes.items()}}
+
+    collection_ids = sorted({
+        _safe_int(row.get("collection_id"))
+        for row in attempts
+        if _safe_int(row.get("collection_id")) > 0
+    })
+    collection_map: Dict[int, Dict[str, Any]] = {}
+    if collection_ids:
+        collection_rows = _safe_rows(
+            supabase.table("collections")
+            .select("id, title, series_id, meta")
+            .in_("id", collection_ids)
+        )
+        for row in collection_rows:
+            collection_id = _safe_int(row.get("id"), -1)
+            if collection_id <= 0:
+                continue
+            collection_map[collection_id] = row
+
+    expanded_cache: Dict[int, Dict[int, CollectionTestQuestion]] = {}
+    for collection_id in collection_ids:
+        try:
+            expanded_questions = _expand_questions(collection_id, supabase)
+        except Exception:
+            expanded_questions = []
+        expanded_cache[collection_id] = {
+            _safe_int(question.item_id): question
+            for question in expanded_questions
+            if _safe_int(question.item_id) > 0
+        }
+
+    section_labels = {
+        "gk": "GK Quiz",
+        "maths": "Maths Quiz",
+        "passage": "Passage Quiz",
+        "mains": "Mains Questions",
+    }
+    source_buckets: Dict[str, Dict[str, Dict[str, Any]]] = {
+        content_type: {
+            "ai": {
+                "summary": _performance_metric_stats_template(is_quiz=content_type != "mains"),
+                "first_level": {},
+                "second_level": {},
+            },
+            "program": {
+                "summary": _performance_metric_stats_template(is_quiz=content_type != "mains"),
+                "first_level": {},
+                "second_level": {},
+            },
+        }
+        for content_type in ("gk", "maths", "passage", "mains")
+    }
+
+    def _ensure_bucket(content_type: str, source_kind: str, first_id: int, second_id: int) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        bucket = source_buckets[content_type][source_kind]
+        first_stats = bucket["first_level"].setdefault(first_id, _performance_metric_stats_template(is_quiz=content_type != "mains"))
+        second_level_map = bucket["second_level"].setdefault(first_id, {})
+        second_stats = second_level_map.setdefault(second_id, _performance_metric_stats_template(is_quiz=content_type != "mains"))
+        return first_stats, second_stats
+
+    for attempt in attempts:
+        collection_id = _safe_int(attempt.get("collection_id"))
+        collection_row = collection_map.get(collection_id)
+        source_kind = _collection_performance_source_kind(collection_row)
+        details = attempt.get("details") if isinstance(attempt.get("details"), list) else []
+        question_map = expanded_cache.get(collection_id, {})
+
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            item_id = _safe_int(detail.get("item_id"), -1)
+            if item_id <= 0:
+                continue
+            question = question_map.get(item_id)
+            if not question:
+                continue
+            quiz_type = (
+                question.quiz_type.value
+                if hasattr(question.quiz_type, "value")
+                else str(question.quiz_type or "")
+            ).strip().lower()
+            if quiz_type not in {"gk", "maths", "passage"}:
+                continue
+
+            selected_option = detail.get("selected_option")
+            is_correct = bool(detail.get("is_correct"))
+            if selected_option in (None, ""):
+                outcome = "unanswered"
+            elif is_correct:
+                outcome = "correct"
+            else:
+                outcome = "incorrect"
+
+            _accumulate_quiz_performance_stats(source_buckets[quiz_type][source_kind]["summary"], outcome)
+            resolved_pairs = _resolve_category_hierarchy_pairs(question.category_ids, nodes=quiz_nodes)
+            for first_id, second_id in resolved_pairs:
+                first_stats, second_stats = _ensure_bucket(quiz_type, source_kind, first_id, second_id)
+                _accumulate_quiz_performance_stats(first_stats, outcome)
+                _accumulate_quiz_performance_stats(second_stats, outcome)
+
+    evaluation_question_ids = sorted({
+        _safe_int(row.get("question_id"))
+        for row in evaluations
+        if _safe_int(row.get("question_id")) > 0
+    })
+    ai_mains_map: Dict[int, Dict[str, Any]] = {}
+    if evaluation_question_ids:
+        ai_rows = _safe_rows(
+            supabase.table("user_ai_mains_questions")
+            .select("id, question_text, mains_category_ids, category_ids, author_id")
+            .eq("author_id", user_id)
+            .in_("id", evaluation_question_ids)
+        )
+        for row in ai_rows:
+            question_id = _safe_int(row.get("id"), -1)
+            if question_id <= 0:
+                continue
+            ai_mains_map[question_id] = row
+
+    content_item_map: Dict[int, Dict[str, Any]] = {}
+    content_item_collection_rows: Dict[int, List[int]] = {}
+    if evaluation_question_ids:
+        content_rows = _safe_rows(
+            supabase.table("content_items")
+            .select("id, type, data")
+            .in_("id", evaluation_question_ids)
+        )
+        for row in content_rows:
+            content_id = _safe_int(row.get("id"), -1)
+            if content_id <= 0:
+                continue
+            content_item_map[content_id] = row
+
+        collection_item_rows = _safe_rows(
+            supabase.table("collection_items")
+            .select("content_item_id, collection_id")
+            .in_("content_item_id", evaluation_question_ids)
+        )
+        for row in collection_item_rows:
+            content_item_id = _safe_int(row.get("content_item_id"), -1)
+            collection_id = _safe_int(row.get("collection_id"), -1)
+            if content_item_id <= 0 or collection_id <= 0:
+                continue
+            content_item_collection_rows.setdefault(content_item_id, []).append(collection_id)
+
+        mains_collection_ids = sorted({
+            collection_id
+            for rows in content_item_collection_rows.values()
+            for collection_id in rows
+            if collection_id > 0
+        })
+        if mains_collection_ids:
+            mains_collection_rows = _safe_rows(
+                supabase.table("collections")
+                .select("id, title, series_id, meta")
+                .in_("id", mains_collection_ids)
+            )
+            for row in mains_collection_rows:
+                collection_id = _safe_int(row.get("id"), -1)
+                if collection_id <= 0:
+                    continue
+                collection_map[collection_id] = row
+
+    for evaluation in evaluations:
+        question_id = _safe_int(evaluation.get("question_id"))
+        score = max(0.0, _safe_float(evaluation.get("score"), 0.0))
+        max_score = _safe_float(evaluation.get("max_score"), 10.0)
+        if max_score <= 0:
+            max_score = 10.0
+
+        selected_source_kind = "ai"
+        selected_category_ids: List[int] = []
+
+        ai_row = ai_mains_map.get(question_id)
+        content_item_row = content_item_map.get(question_id)
+        content_data = content_item_row.get("data") if isinstance(content_item_row, dict) and isinstance(content_item_row.get("data"), dict) else {}
+        content_question_text = _mains_question_text_from_content_data(content_data) if isinstance(content_data, dict) else ""
+        evaluation_text = str(evaluation.get("question_text") or "").strip()
+        ai_question_text = str((ai_row or {}).get("question_text") or "").strip()
+
+        content_collection_ids = content_item_collection_rows.get(question_id, [])
+        content_collection = next((collection_map.get(collection_id) for collection_id in content_collection_ids if collection_id in collection_map), None)
+        content_source_kind = _collection_performance_source_kind(content_collection)
+
+        if ai_row and content_item_row:
+            if evaluation_text and ai_question_text and evaluation_text == ai_question_text and evaluation_text != content_question_text:
+                selected_source_kind = "ai"
+            elif evaluation_text and content_question_text and evaluation_text == content_question_text and evaluation_text != ai_question_text:
+                selected_source_kind = content_source_kind
+            elif content_source_kind == "program":
+                selected_source_kind = "program"
+            else:
+                selected_source_kind = "ai"
+        elif content_item_row:
+            selected_source_kind = content_source_kind
+        elif ai_row:
+            selected_source_kind = "ai"
+
+        if selected_source_kind == "ai" and ai_row:
+            selected_category_ids = _normalize_exam_ids(
+                ai_row.get("mains_category_ids") or ai_row.get("category_ids") or []
+            )
+        elif content_item_row and isinstance(content_data, dict):
+            selected_category_ids = _extract_mains_category_ids_from_content_data(content_data)
+
+        _accumulate_mains_performance_stats(source_buckets["mains"][selected_source_kind]["summary"], score=score, max_score=max_score)
+        resolved_pairs = _resolve_category_hierarchy_pairs(selected_category_ids, nodes=mains_nodes)
+        for first_id, second_id in resolved_pairs:
+            first_stats, second_stats = _ensure_bucket("mains", selected_source_kind, first_id, second_id)
+            _accumulate_mains_performance_stats(first_stats, score=score, max_score=max_score)
+            _accumulate_mains_performance_stats(second_stats, score=score, max_score=max_score)
+
+    overview_sections: Dict[str, Any] = {}
+    detail_index: Dict[str, Dict[str, Dict[int, Dict[str, Any]]]] = {
+        content_type: {"ai": {}, "program": {}}
+        for content_type in ("gk", "maths", "passage", "mains")
+    }
+
+    for content_type in ("gk", "maths", "passage", "mains"):
+        is_quiz = content_type != "mains"
+        name_map = quiz_name_map if is_quiz else mains_name_map
+        overview_sources: Dict[str, Any] = {}
+
+        for source_kind in ("ai", "program"):
+            bucket = source_buckets[content_type][source_kind]
+            first_categories: List[Dict[str, Any]] = []
+            for first_id, stats in bucket["first_level"].items():
+                metric_payload = (
+                    _build_quiz_performance_summary(stats)
+                    if is_quiz
+                    else _build_mains_performance_summary(stats)
+                )
+                detail_rows = bucket["second_level"].get(first_id) or {}
+                has_children = len([key for key in detail_rows.keys() if key != first_id]) > 0
+                first_categories.append(
+                    {
+                        "id": first_id if first_id > 0 else None,
+                        "name": name_map.get(first_id, "Uncategorized"),
+                        "has_children": has_children,
+                        **metric_payload,
+                    }
+                )
+
+                subcategories: List[Dict[str, Any]] = []
+                for second_id, second_stats in detail_rows.items():
+                    second_payload = (
+                        _build_quiz_performance_summary(second_stats)
+                        if is_quiz
+                        else _build_mains_performance_summary(second_stats)
+                    )
+                    second_name = name_map.get(second_id, "Uncategorized")
+                    if second_id == first_id and any(key != first_id for key in detail_rows.keys()):
+                        second_name = f"{second_name} (General)"
+                    subcategories.append(
+                        {
+                            "id": second_id if second_id > 0 else None,
+                            "name": second_name,
+                            "proficiency_label": _performance_proficiency_label(_safe_float(second_payload.get("percentage"))),
+                            **second_payload,
+                        }
+                    )
+
+                subcategories.sort(
+                    key=lambda row: (
+                        -_safe_int(row.get("total_questions")),
+                        -_safe_float(row.get("percentage")),
+                        str(row.get("name") or "").lower(),
+                    )
+                )
+                detail_index[content_type][source_kind][first_id] = {
+                    "category": {
+                        "id": first_id if first_id > 0 else None,
+                        "name": name_map.get(first_id, "Uncategorized"),
+                    },
+                    "summary": {
+                        **metric_payload,
+                    },
+                    "subcategories": subcategories,
+                    "analysis": _build_performance_category_analysis(
+                        category_name=name_map.get(first_id, "Uncategorized"),
+                        content_label=section_labels[content_type],
+                        source_kind=source_kind,
+                        is_quiz=is_quiz,
+                        subcategories=subcategories,
+                    ),
+                }
+
+            first_categories.sort(
+                key=lambda row: (
+                    -_safe_int(row.get("total_questions")),
+                    -_safe_float(row.get("percentage")),
+                    str(row.get("name") or "").lower(),
+                )
+            )
+            overview_sources[source_kind] = {
+                "source_kind": source_kind,
+                **(
+                    _build_quiz_performance_summary(bucket["summary"])
+                    if is_quiz
+                    else _build_mains_performance_summary(bucket["summary"])
+                ),
+                "first_level_categories": first_categories,
+            }
+
+        overview_sections[content_type] = {
+            "content_type": content_type,
+            "label": section_labels[content_type],
+            "is_quiz": is_quiz,
+            "sources": overview_sources,
+        }
+
+    return {
+        "overview": {
+            "generated_at": _utc_now().isoformat(),
+            "sections": overview_sections,
+        },
+        "detail_index": detail_index,
+    }
+
+
+@router.get("/user/performance-audit")
+def get_user_performance_audit(
+    limit: int = Query(default=180, ge=20, le=500),
+    supabase: Client = Depends(get_supabase_client),
+    user_id: Optional[str] = Depends(get_user_id),
+):
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    bundle = _build_user_performance_audit_bundle(user_id=user_id, supabase=supabase, limit=limit)
+    return bundle["overview"]
+
+
+@router.get("/user/performance-audit/{content_type}/sources/{source_kind}/categories/{category_id}")
+def get_user_performance_category_detail(
+    content_type: str,
+    source_kind: str,
+    category_id: int,
+    limit: int = Query(default=180, ge=20, le=500),
+    supabase: Client = Depends(get_supabase_client),
+    user_id: Optional[str] = Depends(get_user_id),
+):
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    normalized_content_type = str(content_type or "").strip().lower()
+    normalized_source_kind = str(source_kind or "").strip().lower()
+    if normalized_content_type not in {"gk", "maths", "passage", "mains"}:
+        raise HTTPException(status_code=404, detail="Unsupported content type")
+    if normalized_source_kind not in {"ai", "program"}:
+        raise HTTPException(status_code=404, detail="Unsupported source type")
+
+    bundle = _build_user_performance_audit_bundle(user_id=user_id, supabase=supabase, limit=limit)
+    detail_payload = (
+        bundle["detail_index"]
+        .get(normalized_content_type, {})
+        .get(normalized_source_kind, {})
+        .get(category_id)
+    )
+    if not detail_payload:
+        raise HTTPException(status_code=404, detail="Category detail not found")
+
+    overview_section = bundle["overview"]["sections"][normalized_content_type]
+    source_overview = overview_section["sources"][normalized_source_kind]
+    return {
+        "generated_at": bundle["overview"]["generated_at"],
+        "content_type": normalized_content_type,
+        "label": overview_section["label"],
+        "source_kind": normalized_source_kind,
+        "source_summary": {
+            key: value
+            for key, value in source_overview.items()
+            if key != "first_level_categories"
+        },
+        **detail_payload,
+    }
+
+
 @router.get("/user/dashboard-analytics")
 def get_user_dashboard_analytics(
     limit: int = Query(default=120, ge=20, le=500),

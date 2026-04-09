@@ -1,0 +1,481 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { AlertCircle, ArrowRight, Loader2 } from "lucide-react";
+
+import { useAuth } from "@/context/AuthContext";
+import {
+  DASHBOARD_CONTENT_TYPES,
+  DASHBOARD_SECTION_META,
+  type DashboardContentType,
+} from "@/lib/dashboardSections";
+import { premiumApi } from "@/lib/premiumApi";
+import type {
+  PerformanceAuditMainsCategory,
+  PerformanceAuditMainsMetrics,
+  PerformanceAuditMainsSection,
+  PerformanceAuditOverviewPayload,
+  PerformanceAuditQuizCategory,
+  PerformanceAuditQuizMetrics,
+  PerformanceAuditQuizSection,
+  PerformanceAuditSourceKind,
+} from "@/types/premium";
+
+const sourceLabels: Record<PerformanceAuditSourceKind, string> = {
+  ai: "AI Based",
+  program: "Program Based",
+};
+
+function formatPercentage(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
+function formatMarks(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function formatTimestamp(value?: string): string {
+  if (!value) return "n/a";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "n/a";
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function resolveDefaultSourceKind(
+  aiMetrics: { total_questions: number },
+  programMetrics: { total_questions: number },
+): PerformanceAuditSourceKind {
+  if (programMetrics.total_questions > 0 && aiMetrics.total_questions === 0) return "program";
+  return "ai";
+}
+
+function QuizMetricGrid({
+  metrics,
+  compact = false,
+}: {
+  metrics: PerformanceAuditQuizMetrics;
+  compact?: boolean;
+}) {
+  const cardClass = compact
+    ? "rounded-[18px] border border-[#dce3fb] bg-white p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]"
+    : "rounded-[18px] border border-[#dce3fb] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]";
+  return (
+    <div className={`grid gap-3 ${compact ? "grid-cols-2 xl:grid-cols-3" : "grid-cols-2 xl:grid-cols-5"}`}>
+      <article className={cardClass}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Attempted</p>
+        <p className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-[#182033]">{metrics.attempted_questions}</p>
+      </article>
+      <article className={cardClass}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Correct</p>
+        <p className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-[#15803d]">{metrics.correct_count}</p>
+      </article>
+      <article className={cardClass}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Incorrect</p>
+        <p className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-[#b45309]">{metrics.incorrect_count}</p>
+      </article>
+      <article className={cardClass}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Not Attempted</p>
+        <p className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-[#c26a00]">{metrics.unanswered_count}</p>
+      </article>
+      <article className={cardClass}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Percentage</p>
+        <p className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-[#1235ae]">{formatPercentage(metrics.percentage)}</p>
+      </article>
+    </div>
+  );
+}
+
+function MainsMetricGrid({
+  metrics,
+  compact = false,
+}: {
+  metrics: PerformanceAuditMainsMetrics;
+  compact?: boolean;
+}) {
+  const cardClass = compact
+    ? "rounded-[18px] border border-[#dce3fb] bg-white p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]"
+    : "rounded-[18px] border border-[#dce3fb] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]";
+  return (
+    <div className={`grid gap-3 ${compact ? "grid-cols-2 xl:grid-cols-3" : "grid-cols-2 xl:grid-cols-4"}`}>
+      <article className={cardClass}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Questions</p>
+        <p className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-[#182033]">{metrics.total_questions}</p>
+      </article>
+      <article className={cardClass}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Marks</p>
+        <p className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-[#182033]">
+          {formatMarks(metrics.total_score)} / {formatMarks(metrics.max_total_score)}
+        </p>
+      </article>
+      <article className={cardClass}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Percentage</p>
+        <p className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-[#1235ae]">{formatPercentage(metrics.percentage)}</p>
+      </article>
+    </div>
+  );
+}
+
+function QuizCategoryList({
+  contentType,
+  sourceKind,
+  categories,
+}: {
+  contentType: DashboardContentType;
+  sourceKind: PerformanceAuditSourceKind;
+  categories: PerformanceAuditQuizCategory[];
+}) {
+  if (categories.length === 0) {
+    return <p className="rounded-[18px] border border-dashed border-[#d5dcf2] bg-white px-4 py-5 text-[13px] leading-6 text-[#7b86a4]">No first-level category performance recorded yet.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {categories.map((category) => {
+        const href =
+          category.has_children && category.id
+            ? `/dashboard/subject/${contentType}/${sourceKind}/${category.id}`
+            : null;
+
+        const content = (
+          <div className="flex flex-col gap-3 rounded-[18px] border border-[#dce3fb] bg-white px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:border-[#bdd1ff]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[16px] font-semibold tracking-[-0.03em] text-[#182033]">{category.name}</p>
+                <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">
+                  Attempted {category.attempted_questions} | Correct {category.correct_count} | Incorrect {category.incorrect_count} | Not Attempted {category.unanswered_count}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#1235ae]">{formatPercentage(category.percentage)}</p>
+                <p className="text-[12px] leading-6 text-[#6c7590]">{category.total_questions} questions</p>
+              </div>
+            </div>
+            {href ? (
+              <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#1739ac]">
+                Open subcategory analysis
+                <ArrowRight className="h-3.5 w-3.5" />
+              </span>
+            ) : (
+              <span className="text-[12px] font-semibold text-[#9aa7c5]">No deeper breakdown yet</span>
+            )}
+          </div>
+        );
+
+        return href ? (
+          <Link key={`${sourceKind}-${category.id ?? category.name}`} href={href} className="block">
+            {content}
+          </Link>
+        ) : (
+          <div key={`${sourceKind}-${category.id ?? category.name}`}>{content}</div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MainsCategoryList({
+  contentType,
+  sourceKind,
+  categories,
+}: {
+  contentType: DashboardContentType;
+  sourceKind: PerformanceAuditSourceKind;
+  categories: PerformanceAuditMainsCategory[];
+}) {
+  if (categories.length === 0) {
+    return <p className="rounded-[18px] border border-dashed border-[#d5dcf2] bg-white px-4 py-5 text-[13px] leading-6 text-[#7b86a4]">No first-level category performance recorded yet.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {categories.map((category) => {
+        const href =
+          category.has_children && category.id
+            ? `/dashboard/subject/${contentType}/${sourceKind}/${category.id}`
+            : null;
+
+        const content = (
+          <div className="flex flex-col gap-3 rounded-[18px] border border-[#dce3fb] bg-white px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:border-[#bdd1ff]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[16px] font-semibold tracking-[-0.03em] text-[#182033]">{category.name}</p>
+                <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">
+                  Questions {category.total_questions} | Marks {formatMarks(category.total_score)} / {formatMarks(category.max_total_score)}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#1235ae]">{formatPercentage(category.percentage)}</p>
+              </div>
+            </div>
+            {href ? (
+              <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#1739ac]">
+                Open subcategory analysis
+                <ArrowRight className="h-3.5 w-3.5" />
+              </span>
+            ) : (
+              <span className="text-[12px] font-semibold text-[#9aa7c5]">No deeper breakdown yet</span>
+            )}
+          </div>
+        );
+
+        return href ? (
+          <Link key={`${sourceKind}-${category.id ?? category.name}`} href={href} className="block">
+            {content}
+          </Link>
+        ) : (
+          <div key={`${sourceKind}-${category.id ?? category.name}`}>{content}</div>
+        );
+      })}
+    </div>
+  );
+}
+
+function QuizSectionCard({ section }: { section: PerformanceAuditQuizSection }) {
+  const meta = DASHBOARD_SECTION_META[section.content_type];
+  const Icon = meta.icon;
+  const [activeSource, setActiveSource] = useState<PerformanceAuditSourceKind>(() =>
+    resolveDefaultSourceKind(section.sources.ai, section.sources.program),
+  );
+  const source = section.sources[activeSource];
+
+  return (
+    <section className="rounded-[34px] bg-[linear-gradient(180deg,#f1f4ff_0%,#edf1ff_100%)] px-6 py-6 sm:px-8 sm:py-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-11 w-11 items-center justify-center rounded-[14px] border border-[#cfe0ff] bg-white text-[#1739ac] shadow-[0_10px_20px_rgba(19,55,173,0.08)]">
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="font-sans text-[30px] font-semibold leading-[1.06] tracking-[-0.05em] text-[#141b2d] sm:text-[34px]">
+              {section.label}
+            </h2>
+            <p className="text-[14px] leading-7 text-[#636b86]">Overall performance and first-level category marks.</p>
+          </div>
+        </div>
+        <div className="inline-flex rounded-full bg-white p-1 shadow-[0_14px_28px_rgba(21,31,76,0.08)]">
+          {(["ai", "program"] as const).map((sourceKind) => {
+            const isActive = sourceKind === activeSource;
+            return (
+              <button
+                key={`${section.content_type}-${sourceKind}-tab`}
+                type="button"
+                onClick={() => setActiveSource(sourceKind)}
+                className={`rounded-full px-4 py-2 text-[12px] font-semibold transition ${
+                  isActive ? "bg-[#173aa9] text-white shadow-[0_12px_24px_rgba(23,58,169,0.22)]" : "text-[#5f6984]"
+                }`}
+              >
+                {sourceLabels[sourceKind]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <article className="mt-6 rounded-[26px] border border-[#d9e2fb] bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(255,255,255,1)_100%)] p-5 shadow-[0_18px_40px_rgba(80,103,170,0.08)]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.28em] text-[#5f7aa9]">{sourceLabels[activeSource]}</p>
+            <h3 className="mt-2 text-[16px] font-semibold tracking-[-0.03em] text-[#182033]">
+              {section.label} Overall Performance
+            </h3>
+          </div>
+          <div className="rounded-full border border-[#b9d5ff] bg-[#eef5ff] px-3 py-1 text-[12px] font-semibold text-[#1739ac]">
+            {formatPercentage(source.percentage)}
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <QuizMetricGrid metrics={source} />
+        </div>
+
+        <div className="mt-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h4 className="text-[12px] font-semibold uppercase tracking-[0.28em] text-[#5f7aa9]">Subject Wise Marks</h4>
+            <span className="text-[12px] leading-6 text-[#6c7590]">Click a category to open second-level analysis</span>
+          </div>
+          <div className="mt-3">
+            <QuizCategoryList contentType={section.content_type} sourceKind={activeSource} categories={source.first_level_categories} />
+          </div>
+        </div>
+      </article>
+    </section>
+  );
+}
+
+function MainsSectionCard({ section }: { section: PerformanceAuditMainsSection }) {
+  const meta = DASHBOARD_SECTION_META.mains;
+  const Icon = meta.icon;
+  const [activeSource, setActiveSource] = useState<PerformanceAuditSourceKind>(() =>
+    resolveDefaultSourceKind(section.sources.ai, section.sources.program),
+  );
+  const source = section.sources[activeSource];
+
+  return (
+    <section className="rounded-[34px] bg-[linear-gradient(180deg,#f1f4ff_0%,#edf1ff_100%)] px-6 py-6 sm:px-8 sm:py-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-11 w-11 items-center justify-center rounded-[14px] border border-[#cfe0ff] bg-white text-[#1739ac] shadow-[0_10px_20px_rgba(19,55,173,0.08)]">
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="font-sans text-[30px] font-semibold leading-[1.06] tracking-[-0.05em] text-[#141b2d] sm:text-[34px]">
+              {section.label}
+            </h2>
+            <p className="text-[14px] leading-7 text-[#636b86]">Question count, marks, percentage, and first-level category breakdown.</p>
+          </div>
+        </div>
+        <div className="inline-flex rounded-full bg-white p-1 shadow-[0_14px_28px_rgba(21,31,76,0.08)]">
+          {(["ai", "program"] as const).map((sourceKind) => {
+            const isActive = sourceKind === activeSource;
+            return (
+              <button
+                key={`mains-${sourceKind}-tab`}
+                type="button"
+                onClick={() => setActiveSource(sourceKind)}
+                className={`rounded-full px-4 py-2 text-[12px] font-semibold transition ${
+                  isActive ? "bg-[#173aa9] text-white shadow-[0_12px_24px_rgba(23,58,169,0.22)]" : "text-[#5f6984]"
+                }`}
+              >
+                {sourceLabels[sourceKind]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <article className="mt-6 rounded-[26px] border border-[#d9e2fb] bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(255,255,255,1)_100%)] p-5 shadow-[0_18px_40px_rgba(80,103,170,0.08)]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.28em] text-[#5f7aa9]">{sourceLabels[activeSource]}</p>
+            <h3 className="mt-2 text-[16px] font-semibold tracking-[-0.03em] text-[#182033]">Mains Overall Performance</h3>
+          </div>
+          <div className="rounded-full border border-[#b9d5ff] bg-[#eef5ff] px-3 py-1 text-[12px] font-semibold text-[#1739ac]">
+            {formatPercentage(source.percentage)}
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <MainsMetricGrid metrics={source} />
+        </div>
+
+        <div className="mt-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h4 className="text-[12px] font-semibold uppercase tracking-[0.28em] text-[#5f7aa9]">Subject Wise Marks</h4>
+            <span className="text-[12px] leading-6 text-[#6c7590]">Click a category to open second-level analysis</span>
+          </div>
+          <div className="mt-3">
+            <MainsCategoryList contentType="mains" sourceKind={activeSource} categories={source.first_level_categories} />
+          </div>
+        </div>
+      </article>
+    </section>
+  );
+}
+
+export default function LearnerPerformanceAudit() {
+  const { loading: authLoading, isAuthenticated, showLoginModal } = useAuth();
+  const [payload, setPayload] = useState<PerformanceAuditOverviewPayload | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
+    let active = true;
+
+    premiumApi
+      .get<PerformanceAuditOverviewPayload>("/user/performance-audit")
+      .then((response) => {
+        if (!active) return;
+        setPayload(response.data);
+        setError("");
+      })
+      .catch((err: unknown) => {
+        if (!active) return;
+        const detail =
+          typeof err === "object" &&
+          err !== null &&
+          "response" in err &&
+          (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+            ? String((err as { response?: { data?: { detail?: string } } }).response?.data?.detail)
+            : "Failed to load performance audit.";
+        setError(detail);
+        setPayload(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [authLoading, isAuthenticated]);
+
+  const loading = authLoading || (isAuthenticated && !payload && !error);
+  const sections = useMemo(() => {
+    if (!payload) return [];
+    return DASHBOARD_CONTENT_TYPES.map((contentType) => payload.sections[contentType]);
+  }, [payload]);
+
+  return (
+    <div className="space-y-6 text-[#192133]">
+      <section className="rounded-[30px] border border-[#dbe3fb] bg-[radial-gradient(circle_at_top_left,_rgba(223,232,255,0.95),_rgba(255,255,255,1)_42%,_rgba(241,245,255,0.98)_100%)] p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-3xl space-y-3">
+            <p className="text-xs font-black uppercase tracking-[0.32em] text-[#1d3b8b]">Performance Audit</p>
+            <h2 className="font-sans text-[34px] font-semibold leading-[1.08] tracking-[-0.05em] text-[#1737af] sm:text-[40px]">
+              Marks-focused evaluation across all content types.
+            </h2>
+            <p className="text-[14px] leading-7 text-[#6d7690]">
+              AI-based content and program-based content are split separately. Each section shows overall marks first, then first-level category performance. Open a category to view second-level breakdown and AI analysis.
+            </p>
+          </div>
+          <div className="rounded-[18px] bg-white px-4 py-3 text-[12px] leading-6 text-[#6c7590] shadow-[0_14px_28px_rgba(21,31,76,0.08)]">
+            Updated {formatTimestamp(payload?.generated_at)}
+          </div>
+        </div>
+      </section>
+
+      {loading ? (
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-8 text-slate-600">
+          <Loader2 className="h-5 w-5 animate-spin text-[#0f2e87]" />
+          Loading performance audit...
+        </div>
+      ) : null}
+
+      {!loading && !isAuthenticated ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-8">
+          <p className="text-slate-700">Login is required to view your marks and category-wise performance.</p>
+          <button
+            type="button"
+            onClick={showLoginModal}
+            className="mt-4 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Login
+          </button>
+        </div>
+      ) : null}
+
+      {!loading && isAuthenticated && error ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-6 text-rose-700">
+          <AlertCircle className="mt-0.5 h-5 w-5" />
+          <p>{error}</p>
+        </div>
+      ) : null}
+
+      {!loading && isAuthenticated && payload ? (
+        <div className="space-y-6">
+          {sections.map((section) =>
+            section.is_quiz ? (
+              <QuizSectionCard key={section.content_type} section={section} />
+            ) : (
+              <MainsSectionCard key={section.content_type} section={section} />
+            ),
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}

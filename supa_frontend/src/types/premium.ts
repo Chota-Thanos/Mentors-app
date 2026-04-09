@@ -375,6 +375,133 @@ export interface DashboardAnalyticsPayload {
   purchase_overview?: DashboardPurchaseOverview;
 }
 
+export type PerformanceAuditContentType = "gk" | "maths" | "passage" | "mains";
+export type PerformanceAuditSourceKind = "ai" | "program";
+
+export interface PerformanceAuditQuizMetrics {
+  total_questions: number;
+  attempted_questions: number;
+  correct_count: number;
+  incorrect_count: number;
+  unanswered_count: number;
+  percentage: number;
+}
+
+export interface PerformanceAuditMainsMetrics {
+  total_questions: number;
+  total_score: number;
+  max_total_score: number;
+  percentage: number;
+}
+
+export interface PerformanceAuditQuizCategory extends PerformanceAuditQuizMetrics {
+  id?: number | null;
+  name: string;
+  has_children: boolean;
+}
+
+export interface PerformanceAuditMainsCategory extends PerformanceAuditMainsMetrics {
+  id?: number | null;
+  name: string;
+  has_children: boolean;
+}
+
+export interface PerformanceAuditQuizSubcategory extends PerformanceAuditQuizMetrics {
+  id?: number | null;
+  name: string;
+  proficiency_label: string;
+}
+
+export interface PerformanceAuditMainsSubcategory extends PerformanceAuditMainsMetrics {
+  id?: number | null;
+  name: string;
+  proficiency_label: string;
+}
+
+export interface PerformanceAuditAnalysis {
+  title: string;
+  summary: string;
+  points: string[];
+}
+
+export interface PerformanceAuditQuizSource extends PerformanceAuditQuizMetrics {
+  source_kind: PerformanceAuditSourceKind;
+  first_level_categories: PerformanceAuditQuizCategory[];
+}
+
+export interface PerformanceAuditMainsSource extends PerformanceAuditMainsMetrics {
+  source_kind: PerformanceAuditSourceKind;
+  first_level_categories: PerformanceAuditMainsCategory[];
+}
+
+export interface PerformanceAuditQuizSection {
+  content_type: Exclude<PerformanceAuditContentType, "mains">;
+  label: string;
+  is_quiz: true;
+  sources: {
+    ai: PerformanceAuditQuizSource;
+    program: PerformanceAuditQuizSource;
+  };
+}
+
+export interface PerformanceAuditMainsSection {
+  content_type: "mains";
+  label: string;
+  is_quiz: false;
+  sources: {
+    ai: PerformanceAuditMainsSource;
+    program: PerformanceAuditMainsSource;
+  };
+}
+
+export interface PerformanceAuditOverviewPayload {
+  generated_at: string;
+  sections: {
+    gk: PerformanceAuditQuizSection;
+    maths: PerformanceAuditQuizSection;
+    passage: PerformanceAuditQuizSection;
+    mains: PerformanceAuditMainsSection;
+  };
+}
+
+export interface PerformanceAuditQuizDetailPayload {
+  generated_at: string;
+  content_type: Exclude<PerformanceAuditContentType, "mains">;
+  label: string;
+  source_kind: PerformanceAuditSourceKind;
+  source_summary: Omit<PerformanceAuditQuizSource, "first_level_categories" | "source_kind"> & {
+    source_kind: PerformanceAuditSourceKind;
+  };
+  category: {
+    id?: number | null;
+    name: string;
+  };
+  summary: PerformanceAuditQuizMetrics;
+  subcategories: PerformanceAuditQuizSubcategory[];
+  analysis: PerformanceAuditAnalysis;
+}
+
+export interface PerformanceAuditMainsDetailPayload {
+  generated_at: string;
+  content_type: "mains";
+  label: string;
+  source_kind: PerformanceAuditSourceKind;
+  source_summary: Omit<PerformanceAuditMainsSource, "first_level_categories" | "source_kind"> & {
+    source_kind: PerformanceAuditSourceKind;
+  };
+  category: {
+    id?: number | null;
+    name: string;
+  };
+  summary: PerformanceAuditMainsMetrics;
+  subcategories: PerformanceAuditMainsSubcategory[];
+  analysis: PerformanceAuditAnalysis;
+}
+
+export type PerformanceAuditDetailPayload =
+  | PerformanceAuditQuizDetailPayload
+  | PerformanceAuditMainsDetailPayload;
+
 export interface ChallengeLinkCreateRequest {
   title?: string;
   description?: string;
