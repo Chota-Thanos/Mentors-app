@@ -9,7 +9,7 @@ import axios from "axios";
 import { premiumApi } from "@/lib/premiumApi";
 import { toNullableRichText } from "@/lib/richText";
 import RichTextField from "@/components/ui/RichTextField";
-import type { PremiumCategory } from "@/types/premium";
+import type { PremiumCategory, PremiumExam } from "@/types/premium";
 
 type SourceLink = { title: string; url: string };
 
@@ -17,6 +17,7 @@ export default function CollectionForm() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [categories, setCategories] = useState<PremiumCategory[]>([]);
+  const [availableExams, setAvailableExams] = useState<PremiumExam[]>([]);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -30,21 +31,32 @@ export default function CollectionForm() {
   const [adminSubpageId, setAdminSubpageId] = useState("");
   const [sourcePdfUrl, setSourcePdfUrl] = useState("");
   const [sourceContentHtml, setSourceContentHtml] = useState("");
+  const [selectedExamIds, setSelectedExamIds] = useState<number[]>([]);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [sourceList, setSourceList] = useState<SourceLink[]>([{ title: "", url: "" }]);
 
   useEffect(() => {
-    const loadCategories = async () => {
+    const loadFormData = async () => {
       try {
-        const response = await premiumApi.get<PremiumCategory[]>("/categories");
-        setCategories(response.data || []);
+        const [categoryResponse, examResponse] = await Promise.all([
+          premiumApi.get<PremiumCategory[]>("/categories"),
+          premiumApi.get<PremiumExam[]>("/exams", { params: { active_only: true } }),
+        ]);
+        setCategories(categoryResponse.data || []);
+        setAvailableExams(examResponse.data || []);
       } catch (error: unknown) {
         const description = axios.isAxiosError(error) ? error.message : "Unknown error";
-        toast.error("Failed to load categories", { description });
+        toast.error("Failed to load form data", { description });
       }
     };
-    loadCategories();
+    void loadFormData();
   }, []);
+
+  const toggleExam = (id: number) => {
+    setSelectedExamIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
 
   const toggleCategory = (id: number) => {
     setSelectedCategoryIds((prev) =>
@@ -74,6 +86,7 @@ export default function CollectionForm() {
         type: "test_series",
         test_kind: "prelims",
         thumbnail_url: thumbnailUrl || null,
+        exam_ids: selectedExamIds,
         category_ids: selectedCategoryIds,
         source_list: sourceList.filter((item) => item.url.trim().length > 0),
         source_category_ids: selectedCategoryIds,
@@ -176,6 +189,31 @@ export default function CollectionForm() {
             {item.label}
           </label>
         ))}
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-medium text-slate-900">Target exams</p>
+          <span className="text-xs text-slate-500">This test appears under these exams.</span>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2 rounded border border-slate-200 bg-slate-50 p-3">
+          {availableExams.length === 0 ? (
+            <span className="text-sm text-slate-500">No active exams available.</span>
+          ) : availableExams.map((exam) => (
+            <button
+              key={exam.id}
+              type="button"
+              onClick={() => toggleExam(exam.id)}
+              className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                selectedExamIds.includes(exam.id)
+                  ? "border-indigo-500 bg-indigo-600 text-white"
+                  : "border-slate-300 bg-white text-slate-700"
+              }`}
+            >
+              {exam.name}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div>

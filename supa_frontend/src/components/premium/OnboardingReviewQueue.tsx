@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
@@ -11,7 +12,13 @@ import { toNullableRichText } from "@/lib/richText";
 import { toDisplayRoleLabel } from "@/lib/roleLabels";
 import RichTextContent from "@/components/ui/RichTextContent";
 import RichTextField from "@/components/ui/RichTextField";
-import type { ProfessionalOnboardingApplication, ProfessionalOnboardingStatus } from "@/types/premium";
+import type {
+  ProfessionalOnboardingApplication,
+  ProfessionalOnboardingAsset,
+  ProfessionalOnboardingDetails,
+  ProfessionalOnboardingStatus,
+  QuizMasterSampleMcq,
+} from "@/types/premium";
 
 type StatusFilter = ProfessionalOnboardingStatus | "all";
 
@@ -19,6 +26,135 @@ function toError(error: unknown): string {
   if (!axios.isAxiosError(error)) return "Unknown error";
   const detail = error.response?.data?.detail;
   return typeof detail === "string" && detail.trim() ? detail : error.message;
+}
+
+function AssetChips({ assets }: { assets: ProfessionalOnboardingAsset[] }) {
+  if (!assets.length) return <p className="text-xs text-slate-500">No files attached.</p>;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {assets.map((asset) => (
+        <a
+          key={`${asset.bucket}/${asset.path}`}
+          href={asset.url || undefined}
+          target="_blank"
+          rel="noreferrer"
+          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-300"
+        >
+          {asset.file_name}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function McqPreview({ mcq, index }: { mcq: QuizMasterSampleMcq; index: number }) {
+  if (!mcq.question && !(mcq.options || []).length && !mcq.explanation) return null;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">MCQ {index + 1}</p>
+      <p className="mt-1 text-sm font-semibold text-slate-900">{mcq.question || "No question provided."}</p>
+      <div className="mt-2 grid gap-1 text-xs text-slate-600 md:grid-cols-2">
+        {(mcq.options || []).map((option, optionIndex) => (
+          <p key={`${mcq.question}-${optionIndex}`}>
+            <span className="font-semibold">{String.fromCharCode(65 + optionIndex)}.</span> {option}
+          </p>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-slate-600"><span className="font-semibold">Correct:</span> {mcq.correct_option || "n/a"}</p>
+      <p className="mt-1 text-xs text-slate-600"><span className="font-semibold">Explanation:</span> {mcq.explanation || "n/a"}</p>
+    </div>
+  );
+}
+
+function ApplicationDetails({ row }: { row: ProfessionalOnboardingApplication }) {
+  const details = row.details as ProfessionalOnboardingDetails;
+  const role = String(row.desired_role || "").trim().toLowerCase();
+  const headshot = details.professional_headshot || null;
+
+  return (
+    <div className="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Basic Profile</p>
+        <div className="mt-3 space-y-2 text-sm text-slate-700">
+          {headshot?.url ? <img src={headshot.url} alt={`${row.full_name} headshot`} className="h-36 w-full rounded-2xl object-cover" /> : <div className="flex h-36 items-center justify-center rounded-2xl bg-white text-xs text-slate-400">No headshot</div>}
+          <p><span className="font-semibold">Name:</span> {row.full_name}</p>
+          <p><span className="font-semibold">Email:</span> {row.email_snapshot || row.user_id}</p>
+          <p><span className="font-semibold">Phone:</span> {row.phone_link ? <a href={row.phone_link} className="text-slate-900 underline">{row.phone}</a> : row.phone || "n/a"}</p>
+          <p><span className="font-semibold">City:</span> {row.city || "n/a"}</p>
+          <p><span className="font-semibold">Occupation:</span> {details.current_occupation || "n/a"}</p>
+          <p><span className="font-semibold">Experience:</span> {row.years_experience ?? "n/a"}</p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">UPSC Credentials</p>
+          <div className="mt-3 grid gap-2 text-sm text-slate-700 md:grid-cols-2">
+            <p><span className="font-semibold">Roll number:</span> {details.upsc_roll_number || "n/a"}</p>
+            <p><span className="font-semibold">Years:</span> {details.upsc_years || "n/a"}</p>
+            {role === "mentor" ? (
+              <>
+                <p><span className="font-semibold">Mains written:</span> {details.mains_written_count ?? "n/a"}</p>
+                <p><span className="font-semibold">Interviews faced:</span> {details.interview_faced_count ?? "n/a"}</p>
+              </>
+            ) : (
+              <>
+                <p><span className="font-semibold">Prelims cleared:</span> {details.prelims_cleared_count ?? "n/a"}</p>
+                <p><span className="font-semibold">Highest score:</span> {details.highest_prelims_score || "n/a"}</p>
+              </>
+            )}
+          </div>
+          <div className="mt-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Proof Documents</p>
+            <AssetChips assets={details.proof_documents || []} />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Domain Expertise</p>
+          {role === "mentor" ? (
+            <div className="mt-3 grid gap-2 text-sm text-slate-700 md:grid-cols-2">
+              <p><span className="font-semibold">Optional subject:</span> {details.optional_subject || "n/a"}</p>
+              <p><span className="font-semibold">Mentorship years:</span> {details.mentorship_years ?? "n/a"}</p>
+              <p className="md:col-span-2"><span className="font-semibold">GS preferences:</span> {(details.gs_preferences || []).join(", ") || "n/a"}</p>
+              <p className="md:col-span-2"><span className="font-semibold">Institutes:</span> {(details.institute_associations || []).join(", ") || "n/a"}</p>
+            </div>
+          ) : (
+            <div className="mt-3 space-y-2 text-sm text-slate-700">
+              <p><span className="font-semibold">Subject focus:</span> {(details.subject_focus || []).join(", ") || "n/a"}</p>
+              <p><span className="font-semibold">Content experience:</span> {details.content_experience || "n/a"}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Skill Assessment</p>
+          {role === "mentor" ? (
+            <div className="mt-3 space-y-2 text-sm text-slate-700">
+              <p><span className="font-semibold">Intro video:</span> {details.intro_video_url ? <a href={details.intro_video_url} target="_blank" rel="noreferrer" className="underline">{details.intro_video_url}</a> : "n/a"}</p>
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Sample Evaluation</p>
+                <AssetChips assets={details.sample_evaluation ? [details.sample_evaluation] : []} />
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {(details.sample_mcqs || []).map((mcq, index) => (
+                <McqPreview key={`${row.id}-mcq-${index}`} mcq={mcq} index={index} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {row.about ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Applicant Note</p>
+            <RichTextContent value={row.about} className="mt-2 text-sm text-slate-700" />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export default function OnboardingReviewQueue() {
@@ -133,17 +269,7 @@ export default function OnboardingReviewQueue() {
                   </p>
                 </div>
               </div>
-
-              <div className="mt-2 grid gap-2 text-xs text-slate-600 md:grid-cols-3">
-                <p><span className="font-semibold">City:</span> {row.city || "n/a"}</p>
-                <p><span className="font-semibold">Experience:</span> {row.years_experience ?? "n/a"}</p>
-                <p><span className="font-semibold">Phone:</span> {row.phone || "n/a"}</p>
-              </div>
-              {row.about ? (
-                <RichTextContent value={row.about} className="mt-2 text-sm text-slate-700" />
-              ) : (
-                <p className="mt-2 text-sm text-slate-700">No additional details provided.</p>
-              )}
+              <ApplicationDetails row={row} />
 
               {row.status === "pending" ? (
                 <div className="mt-3 space-y-2">

@@ -9,7 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useExamContext } from "@/context/ExamContext";
 import {
   canAccessMainsAuthoring,
-  canAccessManualQuizBuilder,
+  canAccessStandaloneManualQuizBuilder,
   canManageMainsSeries,
   canManageMentorship,
   canManagePrelimsSeries,
@@ -108,9 +108,11 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
   const canPrelimsAuthor = canManagePrelimsSeries(user);
   const canMainsAuthor = canManageMainsSeries(user);
   const canMentorshipActions = canManageMentorship(user);
-  const canQuizBuilder = canAccessManualQuizBuilder(user);
+  const canQuizBuilder = canAccessStandaloneManualQuizBuilder(user);
   const canMainsRepository = canAccessMainsAuthoring(user);
   const canEditProfessionalProfile = adminLike || moderatorLike || quizMasterLike || mainsMentorLike;
+  const learnerLike = !adminLike && !moderatorLike && !quizMasterLike && !mainsMentorLike;
+  const dashboardLabel = learnerLike ? "Performance Evaluation" : "Dashboard";
 
   const professionalStatusLink = useMemo(() => {
     if (mainsMentorLike && quizMasterLike) {
@@ -212,7 +214,7 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
             href="/dashboard"
             className="app-topbar-link px-3 py-2 text-sm font-semibold"
           >
-            Dashboard
+            {dashboardLabel}
           </Link>
           <DesktopDropdown label="AI Tools" links={aiLinks} />
           <DesktopDropdown label="Programs" links={seriesLinks} />
@@ -236,7 +238,7 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
               onChange={(e) => setGlobalExamId(e.target.value === "all" ? null : Number(e.target.value))}
               className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
             >
-              <option value="all">All Items</option>
+              <option value="all">All Exams</option>
               {exams.map((ex) => (
                 <option key={ex.id} value={ex.id}>
                   {ex.name}
@@ -251,12 +253,30 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
       {mobileOpen ? (
         <div className="app-mobile-panel lg:hidden">
           <nav className="mx-auto w-full max-w-7xl space-y-4 px-4 py-4">
+            <section className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-text-soft)]">Exam Scope</p>
+              <select
+                value={globalExamId ?? "all"}
+                onChange={(e) => setGlobalExamId(e.target.value === "all" ? null : Number(e.target.value))}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700"
+              >
+                <option value="all">All Exams</option>
+                {exams.map((ex) => (
+                  <option key={ex.id} value={ex.id}>
+                    {ex.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-[var(--app-text-soft)]">
+                {globalExamName ? `Currently showing ${globalExamName}.` : "Currently showing all exams."}
+              </p>
+            </section>
             <MobileSection
               title="Primary"
               onNavigate={closeMobile}
               links={[
                 { href: "/", label: "Home" },
-                { href: "/dashboard", label: "Dashboard" },
+                { href: "/dashboard", label: dashboardLabel },
               ]}
             />
             <MobileSection title="AI Tools" links={aiLinks} onNavigate={closeMobile} />
@@ -279,7 +299,7 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
                 onClick={() => setGlobalExamId(null)}
                 className="w-full rounded-2xl border border-slate-300 p-3 text-left transition hover:bg-slate-50"
               >
-                <div className="font-semibold text-slate-800">All Items</div>
+                <div className="font-semibold text-slate-800">All Exams</div>
                 <div className="text-xs text-slate-500">View content for all exams combined</div>
               </button>
               {exams.map((ex) => (

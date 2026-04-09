@@ -24,8 +24,6 @@ export interface PremiumCategory {
   type: string;
   description?: string | null;
   parent_id?: number | null;
-  exam_ids?: number[];
-  exams?: PremiumExam[];
   children?: PremiumCategory[];
 }
 
@@ -85,6 +83,7 @@ export interface PremiumCollection {
   test_label?: string;
   collection_mode?: string;
   meta?: Record<string, unknown> | null;
+  exam_ids?: number[];
   is_public?: boolean;
   is_premium?: boolean;
   is_paid?: boolean;
@@ -525,6 +524,7 @@ export interface PremiumAIExampleAnalysis {
   style_profile: Record<string, unknown>;
   example_questions: string[];
   tags: string[];
+  exam_ids: number[];
   is_active: boolean;
   author_id?: string | null;
   created_at: string;
@@ -723,6 +723,7 @@ export interface TestSeries {
   is_public: boolean;
   is_active: boolean;
   meta: Record<string, unknown>;
+  exam_ids: number[];
   test_count: number;
   created_at: string;
   updated_at?: string | null;
@@ -738,6 +739,7 @@ export interface TestSeriesCreatePayload {
   is_public?: boolean;
   is_active?: boolean;
   provider_user_id?: string;
+  exam_ids?: number[];
   meta?: Record<string, unknown>;
 }
 
@@ -750,6 +752,7 @@ export interface TestSeriesUpdatePayload {
   price?: number;
   is_public?: boolean;
   is_active?: boolean;
+  exam_ids?: number[];
   meta?: Record<string, unknown>;
 }
 
@@ -814,6 +817,7 @@ export interface TestSeriesTest {
   series_order: number;
   question_count: number;
   meta: Record<string, unknown>;
+  exam_ids: number[];
   created_at: string;
   updated_at?: string | null;
 }
@@ -829,6 +833,7 @@ export interface TestSeriesTestCreatePayload {
   price?: number;
   is_finalized?: boolean;
   series_order?: number;
+  exam_ids?: number[];
   meta?: Record<string, unknown>;
 }
 
@@ -844,6 +849,7 @@ export interface TestSeriesTestUpdatePayload {
   is_finalized?: boolean;
   is_active?: boolean;
   series_order?: number;
+  exam_ids?: number[];
   meta?: Record<string, unknown>;
 }
 
@@ -924,6 +930,7 @@ export interface ProfessionalProfile {
   public_email?: string | null;
   is_public: boolean;
   is_active: boolean;
+  exam_ids: number[];
   meta: Record<string, unknown>;
   created_at: string;
   updated_at?: string | null;
@@ -946,6 +953,7 @@ export interface ProfessionalProfilePayload {
   public_email?: string | null;
   is_public?: boolean;
   is_active?: boolean;
+  exam_ids?: number[];
   meta?: Record<string, unknown>;
 }
 
@@ -1022,7 +1030,48 @@ export interface ProfessionalPublicProfileDetail {
 }
 
 export type ProfessionalOnboardingDesiredRole = "mentor" | "creator";
-export type ProfessionalOnboardingStatus = "pending" | "approved" | "rejected";
+export type ProfessionalOnboardingStatus = "draft" | "pending" | "approved" | "rejected";
+
+export interface ProfessionalOnboardingAsset {
+  bucket: string;
+  path: string;
+  file_name: string;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  uploaded_at?: string | null;
+  asset_kind?: string | null;
+  url?: string | null;
+}
+
+export interface QuizMasterSampleMcq {
+  question?: string | null;
+  options: string[];
+  correct_option?: "A" | "B" | "C" | "D" | "E" | null;
+  explanation?: string | null;
+}
+
+export interface ProfessionalOnboardingDetails {
+  current_occupation?: string | null;
+  professional_headshot?: ProfessionalOnboardingAsset | null;
+  upsc_roll_number?: string | null;
+  upsc_years?: string | null;
+  proof_documents: ProfessionalOnboardingAsset[];
+  mains_written_count?: number | null;
+  interview_faced_count?: number | null;
+  prelims_cleared_count?: number | null;
+  highest_prelims_score?: string | null;
+  optional_subject?: string | null;
+  gs_preferences: string[];
+  mentorship_years?: number | null;
+  institute_associations: string[];
+  sample_evaluation?: ProfessionalOnboardingAsset | null;
+  intro_video_url?: string | null;
+  subject_focus: string[];
+  content_experience?: string | null;
+  short_bio?: string | null;
+  preparation_strategy?: string | null;
+  sample_mcqs: QuizMasterSampleMcq[];
+}
 
 export interface ProfessionalOnboardingApplication {
   id: number;
@@ -1033,7 +1082,9 @@ export interface ProfessionalOnboardingApplication {
   city?: string | null;
   years_experience?: number | null;
   phone?: string | null;
+  phone_link?: string | null;
   about?: string | null;
+  details: ProfessionalOnboardingDetails;
   status: ProfessionalOnboardingStatus | string;
   reviewer_user_id?: string | null;
   reviewer_note?: string | null;
@@ -1047,8 +1098,19 @@ export interface ProfessionalOnboardingApplicationPayload {
   full_name: string;
   city?: string | null;
   years_experience?: number | null;
+  phone: string;
+  about?: string | null;
+  details: ProfessionalOnboardingDetails;
+}
+
+export interface ProfessionalOnboardingDraftPayload {
+  desired_role: ProfessionalOnboardingDesiredRole;
+  full_name?: string | null;
+  city?: string | null;
+  years_experience?: number | null;
   phone?: string | null;
   about?: string | null;
+  details: ProfessionalOnboardingDetails;
 }
 
 export interface ProfessionalOnboardingReviewPayload {

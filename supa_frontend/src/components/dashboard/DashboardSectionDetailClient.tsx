@@ -117,7 +117,7 @@ export default function DashboardSectionDetailClient({ contentType }: { contentT
           <div className="space-y-1">
             <Link href="/dashboard" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-600 hover:text-slate-900">
               <ArrowLeft className="h-4 w-4" />
-              Back to Dashboard Summary
+              Back to Performance Evaluation
             </Link>
             <h1 className="text-3xl font-black tracking-tight text-slate-900">{meta.label} Detailed Analytics</h1>
             <p className="text-sm text-slate-600">

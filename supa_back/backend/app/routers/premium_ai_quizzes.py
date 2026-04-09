@@ -50,6 +50,43 @@ def _parse_content_type(value: Any) -> AISystemInstructionContentType:
     except Exception:
         return AISystemInstructionContentType.PREMIUM_GK_QUIZ
 
+
+def _normalize_exam_ids(raw_ids: Any) -> List[int]:
+    values: List[int] = []
+    if raw_ids is None:
+        return values
+    if isinstance(raw_ids, (str, bytes)):
+        raw_values = str(raw_ids).split(",")
+    elif isinstance(raw_ids, list):
+        raw_values = raw_ids
+    else:
+        raw_values = [raw_ids]
+    for item in raw_values:
+        try:
+            parsed = int(item)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0 and parsed not in values:
+            values.append(parsed)
+    return values
+
+
+def _validate_exam_ids(exam_ids: List[int], supabase: Client) -> List[int]:
+    normalized_exam_ids = _normalize_exam_ids(exam_ids)
+    if not normalized_exam_ids:
+        return []
+    rows = _rows(
+        supabase.table("exams")
+        .select("id")
+        .in_("id", normalized_exam_ids)
+        .execute()
+    )
+    valid_ids = sorted({int(row.get("id") or 0) for row in rows if int(row.get("id") or 0) > 0})
+    missing_ids = [exam_id for exam_id in normalized_exam_ids if exam_id not in valid_ids]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail=f"Exam IDs not found: {missing_ids}")
+    return normalized_exam_ids
+
 def _example_analysis_view(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": int(row["id"]),
@@ -61,6 +98,7 @@ def _example_analysis_view(row: Dict[str, Any]) -> Dict[str, Any]:
         "style_profile": row.get("style_profile") or {},
         "example_questions": row.get("example_questions") or [],
         "tags": row.get("tags") or [],
+        "exam_ids": _normalize_exam_ids(row.get("exam_ids")),
         "is_active": bool(row.get("is_active", True)),
         "author_id": row.get("author_id"),
         "created_at": str(row.get("created_at") or ""),
@@ -199,6 +237,7 @@ def create_example_analysis(
     data = payload.model_dump()
     if hasattr(payload.content_type, 'value'):
         data["content_type"] = payload.content_type.value
+    data["exam_ids"] = _validate_exam_ids(payload.exam_ids, supabase)
     
     row = _first(supabase.table("premium_ai_example_analyses").insert(data).execute())
     if not row:
@@ -215,6 +254,8 @@ def update_example_analysis(
     updates = payload.model_dump(exclude_unset=True)
     if "content_type" in updates and hasattr(updates["content_type"], 'value'):
          updates["content_type"] = updates["content_type"].value
+    if "exam_ids" in updates:
+         updates["exam_ids"] = _validate_exam_ids(updates["exam_ids"], supabase)
          
     row = _first(supabase.table("premium_ai_example_analyses").update(updates).eq("id", analysis_id).execute())
     if not row:

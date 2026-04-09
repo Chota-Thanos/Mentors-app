@@ -52,6 +52,7 @@ type DraftForm = {
   alpha_cat_ids_csv: string;
   passage_title: string;
   passage_text: string;
+  category_ids?: number[];
 };
 
 type DraftQuestion = DraftForm & {
@@ -263,6 +264,14 @@ const parseIdsCsv = (value: string): number[] =>
     .map((part) => Number(part.trim()))
     .filter((item) => Number.isFinite(item) && item > 0);
 
+const normalizeCategoryIds = (value: unknown): number[] => (
+  Array.isArray(value)
+    ? value
+        .map((item) => Number(item))
+        .filter((id, index, values) => Number.isFinite(id) && id > 0 && values.indexOf(id) === index)
+    : []
+);
+
 const toError = (error: unknown): string => {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
@@ -375,6 +384,13 @@ const mapRecordToDraftForm = (input: Record<string, unknown>, quizKind: QuizKind
     source_reference: String(input.source_reference || input.source || "").trim(),
     passage_title: quizKind === "passage" ? String(input.passage_title || "").trim() : "",
     passage_text: quizKind === "passage" ? String(input.passage_text || input.passage || "").trim() : "",
+    category_ids: normalizeCategoryIds(
+      input.category_ids
+      || input.premium_gk_category_ids
+      || input.premium_maths_category_ids
+      || input.premium_passage_category_ids
+      || [],
+    ),
   };
 };
 
@@ -732,10 +748,6 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
   }, [quizKind, selectedCategoryIds]);
 
   const ensureMetadataSelection = (): boolean => {
-    if (selectedCategoryIds.length === 0) {
-      toast.error("Select at least one category.");
-      return false;
-    }
     return true;
   };
 
@@ -748,7 +760,7 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
       selected: true,
       quiz_kind: quizKind,
       exam_id: null,
-      category_ids: [...selectedCategoryIds],
+      category_ids: selectedCategoryIds.length > 0 ? [...selectedCategoryIds] : normalizeCategoryIds(form.category_ids),
     }));
     setDrafts((prev) => [...rows, ...prev]);
     return rows.length;
@@ -768,7 +780,13 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
       setDrafts((prev) =>
         prev.map((row) =>
           row.local_id === editingDraftId
-            ? { ...row, ...manualForm, quiz_kind: quizKind, exam_id: null, category_ids: [...selectedCategoryIds] }
+            ? {
+                ...row,
+                ...manualForm,
+                quiz_kind: quizKind,
+                exam_id: null,
+                category_ids: selectedCategoryIds.length > 0 ? [...selectedCategoryIds] : normalizeCategoryIds(manualForm.category_ids),
+              }
             : row,
         ),
       );

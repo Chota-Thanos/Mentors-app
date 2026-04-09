@@ -24,7 +24,6 @@ import {
     Trash2,
     Upload,
     Wand2,
-    ArrowDown,
     X,
 } from "lucide-react";
 import { premiumApi } from "@/lib/premiumApi";
@@ -48,6 +47,10 @@ interface UserAIMainsQuestion {
     model_answer?: string;
     answer_style_guidance?: string;
     word_limit: number;
+    mains_category_ids?: number[];
+    mains_category_id?: number | null;
+    category_ids?: number[];
+    description?: string;
     created_at?: string;
 }
 
@@ -107,6 +110,17 @@ const toQuestionTitle = (questionText: string): string => {
     return `${normalized.slice(0, 117).trimEnd()}...`;
 };
 
+const normalizeCategoryIds = (value: unknown): number[] => {
+    if (!Array.isArray(value)) return [];
+    const output: number[] = [];
+    value.forEach((item) => {
+        const parsed = Number(item);
+        if (!Number.isFinite(parsed) || parsed <= 0 || output.includes(parsed)) return;
+        output.push(parsed);
+    });
+    return output;
+};
+
 const normalizeMainsItem = (raw: unknown): UserAIMainsQuestion | null => {
     if (!raw || typeof raw !== "object") return null;
     const row = raw as Record<string, unknown>;
@@ -129,6 +143,11 @@ const normalizeMainsItem = (raw: unknown): UserAIMainsQuestion | null => {
     const modelAnswer = String(row.model_answer || "").trim();
     const answerStyleGuidance = String(row.answer_style_guidance || "").trim();
     const createdAt = String(row.created_at || "").trim();
+    const mainsCategoryIds = normalizeCategoryIds([
+        ...(Array.isArray(row.mains_category_ids) ? row.mains_category_ids : []),
+        ...(Array.isArray(row.category_ids) ? row.category_ids : []),
+    ]);
+    const mainsCategoryId = Number(row.mains_category_id);
 
     return {
         id: normalizedId,
@@ -137,6 +156,10 @@ const normalizeMainsItem = (raw: unknown): UserAIMainsQuestion | null => {
         model_answer: modelAnswer || undefined,
         answer_style_guidance: answerStyleGuidance || undefined,
         word_limit: wordLimit,
+        mains_category_ids: mainsCategoryIds.length > 0 ? mainsCategoryIds : undefined,
+        mains_category_id: Number.isFinite(mainsCategoryId) && mainsCategoryId > 0 ? mainsCategoryId : (mainsCategoryIds[0] || undefined),
+        category_ids: mainsCategoryIds.length > 0 ? mainsCategoryIds : undefined,
+        description: String(row.description || questionText).trim() || undefined,
         created_at: createdAt || undefined,
     };
 };
@@ -544,7 +567,7 @@ export default function MainsEvaluationPage() {
                 const payload = {
                     content: useMainsCategorySource ? undefined : (contentSource === "text" ? contentValue : undefined),
                     url: useMainsCategorySource ? undefined : (contentSource === "url" ? contentValue : undefined),
-                    mains_category_ids: useMainsCategorySource ? selectedMainsCategoryIds : undefined,
+                    mains_category_ids: selectedMainsCategoryIds.length > 0 ? selectedMainsCategoryIds : undefined,
                     use_mains_category_source: useMainsCategorySource,
                     number_of_questions: count,
                     word_limit: wordLimit,
@@ -745,11 +768,17 @@ export default function MainsEvaluationPage() {
 
     const addSelectedToCollection = useCallback(async (collectionId: number): Promise<number> => {
         let addedCount = 0;
-        const mainsCategoryIds = selectedMainsCategoryIds
+        const selectedOverrideCategoryIds = selectedMainsCategoryIds
             .map((value) => Number(value))
             .filter((value, index, values) => Number.isFinite(value) && value > 0 && values.indexOf(value) === index);
         for (const item of selectedItems) {
             const answerStyle = String(item.answer_style_guidance || "").trim();
+            const mainsCategoryIds = selectedOverrideCategoryIds.length > 0
+                ? selectedOverrideCategoryIds
+                : normalizeCategoryIds([
+                    ...(item.mains_category_ids || []),
+                    ...(item.category_ids || []),
+                ]);
             const payload = {
                 title: toQuestionTitle(item.question_text),
                 type: "question",
@@ -761,9 +790,9 @@ export default function MainsEvaluationPage() {
                     model_answer: item.model_answer || null,
                     word_limit: Number(item.word_limit) > 0 ? Number(item.word_limit) : 150,
                     answer_style_guidance: answerStyle || null,
-                    mains_category_ids: mainsCategoryIds,
+                    mains_category_ids: mainsCategoryIds.length > 0 ? mainsCategoryIds : undefined,
                     mains_category_id: mainsCategoryIds[0] || null,
-                    category_ids: mainsCategoryIds,
+                    category_ids: mainsCategoryIds.length > 0 ? mainsCategoryIds : undefined,
                     description: item.question_text,
                 },
                 collection_id: collectionId,

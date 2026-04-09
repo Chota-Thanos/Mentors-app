@@ -161,14 +161,10 @@ export default function UserCollectionBuilder() {
 
   useEffect(() => {
     const run = async () => {
-      if (!selectedExamId) {
-        setTree([]);
-        return;
-      }
       setLoadingCats(true);
       try {
         const res = await axios.get<CategoryNode[]>(`${premiumApiRoot}/api/v1/premium-categories/${quizType}/`, {
-          params: { hierarchical: true, exam_id: selectedExamId },
+          params: { hierarchical: true },
         });
         setTree(res.data || []);
       } catch (e: unknown) {
@@ -179,7 +175,7 @@ export default function UserCollectionBuilder() {
       }
     };
     run();
-  }, [quizType, selectedExamId]);
+  }, [quizType]);
 
   useEffect(() => {
     setActive(null);
@@ -265,6 +261,7 @@ export default function UserCollectionBuilder() {
       const created = await premiumCompatApi.post<{ id: number }>("/", {
         name: collectionName.trim(),
         description: null,
+        exam_ids: selectedExamId ? [selectedExamId] : [],
         category_ids: [],
         test_kind: "prelims",
       });
@@ -366,15 +363,10 @@ export default function UserCollectionBuilder() {
                 {selections.length > 0 ? <button type="button" onClick={() => setSelections([])} className="h-8 rounded px-2 text-sm text-red-600 hover:bg-red-50 hover:text-red-700">Clear All</button> : null}
               </div>
 
-              {!selectedExamId ? (
-                <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
-                  <BookOpen className="mx-auto mb-2 h-8 w-8 opacity-20" />
-                  <p>Select an exam above to browse topics.</p>
-                </div>
-              ) : loadingCats ? (
+              {loadingCats ? (
                 <div className="animate-pulse rounded-lg bg-gray-50 p-8 text-center text-gray-500">Loading categories...</div>
               ) : tree.length === 0 ? (
-                <div className="rounded-lg bg-yellow-50 p-8 text-center text-yellow-700">No categories found for this exam.</div>
+                <div className="rounded-lg bg-yellow-50 p-8 text-center text-yellow-700">No categories found for this prelims type.</div>
               ) : (
                 <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
                   <div className="flex items-center border-b border-gray-100 bg-gray-50 p-3">

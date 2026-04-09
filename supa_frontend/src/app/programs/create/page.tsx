@@ -15,7 +15,7 @@ import { useAuth } from "@/context/AuthContext";
 import { isAdminLike, isMainsMentorLike, isQuizMasterLike } from "@/lib/accessControl";
 import { premiumApi } from "@/lib/premiumApi";
 import { toNullableRichText } from "@/lib/richText";
-import type { TestSeries, TestSeriesCreatePayload } from "@/types/premium";
+import type { PremiumExam, TestSeries, TestSeriesCreatePayload } from "@/types/premium";
 
 const emptySeriesForm: TestSeriesCreatePayload = {
     title: "",
@@ -98,6 +98,8 @@ export default function CreateTestSeriesPage() {
 
     const [seriesForm, setSeriesForm] = useState<TestSeriesCreatePayload>(emptySeriesForm);
     const [savingSeries, setSavingSeries] = useState(false);
+    const [availableExams, setAvailableExams] = useState<PremiumExam[]>([]);
+    const [selectedExamIds, setSelectedExamIds] = useState<number[]>([]);
     const isPrelimsBuilder = String(seriesForm.series_kind || "").trim().toLowerCase() !== "mains";
     const workspaceSections = useMemo(
         () =>
@@ -175,6 +177,31 @@ export default function CreateTestSeriesPage() {
         setSeriesForm((prev) => ({ ...prev, series_kind: allowedSeriesKinds[0] || "quiz" }));
     }, [seriesForm.series_kind, seriesKindOptions]);
 
+    useEffect(() => {
+        let active = true;
+        premiumApi.get<PremiumExam[]>("/exams", { params: { active_only: true } })
+            .then((response) => {
+                if (!active) return;
+                const rows = Array.isArray(response.data) ? response.data : [];
+                setAvailableExams(rows);
+            })
+            .catch(() => {
+                if (!active) return;
+                setAvailableExams([]);
+            });
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    const toggleExamId = (examId: number) => {
+        setSelectedExamIds((current) => (
+            current.includes(examId)
+                ? current.filter((item) => item !== examId)
+                : [...current, examId]
+        ));
+    };
+
     const saveSeries = async () => {
         const title = String(seriesForm.title || "").trim();
         if (!title) {
@@ -192,6 +219,7 @@ export default function CreateTestSeriesPage() {
                 ...seriesForm,
                 title,
                 description: toNullableRichText(seriesForm.description || ""),
+                exam_ids: selectedExamIds,
             };
             const response = await premiumApi.post<TestSeries>("/programs", payload);
             const createdSeriesId = Number(response.data?.id || 0);
@@ -381,6 +409,34 @@ export default function CreateTestSeriesPage() {
                                             />
                                             <span>Make globally visible</span>
                                         </label>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <label className="text-sm font-bold text-slate-800">Target exams</label>
+                                        <span className="text-xs text-slate-500">Programs and tests show under these exams.</span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                                        {availableExams.length === 0 ? (
+                                            <span className="text-sm text-slate-500">No active exams available.</span>
+                                        ) : availableExams.map((exam) => {
+                                            const active = selectedExamIds.includes(exam.id);
+                                            return (
+                                                <button
+                                                    key={exam.id}
+                                                    type="button"
+                                                    onClick={() => toggleExamId(exam.id)}
+                                                    className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                                                        active
+                                                            ? "border-indigo-500 bg-indigo-600 text-white"
+                                                            : "border-slate-300 bg-white text-slate-700"
+                                                    }`}
+                                                >
+                                                    {exam.name}
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
 

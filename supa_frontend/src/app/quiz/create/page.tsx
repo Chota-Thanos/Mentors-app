@@ -10,7 +10,7 @@ import axios from 'axios'
 import AppLayout from '@/components/layouts/AppLayout'
 import CategorySelector from '@/components/premium/ExamCategorySelector'
 import { useAuth } from '@/context/AuthContext'
-import { canAccessManualQuizBuilder, hasQuizMasterGenerationSubscription } from '@/lib/accessControl'
+import { canAccessStandaloneManualQuizBuilder, hasQuizMasterGenerationSubscription } from '@/lib/accessControl'
 import { legacyPremiumAiApi } from '@/lib/legacyPremiumAiApi'
 import { OUTPUT_LANGUAGE_OPTIONS, persistOutputLanguage, readOutputLanguage, type OutputLanguage } from '@/lib/outputLanguage'
 import { premiumApi } from '@/lib/premiumApi'
@@ -313,7 +313,7 @@ function mapToPendingPassageQuestion(question: Record<string, unknown>): Omit<Pe
 function CreatePremiumQuizPageContent() {
   const searchParams = useSearchParams()
   const { user, loading: authLoading, isAuthenticated } = useAuth()
-  const canAccessManualBuilder = useMemo(() => canAccessManualQuizBuilder(user), [user])
+  const canAccessManualBuilder = useMemo(() => canAccessStandaloneManualQuizBuilder(user), [user])
   const hasAiParsingAccess = useMemo(() => hasQuizMasterGenerationSubscription(user), [user])
   const targetCollectionId = useMemo(() => {
     const raw = searchParams.get('collection_id') || searchParams.get('test_id') || ''
@@ -374,7 +374,7 @@ function CreatePremiumQuizPageContent() {
         <div className="mx-auto max-w-3xl space-y-4 rounded-xl border border-amber-200 bg-amber-50 p-8">
           <h1 className="text-2xl font-bold text-amber-900">Sign in required</h1>
           <p className="text-sm text-amber-800">
-            Manual prelims quiz creation is available for Quiz Master and admin roles. Please sign in first.
+            Manual prelims quiz creation is reserved for admin and moderation workflows. Please sign in first.
           </p>
           <div className="flex flex-wrap gap-2">
             <Link href="/login" className="rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900">
@@ -395,7 +395,7 @@ function CreatePremiumQuizPageContent() {
         <div className="mx-auto max-w-3xl space-y-4 rounded-xl border border-amber-200 bg-amber-50 p-8">
           <h1 className="text-2xl font-bold text-amber-900">Manual quiz creation is restricted</h1>
           <p className="text-sm text-amber-800">
-            User role can use all AI pages, but manual prelims quiz creation pages are limited to Quiz Master and admin workflows.
+            Quiz Masters should create tests and questions from the program workspace. This standalone manual builder is limited to admin and moderation workflows.
           </p>
           <div className="flex flex-wrap gap-2">
             <Link href="/ai-quiz-generator/gk" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">

@@ -2066,7 +2066,9 @@ async def generate_mains_questions(
                 "question_text": "string",
                 "answer_approach": "string (HTML)",
                 "model_answer": "string (Structured HTML)",
-                "word_limit": "integer"
+                "word_limit": "integer",
+                "mains_category_ids": ["integer ids matched from the available mains category list"],
+                "category_ids": ["same ids as mains_category_ids"],
             }
         ]
     }

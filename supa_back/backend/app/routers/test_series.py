@@ -772,6 +772,213 @@ def _safe_float(value: Any, fallback: float = 0.0) -> float:
         return fallback
 
 
+def _normalize_exam_ids(raw_ids: Any) -> List[int]:
+    values: List[int] = []
+    if raw_ids is None:
+        return values
+    if isinstance(raw_ids, (str, bytes)):
+        raw_values = str(raw_ids).split(",")
+    elif isinstance(raw_ids, list):
+        raw_values = raw_ids
+    else:
+        raw_values = [raw_ids]
+    for item in raw_values:
+        try:
+            parsed = int(item)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0 and parsed not in values:
+            values.append(parsed)
+    return values
+
+
+def _linked_exam_ids_map(
+    *,
+    table_name: str,
+    owner_column: str,
+    owner_ids: List[int],
+    supabase: Client,
+) -> Dict[int, List[int]]:
+    normalized_owner_ids = sorted({owner_id for owner_id in owner_ids if owner_id > 0})
+    if not normalized_owner_ids:
+        return {}
+    try:
+        rows = _rows(
+            supabase.table(table_name)
+            .select(f"{owner_column}, exam_id")
+            .in_(owner_column, normalized_owner_ids)
+            .execute()
+        )
+    except Exception:
+        return {}
+    mapping: Dict[int, List[int]] = {}
+    for row in rows:
+        owner_id = _safe_int(row.get(owner_column), 0)
+        exam_id = _safe_int(row.get("exam_id"), 0)
+        if owner_id <= 0 or exam_id <= 0:
+            continue
+        bucket = mapping.setdefault(owner_id, [])
+        if exam_id not in bucket:
+            bucket.append(exam_id)
+    return mapping
+
+
+def _merge_exam_ids(meta_exam_ids: List[int], linked_exam_ids: List[int]) -> List[int]:
+    merged = list(meta_exam_ids)
+    for exam_id in linked_exam_ids:
+        if exam_id > 0 and exam_id not in merged:
+            merged.append(exam_id)
+    return merged
+
+
+def _series_exam_ids(
+    row: Dict[str, Any],
+    *,
+    supabase: Client,
+    link_map: Optional[Dict[int, List[int]]] = None,
+) -> List[int]:
+    series_id = _safe_int(row.get("id"), 0)
+    meta_exam_ids = _normalize_exam_ids(_meta_dict(row.get("meta")).get("exam_ids"))
+    if series_id <= 0:
+        return meta_exam_ids
+    linked_exam_ids = (link_map or {}).get(series_id)
+    if linked_exam_ids is None:
+        linked_exam_ids = _linked_exam_ids_map(
+            table_name="test_series_exams",
+            owner_column="series_id",
+            owner_ids=[series_id],
+            supabase=supabase,
+        ).get(series_id, [])
+    return _merge_exam_ids(meta_exam_ids, linked_exam_ids)
+
+
+def _test_exam_ids(
+    row: Dict[str, Any],
+    *,
+    supabase: Client,
+    link_map: Optional[Dict[int, List[int]]] = None,
+) -> List[int]:
+    collection_id = _safe_int(row.get("id"), 0)
+    meta_exam_ids = _normalize_exam_ids(_meta_dict(row.get("meta")).get("exam_ids"))
+    if collection_id <= 0:
+        return meta_exam_ids
+    linked_exam_ids = (link_map or {}).get(collection_id)
+    if linked_exam_ids is None:
+        linked_exam_ids = _linked_exam_ids_map(
+            table_name="collection_exams",
+            owner_column="collection_id",
+            owner_ids=[collection_id],
+            supabase=supabase,
+        ).get(collection_id, [])
+    return _merge_exam_ids(meta_exam_ids, linked_exam_ids)
+
+
+def _sync_exam_links(
+    *,
+    table_name: str,
+    owner_column: str,
+    owner_id: int,
+    exam_ids: List[int],
+    supabase: Client,
+) -> None:
+    normalized_exam_ids = _normalize_exam_ids(exam_ids)
+    try:
+        supabase.table(table_name).delete().eq(owner_column, owner_id).execute()
+        if normalized_exam_ids:
+            supabase.table(table_name).insert(
+                [{owner_column: owner_id, "exam_id": exam_id} for exam_id in normalized_exam_ids]
+            ).execute()
+    except Exception:
+        return
+
+
+def _validate_exam_ids(exam_ids: List[int], supabase: Client) -> List[int]:
+    normalized_exam_ids = _normalize_exam_ids(exam_ids)
+    if not normalized_exam_ids:
+        return []
+    rows = _safe_rows(
+        supabase.table("exams")
+        .select("id")
+        .in_("id", normalized_exam_ids)
+    )
+    valid_ids = sorted({_safe_int(row.get("id"), 0) for row in rows if _safe_int(row.get("id"), 0) > 0})
+    missing_ids = [exam_id for exam_id in normalized_exam_ids if exam_id not in valid_ids]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail=f"Exam IDs not found: {missing_ids}")
+    return normalized_exam_ids
+
+
+def _linked_profile_exam_ids_map(
+    *,
+    provider_user_ids: List[str],
+    supabase: Client,
+) -> Dict[str, List[int]]:
+    normalized_user_ids = sorted({str(value or "").strip() for value in provider_user_ids if str(value or "").strip()})
+    if not normalized_user_ids:
+        return {}
+    try:
+        rows = _rows(
+            supabase.table("profile_exams")
+            .select("provider_user_id, exam_id")
+            .in_("provider_user_id", normalized_user_ids)
+            .execute()
+        )
+    except Exception:
+        return {}
+    mapping: Dict[str, List[int]] = {}
+    for row in rows:
+        provider_user_id = str(row.get("provider_user_id") or "").strip()
+        exam_id = _safe_int(row.get("exam_id"), 0)
+        if not provider_user_id or exam_id <= 0:
+            continue
+        bucket = mapping.setdefault(provider_user_id, [])
+        if exam_id not in bucket:
+            bucket.append(exam_id)
+    return mapping
+
+
+def _profile_exam_ids(
+    row: Dict[str, Any],
+    *,
+    supabase: Client,
+    link_map: Optional[Dict[str, List[int]]] = None,
+) -> List[int]:
+    provider_user_id = str(row.get("user_id") or "").strip()
+    meta_exam_ids = _normalize_exam_ids(_meta_dict(row.get("meta")).get("exam_ids"))
+    if not provider_user_id:
+        return meta_exam_ids
+    linked_exam_ids = (link_map or {}).get(provider_user_id)
+    if linked_exam_ids is None:
+        linked_exam_ids = _linked_profile_exam_ids_map(
+            provider_user_ids=[provider_user_id],
+            supabase=supabase,
+        ).get(provider_user_id, [])
+    return _merge_exam_ids(meta_exam_ids, linked_exam_ids)
+
+
+def _sync_profile_exam_links(
+    *,
+    provider_user_id: str,
+    exam_ids: List[int],
+    supabase: Client,
+) -> None:
+    normalized_provider_user_id = str(provider_user_id or "").strip()
+    if not normalized_provider_user_id:
+        return
+    normalized_exam_ids = _normalize_exam_ids(exam_ids)
+    try:
+        supabase.table("profile_exams").delete().eq("provider_user_id", normalized_provider_user_id).execute()
+        if normalized_exam_ids:
+            supabase.table("profile_exams").insert(
+                [
+                    {"provider_user_id": normalized_provider_user_id, "exam_id": exam_id}
+                    for exam_id in normalized_exam_ids
+                ]
+            ).execute()
+    except Exception:
+        return
+
+
 def _normalize_program_item_type(value: Any) -> TestSeriesProgramItemType:
     normalized = _as_role(value)
     for item_type in TestSeriesProgramItemType:
@@ -1038,6 +1245,12 @@ def _normalize_profile_meta(raw_meta: Any) -> Dict[str, Any]:
         normalized["exam_focus"] = exam_focus
     else:
         normalized.pop("exam_focus", None)
+
+    exam_ids = _normalize_exam_ids(normalized.get("exam_ids"))
+    if exam_ids:
+        normalized["exam_ids"] = exam_ids
+    else:
+        normalized.pop("exam_ids", None)
 
     students_mentored = _parse_optional_non_negative_int(normalized.get("students_mentored"))
     if students_mentored is not None:
@@ -1402,6 +1615,11 @@ def _finalize_discussion_config(
 def _normalize_series_meta(raw_meta: Any, *, strict: bool = False) -> Dict[str, Any]:
     meta = _meta_dict(raw_meta)
     normalized = dict(meta)
+    exam_ids = _normalize_exam_ids(normalized.get("exam_ids"))
+    if exam_ids:
+        normalized["exam_ids"] = exam_ids
+    else:
+        normalized.pop("exam_ids", None)
 
     if "final_discussion" in normalized:
         discussion = _normalize_discussion_config(
@@ -1440,10 +1658,17 @@ def _copy_evaluation_enabled_for_role(role_value: str, meta: Dict[str, Any]) -> 
     return role_value == "mentor"
 
 
-def _normalize_profile_row(row: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_profile_row(row: Dict[str, Any], *, exam_ids: Optional[List[int]] = None) -> Dict[str, Any]:
     meta = _normalize_profile_meta(row.get("meta"))
     role_value = _normalize_profile_role(row.get("role"))
     meta["copy_evaluation_enabled"] = _copy_evaluation_enabled_for_role(role_value, meta)
+    resolved_exam_ids = _normalize_exam_ids(
+        exam_ids if exam_ids is not None else meta.get("exam_ids")
+    )
+    if resolved_exam_ids:
+        meta["exam_ids"] = resolved_exam_ids
+    else:
+        meta.pop("exam_ids", None)
     display_name = str(row.get("display_name") or "").strip()
     if not display_name:
         display_name = str(meta.get("display_name") or "").strip() or f"UPSC {_professional_role_title(role_value)}"
@@ -1476,14 +1701,25 @@ def _normalize_profile_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "public_email": row.get("public_email"),
         "is_public": bool(row.get("is_public", True)),
         "is_active": bool(row.get("is_active", True)),
+        "exam_ids": resolved_exam_ids,
         "meta": meta,
         "created_at": str(row.get("created_at") or ""),
         "updated_at": str(row.get("updated_at")) if row.get("updated_at") else None,
     }
 
 
-def _profile_response(row: Dict[str, Any]) -> ProfessionalProfileResponse:
-    return ProfessionalProfileResponse(**_normalize_profile_row(row))
+def _profile_response(
+    row: Dict[str, Any],
+    *,
+    supabase: Client,
+    link_map: Optional[Dict[str, List[int]]] = None,
+) -> ProfessionalProfileResponse:
+    return ProfessionalProfileResponse(
+        **_normalize_profile_row(
+            row,
+            exam_ids=_profile_exam_ids(row, supabase=supabase, link_map=link_map),
+        )
+    )
 
 
 def _series_option_response(row: Dict[str, Any]) -> ProfessionalSeriesOptionResponse:
@@ -1929,12 +2165,16 @@ def _safe_profile_map(user_ids: List[str], supabase: Client) -> Dict[str, Profes
         )
     except Exception:
         return {}
+    profile_exam_map = _linked_profile_exam_ids_map(
+        provider_user_ids=unique_ids,
+        supabase=supabase,
+    )
     output: Dict[str, ProfessionalProfileResponse] = {}
     for row in rows:
         user_id = str(row.get("user_id") or "").strip()
         if not user_id:
             continue
-        output[user_id] = _profile_response(row)
+        output[user_id] = _profile_response(row, supabase=supabase, link_map=profile_exam_map)
     return output
 
 
@@ -2005,7 +2245,12 @@ def _enforce_test_kind_authoring_access(*, user_ctx: Dict[str, Any], test_kind: 
         )
 
 
-def _series_row_to_response(row: Dict[str, Any], test_count: int = 0) -> TestSeriesResponse:
+def _series_row_to_response(
+    row: Dict[str, Any],
+    test_count: int = 0,
+    *,
+    exam_ids: Optional[List[int]] = None,
+) -> TestSeriesResponse:
     meta = _normalize_series_meta(row.get("meta"), strict=False)
     series_kind_raw = _as_role(row.get("series_kind")) or TestSeriesKind.MAINS.value
     access_type_raw = _as_role(row.get("access_type")) or TestSeriesAccessType.SUBSCRIPTION.value
@@ -2035,6 +2280,7 @@ def _series_row_to_response(row: Dict[str, Any], test_count: int = 0) -> TestSer
         is_public=bool(row.get("is_public", False)),
         is_active=bool(row.get("is_active", True)),
         meta=meta,
+        exam_ids=_normalize_exam_ids(exam_ids if exam_ids is not None else meta.get("exam_ids")),
         test_count=test_count,
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
@@ -2062,7 +2308,12 @@ def _resolve_series_id_from_collection(collection_row: Dict[str, Any]) -> Option
     return None
 
 
-def _collection_row_to_test_response(collection_row: Dict[str, Any], series_id: int) -> TestSeriesTestResponse:
+def _collection_row_to_test_response(
+    collection_row: Dict[str, Any],
+    series_id: int,
+    *,
+    exam_ids: Optional[List[int]] = None,
+) -> TestSeriesTestResponse:
     meta = _normalize_test_meta(collection_row.get("meta"), strict=False)
     kind = _resolve_collection_test_kind(meta)
     price_raw = collection_row.get("price")
@@ -2092,6 +2343,7 @@ def _collection_row_to_test_response(collection_row: Dict[str, Any], series_id: 
         series_order=order_value,
         question_count=max(0, int(collection_row.get("question_count") or 0)),
         meta=meta,
+        exam_ids=_normalize_exam_ids(exam_ids if exam_ids is not None else meta.get("exam_ids")),
         created_at=str(collection_row.get("created_at") or ""),
         updated_at=str(collection_row.get("updated_at")) if collection_row.get("updated_at") else None,
     )
@@ -3949,6 +4201,12 @@ def list_test_series(
     except Exception as exc:
         _raise_test_series_migration_required(exc)
 
+    series_exam_map = _linked_exam_ids_map(
+        table_name="test_series_exams",
+        owner_column="series_id",
+        owner_ids=[_safe_int(row.get("id"), 0) for row in rows],
+        supabase=supabase,
+    )
     output: List[TestSeriesResponse] = []
     for row in rows:
         if not _can_view_series(user_ctx=user_ctx, series_row=row, supabase=supabase):
@@ -3957,7 +4215,13 @@ def list_test_series(
         if include_tests:
             tests = _fetch_series_tests(series_id=int(row["id"]), supabase=supabase, include_inactive=include_inactive)
             test_count = len(tests)
-        output.append(_series_row_to_response(row, test_count=test_count))
+        output.append(
+            _series_row_to_response(
+                row,
+                test_count=test_count,
+                exam_ids=_series_exam_ids(row, supabase=supabase, link_map=series_exam_map),
+            )
+        )
     return output
 
 
@@ -3978,6 +4242,7 @@ def create_test_series(
         provider_user_id = str(payload.provider_user_id).strip()
     if not provider_user_id:
         raise HTTPException(status_code=400, detail="Provider identity missing.")
+    exam_ids = _validate_exam_ids(payload.exam_ids, supabase)
 
     insert_payload = {
         "title": title,
@@ -3992,6 +4257,10 @@ def create_test_series(
         "updated_at": _utc_now_iso(),
     }
     insert_payload["meta"] = _normalize_series_meta(payload.meta or {}, strict=True)
+    if exam_ids:
+        insert_payload["meta"]["exam_ids"] = exam_ids
+    else:
+        insert_payload["meta"].pop("exam_ids", None)
     finalized_final_discussion = _finalize_discussion_config(
         insert_payload["meta"].get("final_discussion"),
         provider_user_id=provider_user_id,
@@ -4008,7 +4277,14 @@ def create_test_series(
         _raise_test_series_migration_required(exc)
     if not row:
         raise HTTPException(status_code=400, detail="Failed to create programs.")
-    return _series_row_to_response(row, test_count=0)
+    _sync_exam_links(
+        table_name="test_series_exams",
+        owner_column="series_id",
+        owner_id=int(row.get("id") or 0),
+        exam_ids=exam_ids,
+        supabase=supabase,
+    )
+    return _series_row_to_response(row, test_count=0, exam_ids=exam_ids)
 
 
 @router.get("/programs/{series_id}", response_model=TestSeriesResponse)
@@ -4025,7 +4301,11 @@ def get_test_series(
     if include_tests:
         tests = _fetch_series_tests(series_id=series_id, supabase=supabase, include_inactive=True)
         test_count = len(tests)
-    return _series_row_to_response(row, test_count=test_count)
+    return _series_row_to_response(
+        row,
+        test_count=test_count,
+        exam_ids=_series_exam_ids(row, supabase=supabase),
+    )
 
 
 @router.put("/programs/{series_id}", response_model=TestSeriesResponse)
@@ -4066,13 +4346,34 @@ def update_test_series(
         else:
             normalized_meta.pop("final_discussion", None)
         updates["meta"] = normalized_meta
+    exam_ids_for_update: Optional[List[int]] = None
+    if payload.exam_ids is not None:
+        exam_ids_for_update = _validate_exam_ids(payload.exam_ids, supabase)
+        merged_meta = _meta_dict(updates.get("meta") or row.get("meta"))
+        if exam_ids_for_update:
+            merged_meta["exam_ids"] = exam_ids_for_update
+        else:
+            merged_meta.pop("exam_ids", None)
+        updates["meta"] = _normalize_series_meta(merged_meta, strict=True)
     updates["updated_at"] = _utc_now_iso()
 
     updated = _first(supabase.table(TEST_SERIES_TABLE).update(updates).eq("id", series_id).execute())
     if not updated:
         raise HTTPException(status_code=404, detail="Programs not found.")
+    if exam_ids_for_update is not None:
+        _sync_exam_links(
+            table_name="test_series_exams",
+            owner_column="series_id",
+            owner_id=series_id,
+            exam_ids=exam_ids_for_update,
+            supabase=supabase,
+        )
     tests = _fetch_series_tests(series_id=series_id, supabase=supabase, include_inactive=True)
-    return _series_row_to_response(updated, test_count=len(tests))
+    return _series_row_to_response(
+        updated,
+        test_count=len(tests),
+        exam_ids=_series_exam_ids(updated, supabase=supabase),
+    )
 
 
 @router.delete("/programs/{series_id}")
@@ -4119,11 +4420,23 @@ def list_series_tests(
         [int(row.get("id") or 0) for row in tests],
         supabase,
     )
+    test_exam_map = _linked_exam_ids_map(
+        table_name="collection_exams",
+        owner_column="collection_id",
+        owner_ids=[int(row.get("id") or 0) for row in tests],
+        supabase=supabase,
+    )
     output: List[TestSeriesTestResponse] = []
     for row in tests:
         shaped_row = dict(row)
         shaped_row["question_count"] = question_counts.get(int(row.get("id") or 0), 0)
-        output.append(_collection_row_to_test_response(shaped_row, series_id=series_id))
+        output.append(
+            _collection_row_to_test_response(
+                shaped_row,
+                series_id=series_id,
+                exam_ids=_test_exam_ids(shaped_row, supabase=supabase, link_map=test_exam_map),
+            )
+        )
     return output
 
 
@@ -4149,6 +4462,7 @@ def list_discovery_tests(
     test_kind: CollectionTestKind,
     search: Optional[str] = None,
     category_id: Optional[int] = Query(default=None, ge=1),
+    exam_id: Optional[int] = Query(default=None, ge=1),
     access_type: Optional[TestSeriesAccessType] = None,
     min_price: Optional[float] = Query(default=None, ge=0),
     max_price: Optional[float] = Query(default=None, ge=0),
@@ -4189,6 +4503,18 @@ def list_discovery_tests(
     test_rows = _fetch_public_series_tests(series_ids=series_ids, supabase=supabase)
     if not test_rows:
         return []
+    series_exam_map = _linked_exam_ids_map(
+        table_name="test_series_exams",
+        owner_column="series_id",
+        owner_ids=series_ids,
+        supabase=supabase,
+    )
+    test_exam_map = _linked_exam_ids_map(
+        table_name="collection_exams",
+        owner_column="collection_id",
+        owner_ids=[int(row.get("id") or 0) for row in test_rows],
+        supabase=supabase,
+    )
 
     candidate_rows: List[tuple[TestSeriesTestResponse, TestSeriesResponse, List[int]]] = []
     all_category_ids: List[int] = []
@@ -4204,7 +4530,13 @@ def list_discovery_tests(
         if not _can_view_series(user_ctx=user_ctx, series_row=series_row, supabase=supabase):
             continue
 
-        test_payload = _collection_row_to_test_response(test_row, series_id=series_id)
+        resolved_test_exam_ids = _test_exam_ids(test_row, supabase=supabase, link_map=test_exam_map)
+        resolved_series_exam_ids = _series_exam_ids(series_row, supabase=supabase, link_map=series_exam_map)
+        resolved_exam_ids = resolved_test_exam_ids or resolved_series_exam_ids
+        if exam_id is not None and exam_id not in resolved_exam_ids:
+            continue
+
+        test_payload = _collection_row_to_test_response(test_row, series_id=series_id, exam_ids=resolved_exam_ids)
         if test_payload.test_kind != test_kind:
             continue
 
@@ -4216,7 +4548,11 @@ def list_discovery_tests(
         if max_price is not None and price_value > float(max_price):
             continue
 
-        series_payload = _series_row_to_response(series_row, test_count=0)
+        series_payload = _series_row_to_response(
+            series_row,
+            test_count=0,
+            exam_ids=resolved_series_exam_ids,
+        )
         if not _matches_discovery_search(
             str(search or ""),
             test_payload.title,
@@ -4283,28 +4619,25 @@ def list_discovery_series(
             query = query.eq("access_type", access_type.value)
         series_rows = _rows(query.execute())
 
-        if exam_id is not None and series_rows:
-            series_ids = [int(r.get("id")) for r in series_rows if r.get("id")]
-            if series_ids:
-                exam_mappings = _rows(
-                    supabase.table("test_series_exams")
-                    .select("series_id")
-                    .eq("exam_id", exam_id)
-                    .in_("series_id", series_ids)
-                    .execute()
-                )
-                valid_series_ids = {int(m.get("series_id")) for m in exam_mappings}
-                series_rows = [r for r in series_rows if int(r.get("id")) in valid_series_ids]
     except Exception as exc:
         _raise_test_series_migration_required(exc)
 
     if not series_rows:
         return []
 
+    series_exam_map = _linked_exam_ids_map(
+        table_name="test_series_exams",
+        owner_column="series_id",
+        owner_ids=[int(row.get("id") or 0) for row in series_rows],
+        supabase=supabase,
+    )
     series_by_id: Dict[int, Dict[str, Any]] = {}
     for row in series_rows:
         series_id = int(row.get("id") or 0)
         if series_id <= 0:
+            continue
+        resolved_series_exam_ids = _series_exam_ids(row, supabase=supabase, link_map=series_exam_map)
+        if exam_id is not None and resolved_series_exam_ids and exam_id not in resolved_series_exam_ids:
             continue
         if not _can_view_series(user_ctx=user_ctx, series_row=row, supabase=supabase):
             continue
@@ -4314,6 +4647,12 @@ def list_discovery_series(
         return []
 
     public_test_rows = _fetch_public_series_tests(series_ids=list(series_by_id.keys()), supabase=supabase)
+    test_exam_map = _linked_exam_ids_map(
+        table_name="collection_exams",
+        owner_column="collection_id",
+        owner_ids=[int(row.get("id") or 0) for row in public_test_rows],
+        supabase=supabase,
+    )
     tests_by_series: Dict[int, List[Dict[str, Any]]] = {}
     for test_row in public_test_rows:
         series_id = _resolve_series_id_from_collection(test_row)
@@ -4330,7 +4669,12 @@ def list_discovery_series(
         if not series_test_rows:
             continue
 
-        series_payload = _series_row_to_response(series_row, test_count=len(series_test_rows))
+        resolved_series_exam_ids = _series_exam_ids(series_row, supabase=supabase, link_map=series_exam_map)
+        series_payload = _series_row_to_response(
+            series_row,
+            test_count=len(series_test_rows),
+            exam_ids=resolved_series_exam_ids,
+        )
         price_value = float(series_payload.price or 0.0)
         if only_free and price_value > 0:
             continue
@@ -4341,11 +4685,19 @@ def list_discovery_series(
 
         search_parts: List[Optional[str]] = [series_payload.title, series_payload.description]
         category_ids: List[int] = []
+        matching_test_count = 0
         for test_row in series_test_rows:
+            resolved_test_exam_ids = _test_exam_ids(test_row, supabase=supabase, link_map=test_exam_map)
+            if exam_id is not None and resolved_test_exam_ids and exam_id not in resolved_test_exam_ids:
+                continue
+            matching_test_count += 1
             search_parts.extend([str(test_row.get("title") or ""), test_row.get("description")])
             for resolved_category_id in _extract_category_ids_from_meta(_meta_dict(test_row.get("meta"))):
                 if resolved_category_id not in category_ids:
                     category_ids.append(resolved_category_id)
+
+        if exam_id is not None and matching_test_count == 0 and exam_id not in resolved_series_exam_ids:
+            continue
 
         if category_id is not None and category_id not in category_ids:
             continue
@@ -4393,10 +4745,16 @@ def create_series_test(
     title = str(payload.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="Test title is required.")
+    series_exam_ids = _series_exam_ids(series_row, supabase=supabase)
+    exam_ids = _validate_exam_ids(payload.exam_ids or series_exam_ids, supabase)
 
     merged_meta = dict(payload.meta or {})
     merged_meta["series_id"] = series_id
     merged_meta["series_order"] = payload.series_order
+    if exam_ids:
+        merged_meta["exam_ids"] = exam_ids
+    else:
+        merged_meta.pop("exam_ids", None)
     merged_meta = _apply_collection_test_kind_meta(merged_meta, payload.test_kind)
     merged_meta = _normalize_test_meta(merged_meta, strict=True)
     finalized_test_discussion = _finalize_discussion_config(
@@ -4435,11 +4793,18 @@ def create_series_test(
             raise
     if not row:
         raise HTTPException(status_code=400, detail="Failed to create test.")
+    _sync_exam_links(
+        table_name="collection_exams",
+        owner_column="collection_id",
+        owner_id=int(row.get("id") or 0),
+        exam_ids=exam_ids,
+        supabase=supabase,
+    )
 
     resolved_series_id = _resolve_series_id_from_collection(row) or series_id
     shaped_row = dict(row)
     shaped_row["question_count"] = _fetch_test_question_counts([int(row.get("id") or 0)], supabase).get(int(row.get("id") or 0), 0)
-    return _collection_row_to_test_response(shaped_row, series_id=resolved_series_id)
+    return _collection_row_to_test_response(shaped_row, series_id=resolved_series_id, exam_ids=exam_ids)
 
 
 @router.post("/programs/{series_id}/program-items", response_model=TestSeriesProgramItemResponse)
@@ -4490,7 +4855,11 @@ def get_series_test(
         raise HTTPException(status_code=403, detail="Access denied for this test.")
     shaped_row = dict(collection_row)
     shaped_row["question_count"] = _fetch_test_question_counts([test_id], supabase).get(test_id, 0)
-    return _collection_row_to_test_response(shaped_row, series_id=series_id)
+    return _collection_row_to_test_response(
+        shaped_row,
+        series_id=series_id,
+        exam_ids=_test_exam_ids(shaped_row, supabase=supabase),
+    )
 
 
 def _build_discussion_call_context(
@@ -4912,12 +5281,21 @@ def update_series_test(
         merged_meta.update(updates["meta"])
     else:
         merged_meta = _meta_dict(collection_row.get("meta"))
+    exam_ids_for_update: Optional[List[int]] = None
+    if payload.exam_ids is not None:
+        exam_ids_for_update = _validate_exam_ids(payload.exam_ids, supabase)
+    else:
+        exam_ids_for_update = _test_exam_ids(collection_row, supabase=supabase) or _series_exam_ids(series_row, supabase=supabase)
 
     if payload.series_order is not None:
         merged_meta["series_order"] = payload.series_order
         updates["series_order"] = payload.series_order
     if payload.test_kind is not None:
         merged_meta = _apply_collection_test_kind_meta(merged_meta, payload.test_kind)
+    if exam_ids_for_update:
+        merged_meta["exam_ids"] = exam_ids_for_update
+    else:
+        merged_meta.pop("exam_ids", None)
     normalized_meta = _normalize_test_meta(merged_meta, strict=True)
     finalized_test_discussion = _finalize_discussion_config(
         normalized_meta.get("test_discussion"),
@@ -4950,9 +5328,21 @@ def update_series_test(
             raise
     if not updated:
         raise HTTPException(status_code=404, detail="Test not found.")
+    if payload.exam_ids is not None:
+        _sync_exam_links(
+            table_name="collection_exams",
+            owner_column="collection_id",
+            owner_id=test_id,
+            exam_ids=exam_ids_for_update or [],
+            supabase=supabase,
+        )
     shaped_row = dict(updated)
     shaped_row["question_count"] = _fetch_test_question_counts([test_id], supabase).get(test_id, 0)
-    return _collection_row_to_test_response(shaped_row, series_id=series_id)
+    return _collection_row_to_test_response(
+        shaped_row,
+        series_id=series_id,
+        exam_ids=exam_ids_for_update,
+    )
 
 
 @router.put("/programs/program-items/{item_id}", response_model=TestSeriesProgramItemResponse)
@@ -8984,10 +9374,15 @@ def list_public_profiles(
         )
     except HTTPException:
         review_summary_by_user = {}
+    profile_exam_map = _linked_profile_exam_ids_map(
+        provider_user_ids=[str(row.get("user_id") or "").strip() for row in rows],
+        supabase=supabase,
+    )
 
     out: List[ProfessionalProfileResponse] = []
     for row in rows:
-        normalized = _normalize_profile_row(row)
+        user_exam_ids = _profile_exam_ids(row, supabase=supabase, link_map=profile_exam_map)
+        normalized = _normalize_profile_row(row, exam_ids=user_exam_ids)
         user_id_value = str(normalized.get("user_id") or "").strip()
         summary = review_summary_by_user.get(user_id_value)
         if summary:
@@ -9057,7 +9452,7 @@ def get_professional_profile_detail(
     if not is_profile_public and not (is_owner or is_admin_moderator):
         raise HTTPException(status_code=403, detail="This profile is private.")
 
-    profile = _profile_response(row)
+    profile = _profile_response(row, supabase=supabase)
     profile_meta = _normalize_profile_meta(profile.meta)
     role_label = _professional_role_title(profile.role)
 
@@ -9311,7 +9706,7 @@ def get_my_professional_profile(
         raise HTTPException(status_code=500, detail=str(exc))
     if not row:
         raise HTTPException(status_code=404, detail="Professional profile not found.")
-    return _profile_response(row)
+    return _profile_response(row, supabase=supabase)
 
 
 @router.put("/profiles/me", response_model=ProfessionalProfileResponse)
@@ -9345,6 +9740,12 @@ def upsert_my_professional_profile(
 
     role_fallback = _normalize_profile_role((existing or {}).get("role") or user_ctx.get("role"), fallback="mentor")
     role = _normalize_profile_role(payload.role, fallback=role_fallback)
+    if payload.exam_ids is not None:
+        resolved_exam_ids = _validate_exam_ids(payload.exam_ids, supabase)
+    elif existing:
+        resolved_exam_ids = _profile_exam_ids(existing, supabase=supabase)
+    else:
+        resolved_exam_ids = []
 
     updates: Dict[str, Any] = {
         "role": role,
@@ -9384,6 +9785,10 @@ def upsert_my_professional_profile(
         merged_meta = _meta_dict((existing or {}).get("meta"))
         merged_meta.update(_meta_dict(payload.meta))
         updates["meta"] = _normalize_profile_meta(merged_meta)
+    if payload.exam_ids is not None:
+        merged_meta = _meta_dict(updates.get("meta") if "meta" in updates else (existing or {}).get("meta"))
+        merged_meta["exam_ids"] = resolved_exam_ids
+        updates["meta"] = _normalize_profile_meta(merged_meta)
 
     display_name = str(updates.get("display_name") or (existing or {}).get("display_name") or "").strip()
     if not display_name:
@@ -9395,6 +9800,9 @@ def upsert_my_professional_profile(
         if existing:
             row = _first(supabase.table(PROFILES_TABLE).update(updates).eq("user_id", user_id).execute())
         else:
+            insert_meta = _meta_dict(updates.get("meta"))
+            if resolved_exam_ids:
+                insert_meta["exam_ids"] = resolved_exam_ids
             insert_payload = {
                 "user_id": user_id,
                 "display_name": display_name,
@@ -9413,7 +9821,7 @@ def upsert_my_professional_profile(
                 "public_email": updates.get("public_email"),
                 "is_public": bool(updates.get("is_public", True)),
                 "is_active": bool(updates.get("is_active", True)),
-                "meta": updates.get("meta") or {},
+                "meta": _normalize_profile_meta(insert_meta),
                 "updated_at": _utc_now_iso(),
             }
             row = _first(supabase.table(PROFILES_TABLE).insert(insert_payload).execute())
@@ -9424,7 +9832,12 @@ def upsert_my_professional_profile(
 
     if not row:
         raise HTTPException(status_code=400, detail="Failed to save professional profile.")
-    return _profile_response(row)
+    _sync_profile_exam_links(
+        provider_user_id=user_id,
+        exam_ids=resolved_exam_ids,
+        supabase=supabase,
+    )
+    return _profile_response(row, supabase=supabase)
 
 
 # ==========================================

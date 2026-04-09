@@ -6,13 +6,12 @@ import { toast } from "sonner";
 
 import { premiumApi, premiumApiRoot } from "@/lib/premiumApi";
 import ContentItemPicker from "@/components/premium/ContentItemPicker";
-import type { CategoryAISource, PremiumCategory, PremiumExam, QuizKind } from "@/types/premium";
+import type { CategoryAISource, PremiumCategory, QuizKind } from "@/types/premium";
 
 type FlatCategoryNode = {
   id: number;
   name: string;
   depth: number;
-  exam_ids: number[];
 };
 
 type SourceKind = "text" | "url" | "content_item";
@@ -27,7 +26,6 @@ function flattenCategories(nodes: PremiumCategory[], depth = 0): FlatCategoryNod
       id: node.id,
       name: node.name,
       depth,
-      exam_ids: Array.isArray(node.exam_ids) ? node.exam_ids : [],
     });
     if (Array.isArray(node.children) && node.children.length > 0) {
       output.push(...flattenCategories(node.children, depth + 1));
@@ -74,10 +72,8 @@ function sourceKindHint(kind: SourceKind): string {
 
 export default function CategoryAISourceManager() {
   const [quizType, setQuizType] = useState<QuizKind>("gk");
-  const [examFilterId, setExamFilterId] = useState<string>("");
   const [activeOnlySources, setActiveOnlySources] = useState(false);
 
-  const [exams, setExams] = useState<PremiumExam[]>([]);
   const [categories, setCategories] = useState<PremiumCategory[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
 
@@ -124,43 +120,28 @@ export default function CategoryAISourceManager() {
     setUsePdfOcr(true);
   }, []);
 
-  const loadExams = useCallback(async () => {
-    const response = await premiumApi.get<PremiumExam[]>("/exams");
-    const data = Array.isArray(response.data) ? response.data : [];
-    setExams(data);
-    if (data.length === 0) {
-      setExamFilterId("");
-      return;
-    }
-    if (!examFilterId || !data.some((item) => String(item.id) === examFilterId)) {
-      setExamFilterId(String(data[0].id));
-    }
-  }, [examFilterId]);
-
   const loadCategories = useCallback(async () => {
     const response = await premiumApi.get<PremiumCategory[]>(
       `${premiumApiRoot}/api/v1/premium-categories/${quizTypeKey}/`,
       {
         params: {
           hierarchical: true,
-          exam_id: examFilterId ? Number(examFilterId) : undefined,
         },
       },
     );
     setCategories(Array.isArray(response.data) ? response.data : []);
-  }, [examFilterId, quizTypeKey]);
+  }, [quizTypeKey]);
 
   const refreshContext = useCallback(async () => {
     setIsLoadingContext(true);
     try {
-      await loadExams();
       await loadCategories();
     } catch (error: unknown) {
       toast.error("Failed to load category source context", { description: toErrorMessage(error) });
     } finally {
       setIsLoadingContext(false);
     }
-  }, [loadCategories, loadExams]);
+  }, [loadCategories]);
 
   const loadSources = useCallback(async (categoryId: number) => {
     setIsLoadingSources(true);
@@ -176,15 +157,6 @@ export default function CategoryAISourceManager() {
       setIsLoadingSources(false);
     }
   }, [activeOnlySources]);
-
-  useEffect(() => {
-    setIsLoadingContext(true);
-    loadExams()
-      .catch((error: unknown) => {
-        toast.error("Failed to load category source context", { description: toErrorMessage(error) });
-      })
-      .finally(() => setIsLoadingContext(false));
-  }, [loadExams]);
 
   useEffect(() => {
     setIsLoadingContext(true);
@@ -410,19 +382,6 @@ export default function CategoryAISourceManager() {
         </select>
 
         <select
-          value={examFilterId}
-          onChange={(event) => setExamFilterId(event.target.value)}
-          className="rounded border border-slate-300 px-3 py-2 text-sm"
-        >
-          <option value="">All exams</option>
-          {exams.map((item) => (
-            <option key={item.id} value={String(item.id)}>
-              {item.name}
-            </option>
-          ))}
-        </select>
-
-        <select
           value={selectedCategoryId}
           onChange={(event) => {
             setSelectedCategoryId(event.target.value);
@@ -458,11 +417,10 @@ export default function CategoryAISourceManager() {
       </div>
 
       <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-        {isLoadingContext ? "Loading exams/categories..." : null}
+        {isLoadingContext ? "Loading categories..." : null}
         {selectedCategory ? (
           <span>
-            Selected category: <strong>ID {selectedCategory.id}</strong> | exams:{" "}
-            {selectedCategory.exam_ids.length > 0 ? selectedCategory.exam_ids.join(", ") : "none"}
+            Selected category: <strong>ID {selectedCategory.id}</strong>
           </span>
         ) : (
           <span>Select a category to manage sources.</span>

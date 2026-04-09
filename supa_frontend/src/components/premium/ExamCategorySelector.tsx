@@ -39,6 +39,7 @@ export default function CategorySelector({
 }: CategorySelectorProps) {
   const [categories, setCategories] = useState<PremiumCategory[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(false);
+  void examId;
 
   useEffect(() => {
     const loadCategories = async () => {
@@ -50,7 +51,6 @@ export default function CategorySelector({
           {
             params: {
               hierarchical: true,
-              exam_id: examId || undefined,
             },
           },
         );
@@ -64,7 +64,7 @@ export default function CategorySelector({
     };
 
     loadCategories();
-  }, [quizKind, examId]);
+  }, [quizKind]);
 
   const flatCategories = useMemo(() => flattenCategories(categories), [categories]);
 

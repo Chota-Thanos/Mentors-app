@@ -308,6 +308,7 @@ function SeriesCard({
   const cover = series.cover_image_url || "";
   const providerName = profile?.display_name || (isMains ? "Mentors App Mains Faculty" : "Mentors App Prelims Faculty");
   const providerLine = profile?.headline || profile?.role || (isMains ? "Mains writing mentor" : "Objective practice mentor");
+  const providerBio = textExcerpt(profile?.bio, "");
   const categoryLine = category_labels.filter(Boolean).slice(0, 3).join(", ");
   const isPremium = series.access_type !== "free";
   const isPopular = review.total >= 12 && review.average >= 4.2;
@@ -371,6 +372,10 @@ function SeriesCard({
             <SeriesBadge label={isMains ? "Answer-writing" : "MCQ series"} tone="neutral" />
           </div>
 
+          {providerBio ? (
+            <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{providerBio}</p>
+          ) : null}
+
           <p className="mt-3 text-xl font-black text-slate-900 lg:hidden">{formatListingPrice(series.price)}</p>
         </div>
 
@@ -419,7 +424,7 @@ export default function TestSeriesCatalogView({
   description,
 }: TestSeriesCatalogViewProps) {
   const { isAuthenticated } = useAuth();
-  const { globalExamId } = useExamContext();
+  const { globalExamId, globalExamName, isLoading: examLoading } = useExamContext();
   const [seriesRows, setSeriesRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -526,6 +531,17 @@ export default function TestSeriesCatalogView({
               All {title}
             </h1>
             <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-600 sm:text-base">{description}</p>
+            <div className="mt-4 rounded-3xl border border-violet-100 bg-violet-50/70 p-4">
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-violet-700">Exam Scope</p>
+              <p className="mt-1 text-lg font-black tracking-tight text-slate-900">
+                {examLoading ? "Loading exam preference..." : globalExamName || "All Exams"}
+              </p>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                {globalExamName
+                  ? "Programs in this directory are filtered to the selected exam."
+                  : "Programs in this directory are showing across all exams."}
+              </p>
+            </div>
           </div>
 
           <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">

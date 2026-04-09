@@ -7,14 +7,27 @@ import { premiumApi } from "@/lib/premiumApi";
 import { legacyPremiumAiApi } from "@/lib/legacyPremiumAiApi";
 import { toast } from "sonner";
 import { Loader2, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
-import { PremiumAIExampleAnalysis, PremiumAIContentType, PremiumAIQuizInstruction } from "@/types/premium";
+import { PremiumAIExampleAnalysis, PremiumAIContentType, PremiumAIQuizInstruction, PremiumExam } from "@/types/premium";
 
 function normalizeTag(value?: string | null): string {
     return String(value ?? "").trim().toLowerCase();
 }
 
+function normalizeExamIds(value: unknown): number[] {
+    if (!Array.isArray(value)) return [];
+    const output: number[] = [];
+    value.forEach((item) => {
+        const parsed = Number(item);
+        if (Number.isFinite(parsed) && parsed > 0 && !output.includes(parsed)) {
+            output.push(parsed);
+        }
+    });
+    return output;
+}
+
 export default function StyleAnalysisPage() {
     const [analyses, setAnalyses] = useState<PremiumAIExampleAnalysis[]>([]);
+    const [availableExams, setAvailableExams] = useState<PremiumExam[]>([]);
     const [instructionSettings, setInstructionSettings] = useState<PremiumAIQuizInstruction[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -25,6 +38,7 @@ export default function StyleAnalysisPage() {
     const [examples, setExamples] = useState("");
     const [styleProfile, setStyleProfile] = useState("");
     const [tags, setTags] = useState<string[]>([]);
+    const [selectedExamIds, setSelectedExamIds] = useState<number[]>([]);
     const [tagLevel1, setTagLevel1] = useState("");
     const [tagLevel2, setTagLevel2] = useState("");
     const [analysisPrompt, setAnalysisPrompt] = useState("");
@@ -74,6 +88,10 @@ export default function StyleAnalysisPage() {
     }, []);
 
     useEffect(() => {
+        loadExams();
+    }, []);
+
+    useEffect(() => {
         setAnalysisPrompt(String(currentInstructionSetting?.style_analysis_system_prompt || "").trim());
     }, [currentInstructionSetting?.id, currentInstructionSetting?.style_analysis_system_prompt]);
 
@@ -104,6 +122,15 @@ export default function StyleAnalysisPage() {
         }
     };
 
+    const loadExams = async () => {
+        try {
+            const response = await premiumApi.get<PremiumExam[]>("/exams", { params: { active_only: true } });
+            setAvailableExams(Array.isArray(response.data) ? response.data : []);
+        } catch {
+            toast.error("Failed to load exams.");
+        }
+    };
+
     const resetForm = useCallback(() => {
         const mainsDefaultPrompt = String(
             instructionSettings.find((item) => item.content_type === "mains_evaluation")?.style_analysis_system_prompt || "",
@@ -113,6 +140,7 @@ export default function StyleAnalysisPage() {
         setExamples("");
         setStyleProfile("{}");
         setTags([]);
+        setSelectedExamIds([]);
         setTagLevel1("");
         setTagLevel2("");
         setAnalysisPrompt(mainsDefaultPrompt);
@@ -141,6 +169,7 @@ export default function StyleAnalysisPage() {
                     String(parsedProfile.answer_style_instructions || parsedProfile.answer_style || ""),
                 );
                 setTags(item.tags || []);
+                setSelectedExamIds(normalizeExamIds(item.exam_ids));
                 setTagLevel1(item.tag_level1 || "");
                 setTagLevel2(item.tag_level2 || "");
             }
@@ -268,6 +297,7 @@ export default function StyleAnalysisPage() {
                 example_questions: exampleList.length > 0 ? exampleList : [examples],
                 style_profile: profileJson,
                 tags: tags,
+                exam_ids: selectedExamIds,
                 tag_level1: normalizeTag(tagLevel1) || null,
                 tag_level2: normalizeTag(tagLevel2) || null,
                 is_active: true
@@ -287,6 +317,12 @@ export default function StyleAnalysisPage() {
             setIsSaving(false);
         }
     };
+
+    const toggleExamId = useCallback((examId: number) => {
+        setSelectedExamIds((prev) =>
+            prev.includes(examId) ? prev.filter((item) => item !== examId) : [...prev, examId],
+        );
+    }, []);
 
     const handleDelete = async (id: number) => {
         if (!confirm("Are you sure you want to delete this analysis?")) return;
@@ -495,6 +531,30 @@ export default function StyleAnalysisPage() {
                                                 className="w-full text-sm border-b-2 border-slate-200 py-1 focus:border-indigo-500 focus:outline-none bg-transparent"
                                                 placeholder="e.g. upsc, prelims, environment"
                                             />
+                                        </div>
+                                        <div className="space-y-2 md:col-span-2">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <label className="text-xs font-bold uppercase text-slate-400">Target Exams</label>
+                                                <span className="text-[11px] text-slate-500">This format can be reused across multiple exams.</span>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                                {availableExams.length === 0 ? (
+                                                    <span className="text-sm text-slate-500">No active exams available.</span>
+                                                ) : availableExams.map((exam) => (
+                                                    <button
+                                                        key={exam.id}
+                                                        type="button"
+                                                        onClick={() => toggleExamId(exam.id)}
+                                                        className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                                                            selectedExamIds.includes(exam.id)
+                                                                ? "border-indigo-500 bg-indigo-600 text-white"
+                                                                : "border-slate-300 bg-white text-slate-700"
+                                                        }`}
+                                                    >
+                                                        {exam.name}
+                                                    </button>
+                                                ))}
+                                            </div>
                                         </div>
                                         <div className="space-y-1 md:col-span-2">
                                             <label className="text-xs font-bold uppercase text-slate-400">Universal Style Analysis Prompt (Per Content Type)</label>

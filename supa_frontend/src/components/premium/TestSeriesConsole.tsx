@@ -16,8 +16,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import DiscussionConfigEditor from "@/components/premium/DiscussionConfigEditor";
-import RichTextContent from "@/components/ui/RichTextContent";
 import RichTextField from "@/components/ui/RichTextField";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -29,19 +27,17 @@ import {
 } from "@/lib/accessControl";
 import { premiumApi } from "@/lib/premiumApi";
 import { richTextToPlainText, toNullableRichText } from "@/lib/richText";
-import { getDiscussionDraftFromMeta, getDiscussionFromMeta, mergeDiscussionIntoMeta } from "@/lib/testSeriesDiscussion";
 import type {
   MainsCopySubmission,
   MentorshipEntitlement,
   MentorshipRequest,
   MentorshipSlot,
   ModerationActivitySummary,
+  PremiumExam,
   ProviderDashboardSummary,
   TestSeries,
   TestSeriesCreatePayload,
   TestSeriesTest,
-  TestSeriesTestCreatePayload,
-  TestSeriesTestUpdatePayload,
   TestSeriesUpdatePayload,
   UserMainsPerformanceReport,
 } from "@/types/premium";
@@ -61,21 +57,9 @@ const emptySeriesForm: TestSeriesCreatePayload = {
   series_kind: "quiz",
   access_type: "subscription",
   price: 0,
+  exam_ids: [],
   is_public: false,
   is_active: true,
-  meta: {},
-};
-
-const emptyTestForm: TestSeriesTestCreatePayload = {
-  title: "",
-  description: "",
-  test_kind: "prelims",
-  thumbnail_url: "",
-  is_public: true,
-  is_premium: true,
-  price: 0,
-  is_finalized: false,
-  series_order: 0,
   meta: {},
 };
 
@@ -92,7 +76,6 @@ export default function TestSeriesConsole() {
     () => canBuildPrelimsSeries || canBuildMainsSeries,
     [canBuildMainsSeries, canBuildPrelimsSeries],
   );
-  const canReviewCopies = useMemo(() => mainsMentorLike || adminLike, [mainsMentorLike, adminLike]);
   const canScheduleMentorship = useMemo(() => adminLike || moderatorLike, [adminLike, moderatorLike]);
   const canManageMentorSlots = useMemo(() => mainsMentorLike, [mainsMentorLike]);
   const canHandleMentorship = useMemo(
@@ -102,6 +85,7 @@ export default function TestSeriesConsole() {
   const [mode, setMode] = useState<ConsoleMode>("explore");
 
   const [seriesRows, setSeriesRows] = useState<TestSeries[]>([]);
+  const [availableExams, setAvailableExams] = useState<PremiumExam[]>([]);
   const [selectedSeriesId, setSelectedSeriesId] = useState<number | null>(null);
   const [seriesTestsById, setSeriesTestsById] = useState<Record<string, TestSeriesTest[]>>({});
   const [seriesLoading, setSeriesLoading] = useState(false);
@@ -110,18 +94,12 @@ export default function TestSeriesConsole() {
   const [editingSeriesId, setEditingSeriesId] = useState<number | null>(null);
   const [savingSeries, setSavingSeries] = useState(false);
 
-  const [testForm, setTestForm] = useState<TestSeriesTestCreatePayload>(emptyTestForm);
-  const [editingTestId, setEditingTestId] = useState<number | null>(null);
-  const [savingTest, setSavingTest] = useState(false);
-
   const [providerSummary, setProviderSummary] = useState<ProviderDashboardSummary | null>(null);
   const [providerSummaryLoading, setProviderSummaryLoading] = useState(false);
   const [moderationSummary, setModerationSummary] = useState<ModerationActivitySummary | null>(null);
   const [moderationSummaryLoading, setModerationSummaryLoading] = useState(false);
 
   const [copySubmissionsByTest, setCopySubmissionsByTest] = useState<Record<string, MainsCopySubmission[]>>({});
-  const [submissionsLoadingTestId, setSubmissionsLoadingTestId] = useState<number | null>(null);
-
   const [slots, setSlots] = useState<MentorshipSlot[]>([]);
 
   const [mentorshipRequests, setMentorshipRequests] = useState<MentorshipRequest[]>([]);
@@ -140,20 +118,6 @@ export default function TestSeriesConsole() {
     }
   }, [canHandleMentorship, operatorEnabled]);
 
-  const selectedSeries = useMemo(
-    () => seriesRows.find((item) => item.id === selectedSeriesId) || null,
-    [selectedSeriesId, seriesRows],
-  );
-  const activeTestDiscussion = useMemo(
-    () => getDiscussionDraftFromMeta(testForm.meta, "test_discussion"),
-    [testForm.meta],
-  );
-
-  const selectedSeriesTests = useMemo(
-    () => (selectedSeriesId ? seriesTestsById[String(selectedSeriesId)] || [] : []),
-    [seriesTestsById, selectedSeriesId],
-  );
-
   const seriesKindOptions = useMemo(() => {
     if (adminLike || (canBuildPrelimsSeries && canBuildMainsSeries)) {
       return [
@@ -167,30 +131,22 @@ export default function TestSeriesConsole() {
     }
     return [{ value: "quiz" as const, label: "Prelims Series" }];
   }, [adminLike, canBuildMainsSeries, canBuildPrelimsSeries]);
+  const examNameById = useMemo(
+    () => new Map(availableExams.map((exam) => [exam.id, exam.name] as const)),
+    [availableExams],
+  );
 
-  const baseTestKindOptions = useMemo(() => {
-    if (adminLike || (canBuildPrelimsSeries && canBuildMainsSeries)) {
-      return [
-        { value: "prelims" as const, label: "Prelims Test" },
-        { value: "mains" as const, label: "Mains Test" },
-      ];
-    }
-    if (canBuildMainsSeries) {
-      return [{ value: "mains" as const, label: "Mains Test" }];
-    }
-    return [{ value: "prelims" as const, label: "Prelims Test" }];
-  }, [adminLike, canBuildMainsSeries, canBuildPrelimsSeries]);
-
-  const scopedTestKindOptions = useMemo(() => {
-    const seriesKind = String(selectedSeries?.series_kind || "").trim().toLowerCase();
-    if (seriesKind === "mains") {
-      return [{ value: "mains" as const, label: "Mains Test" }];
-    }
-    if (seriesKind === "quiz") {
-      return [{ value: "prelims" as const, label: "Prelims Test" }];
-    }
-    return baseTestKindOptions;
-  }, [baseTestKindOptions, selectedSeries?.series_kind]);
+  const toggleSeriesExamId = (examId: number) => {
+    setSeriesForm((prev) => {
+      const currentIds = Array.isArray(prev.exam_ids) ? prev.exam_ids : [];
+      return {
+        ...prev,
+        exam_ids: currentIds.includes(examId)
+          ? currentIds.filter((item) => item !== examId)
+          : [...currentIds, examId],
+      };
+    });
+  };
 
   const loadSeries = async () => {
     setSeriesLoading(true);
@@ -247,6 +203,18 @@ export default function TestSeriesConsole() {
       setSelectedSeriesId(null);
     } finally {
       setSeriesLoading(false);
+    }
+  };
+
+  const loadExams = async () => {
+    try {
+      const response = await premiumApi.get<PremiumExam[]>("/exams", {
+        params: { active_only: true },
+      });
+      setAvailableExams(Array.isArray(response.data) ? response.data : []);
+    } catch (error: unknown) {
+      setAvailableExams([]);
+      toast.error("Failed to load exams", { description: toError(error) });
     }
   };
 
@@ -344,6 +312,11 @@ export default function TestSeriesConsole() {
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     if (loading) return;
+    void loadExams();
+  }, [loading]);
+
+  useEffect(() => {
+    if (loading) return;
     void loadSeries();
     void loadMentorshipSlots();
     void loadMentorshipRequests();
@@ -374,27 +347,7 @@ export default function TestSeriesConsole() {
     setSeriesForm((prev) => ({ ...prev, series_kind: allowedSeriesKinds[0] || "quiz" }));
   }, [seriesForm.series_kind, seriesKindOptions]);
 
-  useEffect(() => {
-    const allowedTestKinds = scopedTestKindOptions.map((option) => option.value);
-    if (allowedTestKinds.includes(testForm.test_kind || "prelims")) return;
-    setTestForm((prev) => ({ ...prev, test_kind: allowedTestKinds[0] || "prelims" }));
-  }, [scopedTestKindOptions, testForm.test_kind]);
   /* eslint-enable react-hooks/exhaustive-deps */
-
-  const beginEditSeries = (series: TestSeries) => {
-    setEditingSeriesId(series.id);
-    setSeriesForm({
-      title: series.title,
-      description: series.description || "",
-      cover_image_url: series.cover_image_url || "",
-      series_kind: series.series_kind,
-      access_type: series.access_type,
-      price: Number(series.price || 0),
-      is_public: series.is_public,
-      is_active: series.is_active,
-      meta: series.meta || {},
-    });
-  };
 
   const resetSeriesForm = () => {
     setEditingSeriesId(null);
@@ -423,6 +376,7 @@ export default function TestSeriesConsole() {
           ...seriesForm,
           title,
           description: toNullableRichText(seriesForm.description || ""),
+          exam_ids: Array.isArray(seriesForm.exam_ids) ? seriesForm.exam_ids : [],
         };
         await premiumApi.put(`/programs/${editingSeriesId}`, payload);
         toast.success("Series updated");
@@ -431,6 +385,7 @@ export default function TestSeriesConsole() {
           ...seriesForm,
           title,
           description: toNullableRichText(seriesForm.description || ""),
+          exam_ids: Array.isArray(seriesForm.exam_ids) ? seriesForm.exam_ids : [],
         };
         const response = await premiumApi.post<TestSeries>("/programs", payload);
         if (response.data?.id) {
@@ -445,102 +400,6 @@ export default function TestSeriesConsole() {
       toast.error("Failed to save series", { description: toError(error) });
     } finally {
       setSavingSeries(false);
-    }
-  };
-
-  const removeSeries = async (seriesId: number) => {
-    const ok = window.confirm("Archive this programs?");
-    if (!ok) return;
-    try {
-      await premiumApi.delete(`/programs/${seriesId}`);
-      toast.success("Series archived");
-      await loadSeries();
-      if (canBuildSeries) await loadProviderSummary();
-    } catch (error: unknown) {
-      toast.error("Failed to archive series", { description: toError(error) });
-    }
-  };
-
-  const beginEditTest = (test: TestSeriesTest) => {
-    setEditingTestId(test.id);
-    setTestForm({
-      title: test.title,
-      description: test.description || "",
-      test_kind: test.test_kind,
-      thumbnail_url: test.thumbnail_url || "",
-      is_public: test.is_public,
-      is_premium: test.is_premium,
-      price: Number(test.price || 0),
-      is_finalized: test.is_finalized,
-      series_order: test.series_order,
-      meta: test.meta || {},
-    });
-  };
-
-  const resetTestForm = () => {
-    setEditingTestId(null);
-    setTestForm({
-      ...emptyTestForm,
-      test_kind: scopedTestKindOptions[0]?.value || "prelims",
-    });
-  };
-
-  const saveTest = async () => {
-    if (!selectedSeriesId) {
-      toast.error("Select a series first");
-      return;
-    }
-    const title = String(testForm.title || "").trim();
-    if (!title) {
-      toast.error("Test title is required");
-      return;
-    }
-    const selectedKind = String(testForm.test_kind || "").trim().toLowerCase();
-    if (!scopedTestKindOptions.some((option) => option.value === selectedKind)) {
-      toast.error("Selected test kind is not allowed for this series or role.");
-      return;
-    }
-    setSavingTest(true);
-    try {
-      if (editingTestId) {
-        const payload: TestSeriesTestUpdatePayload = {
-          ...testForm,
-          title,
-          description: toNullableRichText(testForm.description || ""),
-        };
-        await premiumApi.put(`/tests/${editingTestId}`, payload);
-        toast.success("Test updated");
-      } else {
-        const payload: TestSeriesTestCreatePayload = {
-          ...testForm,
-          title,
-          description: toNullableRichText(testForm.description || ""),
-        };
-        await premiumApi.post(`/programs/${selectedSeriesId}/tests`, payload);
-        toast.success("Test created");
-      }
-      resetTestForm();
-      await loadSeriesTests(selectedSeriesId);
-      await loadSeries();
-      if (canBuildSeries) await loadProviderSummary();
-    } catch (error: unknown) {
-      toast.error("Failed to save test", { description: toError(error) });
-    } finally {
-      setSavingTest(false);
-    }
-  };
-
-  const removeTest = async (testId: number) => {
-    const ok = window.confirm("Archive this test?");
-    if (!ok) return;
-    try {
-      await premiumApi.delete(`/tests/${testId}`);
-      toast.success("Test archived");
-      if (selectedSeriesId) await loadSeriesTests(selectedSeriesId);
-      await loadSeries();
-      if (canBuildSeries) await loadProviderSummary();
-    } catch (error: unknown) {
-      toast.error("Failed to archive test", { description: toError(error) });
     }
   };
 
@@ -562,7 +421,6 @@ export default function TestSeriesConsole() {
   };
 
   const loadCopySubmissions = async (testId: number) => {
-    setSubmissionsLoadingTestId(testId);
     try {
       const response = await premiumApi.get<MainsCopySubmission[]>(`/tests/${testId}/copy-submissions`);
       setCopySubmissionsByTest((prev) => ({
@@ -572,8 +430,6 @@ export default function TestSeriesConsole() {
     } catch (error: unknown) {
       toast.error("Failed to load submissions", { description: toError(error) });
       setCopySubmissionsByTest((prev) => ({ ...prev, [String(testId)]: [] }));
-    } finally {
-      setSubmissionsLoadingTestId(null);
     }
   };
 
@@ -750,6 +606,33 @@ export default function TestSeriesConsole() {
                             Public
                           </label>
                         </div>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <label className="text-xs font-semibold uppercase text-slate-500">Target exams</label>
+                            <span className="text-xs text-slate-500">Programs and tests show under these exams.</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                            {availableExams.length === 0 ? (
+                              <span className="text-sm text-slate-500">No active exams available.</span>
+                            ) : availableExams.map((exam) => {
+                              const active = (seriesForm.exam_ids || []).includes(exam.id);
+                              return (
+                                <button
+                                  key={exam.id}
+                                  type="button"
+                                  onClick={() => toggleSeriesExamId(exam.id)}
+                                  className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                                    active
+                                      ? "border-indigo-500 bg-indigo-600 text-white"
+                                      : "border-slate-300 bg-white text-slate-700"
+                                  }`}
+                                >
+                                  {exam.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                         <div className="flex gap-2">
                           <button
                             type="button"
@@ -766,7 +649,7 @@ export default function TestSeriesConsole() {
                         </div>
                       </div>
                     ) : (
-                      <p className="text-xs text-slate-500">Select a series below to manage it, or use the button above to create a new one.</p>
+                      <p className="text-xs text-slate-500">Use the cards below to open or manage a program, or use the button above to create a new one.</p>
                     )}
                   </>
                 </>
@@ -778,192 +661,51 @@ export default function TestSeriesConsole() {
                 <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Your Series</p>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {seriesRows.map((series) => (
-                    <div key={series.id} className={`rounded-md border px-3 py-2 ${selectedSeriesId === series.id ? "border-slate-900 bg-slate-50" : "border-slate-200 bg-white"}`}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedSeriesId(series.id);
-                          void loadSeriesTests(series.id);
-                        }}
-                        className="w-full text-left"
-                      >
-                        <p className="text-sm font-semibold text-slate-900">{series.title}</p>
-                        <p className="text-xs text-slate-500">{series.test_count} tests</p>
-                      </button>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <Link href={`/programs/${series.id}`} className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px]">
+                    <article key={series.id} className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_14px_32px_rgba(15,23,42,0.06)] transition hover:-translate-y-1 hover:shadow-[0_22px_48px_rgba(15,23,42,0.12)]">
+                      <div className="bg-[linear-gradient(135deg,#eef4ff_0%,#f8fbff_55%,#edfdf7_100%)] px-4 py-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-base font-black tracking-tight text-[#091a4a]">{series.title}</p>
+                            <p className="mt-1 text-xs text-slate-600">
+                              {series.test_count} tests
+                            </p>
+                          </div>
+                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${series.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>
+                            {series.is_active ? "Active" : "Archived"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="px-4 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                            {String(series.series_kind || "").trim() || "series"}
+                          </span>
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                            {String(series.access_type || "").trim() || "subscription"}
+                          </span>
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                            {series.is_public ? "Public" : "Private"}
+                          </span>
+                          {(series.exam_ids || []).map((examId) => (
+                            <span key={examId} className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+                              {examNameById.get(examId) || `Exam ${examId}`}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <Link href={`/programs/${series.id}`} className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700">
                           Detail
                         </Link>
-                        <Link href={`/programs/${series.id}/manage`} className="rounded border border-indigo-300 bg-white px-2 py-1 text-[11px] text-indigo-700">
+                        <Link href={`/programs/${series.id}/manage`} className="inline-flex items-center rounded-xl border border-indigo-300 bg-indigo-50 px-3 py-2 text-[11px] font-semibold text-indigo-700">
                           Manage
                         </Link>
+                        </div>
                       </div>
-                    </div>
+                    </article>
                   ))}
                   {!seriesLoading && seriesRows.length === 0 ? <p className="text-sm text-slate-500">No series yet.</p> : null}
                 </div>
               </div>
-            </div>
-
-            <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
-              {selectedSeries ? (
-                <>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h2 className="text-xl font-bold text-slate-900">{selectedSeries.title}</h2>
-                      {selectedSeries.description ? (
-                        <RichTextContent value={selectedSeries.description} className="mt-1 text-sm text-slate-600" />
-                      ) : (
-                        <p className="text-sm text-slate-600">No description.</p>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Link href={`/programs/${selectedSeries.id}`} className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-                        Learner View
-                      </Link>
-                      <Link href={`/programs/${selectedSeries.id}/manage`} className="rounded-md border border-indigo-300 px-3 py-2 text-sm text-indigo-700">
-                        Dedicated Manage
-                      </Link>
-                      {canBuildSeries ? (
-                        <button type="button" onClick={() => beginEditSeries(selectedSeries)} className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-                          Edit Series
-                        </button>
-                      ) : null}
-                      {canBuildSeries ? (
-                        <button type="button" onClick={() => void removeSeries(selectedSeries.id)} className="rounded-md border border-rose-300 px-3 py-2 text-sm text-rose-700">
-                          Archive
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {canBuildSeries ? (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="mb-2 text-sm font-semibold text-slate-900">{editingTestId ? "Edit Test" : "Create Test"}</p>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        <input
-                          value={testForm.title || ""}
-                          onChange={(event) => setTestForm((prev) => ({ ...prev, title: event.target.value }))}
-                          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                          placeholder="Test title"
-                        />
-                        <div className="md:col-span-2">
-                          <RichTextField
-                            label="Test description"
-                            value={testForm.description || ""}
-                            onChange={(value) => setTestForm((prev) => ({ ...prev, description: value }))}
-                            placeholder="Describe what this test covers, how learners should use it, and any submission expectations."
-                            helperText="Used on learner-facing test cards and detail pages."
-                          />
-                        </div>
-                        {(testForm.test_kind || scopedTestKindOptions[0]?.value || "prelims") === "prelims" ? (
-                          <div className="md:col-span-2">
-                            <DiscussionConfigEditor
-                              heading="Post-test discussion"
-                              hint="Attach a discussion directly after this prelims test."
-                              value={activeTestDiscussion}
-                              onChange={(discussion) =>
-                                setTestForm((prev) => ({
-                                  ...prev,
-                                  meta: mergeDiscussionIntoMeta(prev.meta || {}, "test_discussion", discussion),
-                                }))
-                              }
-                            />
-                          </div>
-                        ) : null}
-                        <select
-                          value={testForm.test_kind || scopedTestKindOptions[0]?.value || "prelims"}
-                          onChange={(event) =>
-                            setTestForm((prev) => ({
-                              ...prev,
-                              test_kind: event.target.value as "prelims" | "mains",
-                            }))
-                          }
-                          disabled={scopedTestKindOptions.length <= 1}
-                          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-                        >
-                          {scopedTestKindOptions.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="mt-2 flex gap-2">
-                        <button type="button" disabled={savingTest} onClick={() => void saveTest()} className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">
-                          {editingTestId ? "Update Test" : "Create Test"}
-                        </button>
-                        {editingTestId ? (
-                          <button type="button" onClick={resetTestForm} className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-                            Cancel
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="space-y-3">
-                    {selectedSeriesTests.map((test) => {
-                      const submissions = copySubmissionsByTest[String(test.id)] || [];
-                      return (
-                        <div key={test.id} className="rounded-lg border border-slate-200 bg-white p-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <p className="text-base font-semibold text-slate-900">{test.title}</p>
-                              <p className="text-xs text-slate-500">{richTextToPlainText(test.description || "") || "No description"}</p>
-                              {getDiscussionFromMeta(test.meta, "test_discussion") ? (
-                                <span className="mt-1 inline-flex rounded bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold text-violet-700">
-                                  Class Ready
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <Link href={`/collections/${test.id}`} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs">Open</Link>
-                              {canBuildSeries ? <Link href={`/collections/${test.id}/question-methods`} className="rounded-md border border-indigo-300 px-2.5 py-1 text-xs text-indigo-700">Manage Questions</Link> : null}
-                              {canBuildSeries ? <button type="button" onClick={() => beginEditTest(test)} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs">Edit</button> : null}
-                              {canBuildSeries ? <button type="button" onClick={() => void removeTest(test.id)} className="rounded-md border border-rose-300 px-2.5 py-1 text-xs text-rose-700">Archive</button> : null}
-                              <button type="button" onClick={() => void loadCopySubmissions(test.id)} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs">Submissions</button>
-                            </div>
-                          </div>
-
-                          {submissions.length > 0 ? (
-                            <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
-                              {!canReviewCopies ? <p className="text-xs text-amber-700">Read-only copy queue. Open the mentor desk on the test to review answers and save marks.</p> : null}
-                              {submissions.map((submission) => (
-                                <div key={submission.id} className="rounded-md border border-slate-200 bg-slate-50 p-2">
-                                  <p className="text-xs font-semibold text-slate-700">Submission #{submission.id} | {submission.status}</p>
-                                  <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-600">
-                                    {submission.provider_eta_text ? <span>ETA: {submission.provider_eta_text}</span> : null}
-                                    {submission.total_marks !== null && submission.total_marks !== undefined ? <span>Marks: {submission.total_marks}</span> : null}
-                                    {submission.question_responses.length > 0 ? <span>{submission.question_responses.length} question-wise answer sets</span> : null}
-                                    {submission.answer_pdf_url ? (
-                                      <a href={submission.answer_pdf_url} target="_blank" rel="noreferrer" className="text-indigo-700 hover:underline">
-                                        Answer PDF
-                                      </a>
-                                    ) : null}
-                                    {submission.checked_copy_pdf_url ? (
-                                      <a href={submission.checked_copy_pdf_url} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">
-                                        Checked Copy
-                                      </a>
-                                    ) : null}
-                                  </div>
-                                  <div className="mt-2">
-                                    <Link href={`/collections/${test.id}`} className="rounded border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-emerald-700">
-                                      Open Test
-                                    </Link>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : submissionsLoadingTestId === test.id ? <p className="mt-2 text-xs text-slate-500">Loading submissions...</p> : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-slate-500">Select a series to manage tests and submissions.</p>
-              )}
             </div>
           </div>
 
@@ -1030,30 +772,44 @@ export default function TestSeriesConsole() {
             {seriesRows.map((series) => {
               const tests = seriesTestsById[String(series.id)] || [];
               return (
-                <div key={series.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white p-4">
-                  <h2 className="text-lg font-bold text-slate-900">{series.title}</h2>
-                  <p className="mt-1 text-sm text-slate-600">{richTextToPlainText(series.description || "") || "No description."}</p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <Link href={`/programs/${series.id}`} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs">
+                <article key={series.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+                  <div className="bg-[linear-gradient(135deg,#f9fbff_0%,#eef4ff_52%,#f5fffb_100%)] px-5 py-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h2 className="text-xl font-black tracking-tight text-[#091a4a]">{series.title}</h2>
+                        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{richTextToPlainText(series.description || "") || "No description."}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full border border-white/70 bg-white/80 px-3 py-1 text-[11px] font-semibold text-slate-600">
+                          {String(series.series_kind || "").trim() || "series"}
+                        </span>
+                        <span className="rounded-full border border-white/70 bg-white/80 px-3 py-1 text-[11px] font-semibold text-slate-600">
+                          {series.test_count} tests
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <Link href={`/programs/${series.id}`} className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
                       Open Detail
                     </Link>
                     {isAuthenticated ? (
-                      <button type="button" onClick={() => void enrollInSeries(series.id, Number(series.price || 0), String(series.access_type || ""))} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs">Enroll</button>
+                      <button type="button" onClick={() => void enrollInSeries(series.id, Number(series.price || 0), String(series.access_type || ""))} className="inline-flex items-center rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Enroll</button>
                     ) : null}
+                    </div>
                   </div>
-                  <div className="mt-3 space-y-2">
+                  <div className="space-y-2 px-5 py-5">
                     {tests.map((test) => {
                       const submissions = copySubmissionsByTest[String(test.id)] || [];
                       return (
-                        <div key={test.id} className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                        <div key={test.id} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
                               <p className="text-sm font-semibold text-slate-900">{test.title}</p>
                               <p className="text-xs text-slate-500">{richTextToPlainText(test.description || "") || "No description."}</p>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              <Link href={`/collections/${test.id}`} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs">Open</Link>
-                              <Link href={test.test_kind === "mains" ? `/collections/${test.id}` : `/collections/${test.id}/test`} className="rounded border border-indigo-300 bg-white px-2 py-1 text-xs text-indigo-700">{test.test_kind === "mains" ? "Open Test" : "Start"}</Link>
+                              <Link href={`/collections/${test.id}`} className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700">Open</Link>
+                              <Link href={test.test_kind === "mains" ? `/collections/${test.id}` : `/collections/${test.id}/test`} className="rounded-xl border border-indigo-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-700">{test.test_kind === "mains" ? "Open Test" : "Start"}</Link>
                             </div>
                           </div>
                           {test.test_kind === "mains" && isAuthenticated ? (
@@ -1077,7 +833,7 @@ export default function TestSeriesConsole() {
                       );
                     })}
                   </div>
-                </div>
+                </article>
               );
             })}
             {!seriesLoading && seriesRows.length === 0 ? (

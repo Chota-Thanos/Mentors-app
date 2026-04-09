@@ -34,6 +34,10 @@ type ParsedMainsQuestion = {
   model_answer?: string;
   word_limit?: number;
   source_reference?: string | null;
+  mains_category_ids?: number[];
+  mains_category_id?: number | null;
+  category_ids?: number[];
+  description?: string;
 };
 
 type MainsParseResponse = {
@@ -368,6 +372,7 @@ export default function MainsQuestionRepositoryStudio({
       .map((row) => {
         const questionText = String(row.question_text || "").trim();
         if (!questionText) return null;
+        const resolvedCategoryIds = extractMainsCategoryIds(row as unknown as Record<string, unknown>);
         return {
           local_id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           question_text: questionText,
@@ -375,7 +380,7 @@ export default function MainsQuestionRepositoryStudio({
           model_answer: String(row.model_answer || "").trim(),
           word_limit: normalizeWordLimit(row.word_limit, fallbackWordLimit),
           source_reference: String(row.source_reference || fallbackSourceReference).trim(),
-          mains_category_ids: [...selectedCategoryIds],
+          mains_category_ids: resolvedCategoryIds.length > 0 ? resolvedCategoryIds : [...selectedCategoryIds],
           selected: true,
         } as MainsDraftItem;
       })
@@ -392,10 +397,6 @@ export default function MainsQuestionRepositoryStudio({
     const questionText = manualQuestion.trim();
     if (!questionText) {
       toast.error("Question text is required.");
-      return;
-    }
-    if (selectedCategoryIds.length === 0) {
-      toast.error("Select at least one mains category.");
       return;
     }
 
@@ -421,8 +422,8 @@ export default function MainsQuestionRepositoryStudio({
   const handleParseWithAi = async () => {
     if (!ensureGenerationAccess()) return;
 
-    if (selectedCategoryIds.length === 0) {
-      toast.error("Select at least one mains category.");
+    if (useMainsCategorySource && selectedCategoryIds.length === 0) {
+      toast.error("Select at least one mains category when category source mode is enabled.");
       return;
     }
     if (!useMainsCategorySource && !sourceValue.trim()) {
@@ -433,7 +434,7 @@ export default function MainsQuestionRepositoryStudio({
     setIsParsing(true);
     try {
       const payload: Record<string, unknown> = {
-        mains_category_ids: selectedCategoryIds,
+        mains_category_ids: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
         use_mains_category_source: useMainsCategorySource,
         number_of_questions: effectiveParseCount,
         word_limit: effectiveWordLimit,
@@ -468,8 +469,8 @@ export default function MainsQuestionRepositoryStudio({
   const handleGenerateWithAi = async () => {
     if (!ensureGenerationAccess()) return;
 
-    if (selectedCategoryIds.length === 0) {
-      toast.error("Select at least one mains category.");
+    if (generateUseMainsCategorySource && selectedCategoryIds.length === 0) {
+      toast.error("Select at least one mains category when category source mode is enabled.");
       return;
     }
     if (!generateUseMainsCategorySource && !generateSourceValue.trim()) {
@@ -480,7 +481,7 @@ export default function MainsQuestionRepositoryStudio({
     setIsGenerating(true);
     try {
       const payload: Record<string, unknown> = {
-        mains_category_ids: selectedCategoryIds,
+        mains_category_ids: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
         use_mains_category_source: generateUseMainsCategorySource,
         number_of_questions: effectiveGenerateCount,
         word_limit: effectiveGenerateWordLimit,
@@ -548,7 +549,7 @@ export default function MainsQuestionRepositoryStudio({
     for (const draft of selectedDrafts) {
       const questionText = draft.question_text.trim();
       const categoryIds = draft.mains_category_ids.length > 0 ? draft.mains_category_ids : selectedCategoryIds;
-      if (!questionText || categoryIds.length === 0) {
+      if (!questionText) {
         failedCount += 1;
         continue;
       }
@@ -564,9 +565,9 @@ export default function MainsQuestionRepositoryStudio({
           answer_approach: draft.answer_approach.trim() || null,
           model_answer: draft.model_answer.trim() || null,
           word_limit: normalizeWordLimit(draft.word_limit, 150),
-          mains_category_ids: categoryIds,
+          mains_category_ids: categoryIds.length > 0 ? categoryIds : undefined,
           mains_category_id: categoryIds[0] || null,
-          category_ids: categoryIds,
+          category_ids: categoryIds.length > 0 ? categoryIds : undefined,
           source_reference: draft.source_reference.trim() || null,
           description: questionText,
         },
@@ -642,7 +643,7 @@ export default function MainsQuestionRepositoryStudio({
         </div>
 
         <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-          The selected mains categories above are the active metadata for manual drafts, AI generation, and AI parsing, and they are applied when you save questions.
+          Selected mains categories act as an override. If you leave them empty, AI-generated and saved mains questions can still be auto-classified from the source/question text.
         </p>
       </section>
 

@@ -150,8 +150,15 @@ export default function ProfessionalOnboardingForm() {
       full_name: safeName,
       city: city.trim() || null,
       years_experience: parsedExperience,
-      phone: phone.trim() || null,
+      phone: phone.trim(),
       about: toNullableRichText(about),
+      details: {
+        proof_documents: [],
+        gs_preferences: [],
+        institute_associations: [],
+        subject_focus: [],
+        sample_mcqs: [],
+      },
     };
 
     setSubmitting(true);

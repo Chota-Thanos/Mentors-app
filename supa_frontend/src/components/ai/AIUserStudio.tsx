@@ -1011,7 +1011,6 @@ export default function AIUserStudio({
           {
             params: {
               hierarchical: true,
-              exam_id: globalExamId || undefined,
             },
           },
         );
@@ -1028,7 +1027,7 @@ export default function AIUserStudio({
     return () => {
       active = false;
     };
-  }, [quizKind, globalExamId]);
+  }, [quizKind]);
 
   useEffect(() => {
     if (!sharedSettingsHydrated) return;

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Header, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from supabase import Client, create_client
 import html
@@ -48,6 +48,8 @@ from ..models import (
     CategoryAISourceUpdate,
     CategoryBulkCreateRequest,
     CategoryBulkCreateResponse,
+    CategoryBulkDeleteRequest,
+    CategoryBulkDeleteResponse,
     CategoryCreate,
     CategoryResponse,
     CategoryType,
@@ -139,8 +141,8 @@ EXAMPLE_ANALYSES_MIGRATION_HINT = (
 )
 EXAMS_TABLE = "exams"
 EXAMS_MIGRATION_HINT = (
-    "Missing exams/category_exams tables. "
-    "Run supa_back/migrations/2026-02-13_premium_exam_category.sql in Supabase SQL Editor."
+    "Missing exams table. "
+    "Run the exams migration in Supabase SQL Editor."
 )
 DRAFT_QUIZZES_TABLE = "premium_ai_draft_quizzes"
 DRAFT_QUIZZES_MIGRATION_HINT = (
@@ -186,13 +188,39 @@ QUIZ_COMPLAINTS_MIGRATION_HINT = (
 )
 ONBOARDING_REQUESTS_TABLE = "professional_onboarding_requests"
 ONBOARDING_REQUESTS_MIGRATION_HINT = (
-    "Missing professional_onboarding_requests table. "
-    "Run supa_back/migrations/2026-02-24_professional_onboarding_requests.sql in Supabase SQL Editor."
+    "Missing professional onboarding schema. "
+    "Run supa_back/migrations/2026-02-24_professional_onboarding_requests.sql and "
+    "supa_back/migrations/2026-04-06_professional_onboarding_v2.sql and "
+    "supa_back/migrations/2026-04-07_professional_onboarding_drafts.sql in Supabase SQL Editor."
 )
 PROFILES_TABLE = "creator_mentor_profiles"
 PROFILES_MIGRATION_HINT = (
     "Missing creator_mentor_profiles table. "
     "Run supa_back/migrations/2026-02-23_profiles_and_subscriptions_scaffold.sql in Supabase SQL Editor."
+)
+ONBOARDING_PROFILE_MEDIA_BUCKET = "professional-profile-media"
+ONBOARDING_REVIEW_DOCS_BUCKET = "professional-review-docs"
+ONBOARDING_ASSET_KINDS = {"headshot", "proof_document", "sample_evaluation"}
+ONBOARDING_STORAGE_BUCKET_OPTIONS: Dict[str, Dict[str, Any]] = {
+    ONBOARDING_PROFILE_MEDIA_BUCKET: {
+        "public": True,
+        "file_size_limit": 6 * 1024 * 1024,
+        "allowed_mime_types": ["image/jpeg", "image/png", "image/webp"],
+    },
+    ONBOARDING_REVIEW_DOCS_BUCKET: {
+        "public": False,
+        "file_size_limit": 12 * 1024 * 1024,
+        "allowed_mime_types": ["application/pdf", "image/jpeg", "image/png", "image/webp"],
+    },
+}
+ONBOARDING_ASSETS_MIGRATION_HINT = (
+    "Missing professional onboarding storage buckets. "
+    "Run supa_back/migrations/2026-04-06_professional_onboarding_v2.sql in Supabase SQL Editor."
+)
+ONBOARDING_ASSET_MAX_SIZE_MB = max(1, int(os.getenv("ONBOARDING_ASSET_MAX_SIZE_MB", "12")))
+ONBOARDING_ASSET_SIGNED_URL_TTL_SECONDS = max(
+    300,
+    int(os.getenv("ONBOARDING_ASSET_SIGNED_URL_TTL_SECONDS", "3600")),
 )
 TEST_SERIES_TABLE = "test_series"
 TEST_SERIES_ENROLLMENTS_TABLE = "test_series_enrollments"
@@ -231,6 +259,7 @@ MANAGED_USER_ROLES: Set[str] = {
     "user",
 }
 _AUTH_ADMIN_CLIENT: Optional[Client] = None
+_ONBOARDING_STORAGE_READY = False
 
 QUIZ_KIND_TO_CONTENT_TYPE: Dict[QuizKind, str] = {
     QuizKind.GK: ContentType.QUIZ_GK.value,
@@ -393,13 +422,35 @@ class AdminUserRoleUpdateRequest(BaseModel):
     role: str
 
 
+class ProfessionalOnboardingAssetResponse(BaseModel):
+    bucket: str
+    path: str
+    file_name: str
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    uploaded_at: Optional[str] = None
+    asset_kind: Optional[str] = None
+    url: Optional[str] = None
+
+
 class ProfessionalOnboardingApplicationCreate(BaseModel):
     desired_role: Literal["mentor", "creator"]
     full_name: str = Field(min_length=2, max_length=120)
     city: Optional[str] = Field(default=None, max_length=120)
     years_experience: Optional[int] = Field(default=None, ge=0, le=60)
+    phone: str = Field(min_length=7, max_length=40)
+    about: Optional[str] = Field(default=None, max_length=3000)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ProfessionalOnboardingApplicationDraftSave(BaseModel):
+    desired_role: Literal["mentor", "creator"]
+    full_name: Optional[str] = Field(default=None, max_length=120)
+    city: Optional[str] = Field(default=None, max_length=120)
+    years_experience: Optional[int] = Field(default=None, ge=0, le=60)
     phone: Optional[str] = Field(default=None, max_length=40)
     about: Optional[str] = Field(default=None, max_length=3000)
+    details: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ProfessionalOnboardingApplicationReview(BaseModel):
@@ -416,7 +467,9 @@ class ProfessionalOnboardingApplicationResponse(BaseModel):
     city: Optional[str] = None
     years_experience: Optional[int] = None
     phone: Optional[str] = None
+    phone_link: Optional[str] = None
     about: Optional[str] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
     status: str
     reviewer_user_id: Optional[str] = None
     reviewer_note: Optional[str] = None
@@ -708,6 +761,14 @@ def _get_auth_admin_client(default_client: Client) -> Client:
     return default_client
 
 
+def _storage_bucket_identifier(value: Any) -> str:
+    if isinstance(value, dict):
+        raw = value.get("id") or value.get("name")
+    else:
+        raw = getattr(value, "id", None) or getattr(value, "name", None)
+    return str(raw or "").strip()
+
+
 def _auth_user_to_role_row(user_obj: Any) -> AdminUserRoleRow:
     app_meta = getattr(user_obj, "app_metadata", None) or {}
     if not isinstance(app_meta, dict):
@@ -779,6 +840,332 @@ def _as_optional_text(value: Any, *, max_length: int) -> Optional[str]:
     return text[:max_length]
 
 
+def _sanitize_text_list(
+    value: Any,
+    *,
+    max_items: int,
+    max_length: int,
+) -> List[str]:
+    raw_values: List[Any]
+    if isinstance(value, list):
+        raw_values = value
+    elif isinstance(value, str):
+        raw_values = [item for item in re.split(r"[\n,]", value) if item and item.strip()]
+    else:
+        raw_values = []
+
+    output: List[str] = []
+    for item in raw_values:
+        cleaned = _as_optional_text(item, max_length=max_length)
+        if not cleaned or cleaned in output:
+            continue
+        output.append(cleaned)
+        if len(output) >= max_items:
+            break
+    return output
+
+
+def _phone_contact_url(value: Any) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = "".join(ch for ch in raw if ch.isdigit() or ch == "+")
+    if not normalized:
+        return None
+    if normalized.count("+") > 1:
+        normalized = normalized.replace("+", "")
+    if "+" in normalized and not normalized.startswith("+"):
+        normalized = normalized.replace("+", "")
+    return f"tel:{normalized}"
+
+
+def _is_missing_storage_bucket_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "bucket" in text and ("not found" in text or "does not exist" in text)
+
+
+def _raise_onboarding_assets_migration_required(exc: Exception) -> None:
+    text = str(exc).lower()
+    if any(token in text for token in ("permission", "not authorized", "unauthorized", "access denied", "403")):
+        detail = ONBOARDING_ASSETS_MIGRATION_HINT
+        if not str(os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")).strip():
+            detail += " Automatic bucket provisioning also requires SUPABASE_SERVICE_ROLE_KEY on the backend."
+        raise HTTPException(status_code=503, detail=detail)
+    if _is_missing_storage_bucket_error(exc):
+        raise HTTPException(status_code=503, detail=ONBOARDING_ASSETS_MIGRATION_HINT)
+    raise exc
+
+
+def _onboarding_bucket_for_asset_kind(asset_kind: str) -> str:
+    return ONBOARDING_PROFILE_MEDIA_BUCKET if asset_kind == "headshot" else ONBOARDING_REVIEW_DOCS_BUCKET
+
+
+def _ensure_onboarding_storage_buckets(default_client: Client) -> Client:
+    global _ONBOARDING_STORAGE_READY
+    storage_client = _get_auth_admin_client(default_client)
+    if _ONBOARDING_STORAGE_READY:
+        return storage_client
+
+    try:
+        existing_bucket_ids = {
+            bucket_id
+            for bucket_id in (
+                _storage_bucket_identifier(item) for item in (storage_client.storage.list_buckets() or [])
+            )
+            if bucket_id
+        }
+        for bucket_id, options in ONBOARDING_STORAGE_BUCKET_OPTIONS.items():
+            if bucket_id not in existing_bucket_ids:
+                try:
+                    storage_client.storage.create_bucket(bucket_id, bucket_id, options)
+                except Exception as exc:
+                    text = str(exc).lower()
+                    if "already exists" not in text and "duplicate" not in text and "exists" not in text:
+                        raise
+            storage_client.storage.update_bucket(bucket_id, options)
+        _ONBOARDING_STORAGE_READY = True
+        return storage_client
+    except Exception as exc:
+        _raise_onboarding_assets_migration_required(exc)
+        raise
+
+
+def _normalize_onboarding_asset(
+    value: Any,
+    *,
+    user_id: str,
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+
+    bucket = _as_optional_text(value.get("bucket"), max_length=120)
+    if bucket not in {ONBOARDING_PROFILE_MEDIA_BUCKET, ONBOARDING_REVIEW_DOCS_BUCKET}:
+        return None
+
+    path = _as_optional_text(value.get("path"), max_length=600)
+    if not path:
+        return None
+    normalized_path = path.lstrip("/")
+    if user_id and not normalized_path.startswith(f"{user_id}/"):
+        return None
+
+    file_name = _as_optional_text(
+        value.get("file_name") or value.get("filename") or os.path.basename(normalized_path),
+        max_length=240,
+    ) or os.path.basename(normalized_path)
+    mime_type = _as_optional_text(value.get("mime_type"), max_length=120)
+    size_bytes = _parse_optional_non_negative_int(
+        value.get("size_bytes"),
+        max_value=ONBOARDING_ASSET_MAX_SIZE_MB * 1024 * 1024,
+    )
+    uploaded_at = _as_optional_text(value.get("uploaded_at"), max_length=80)
+    asset_kind = _as_optional_text(value.get("asset_kind"), max_length=40)
+    if asset_kind not in ONBOARDING_ASSET_KINDS:
+        asset_kind = None
+
+    return {
+        "bucket": bucket,
+        "path": normalized_path,
+        "file_name": file_name,
+        "mime_type": mime_type,
+        "size_bytes": size_bytes,
+        "uploaded_at": uploaded_at,
+        "asset_kind": asset_kind,
+    }
+
+
+def _onboarding_asset_url(
+    asset: Dict[str, Any],
+    *,
+    supabase: Client,
+) -> Optional[str]:
+    bucket = str(asset.get("bucket") or "").strip()
+    path = str(asset.get("path") or "").strip()
+    if not bucket or not path:
+        return None
+    try:
+        bucket_proxy = supabase.storage.from_(bucket)
+        if bucket == ONBOARDING_PROFILE_MEDIA_BUCKET:
+            return bucket_proxy.get_public_url(path)
+        signed = bucket_proxy.create_signed_url(path, ONBOARDING_ASSET_SIGNED_URL_TTL_SECONDS)
+        return str(signed.get("signedURL") or "").strip() or None
+    except Exception as exc:
+        logger.warning("Failed to create onboarding asset URL for %s/%s: %s", bucket, path, exc)
+        return None
+
+
+def _present_onboarding_asset(
+    asset: Any,
+    *,
+    user_id: str,
+    supabase: Client,
+) -> Optional[Dict[str, Any]]:
+    normalized = _normalize_onboarding_asset(asset, user_id=user_id)
+    if not normalized:
+        return None
+    presented = dict(normalized)
+    presented["url"] = _onboarding_asset_url(normalized, supabase=supabase)
+    return presented
+
+
+def _normalize_quiz_master_sample_mcqs(value: Any) -> List[Dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+
+    output: List[Dict[str, Any]] = []
+    for entry in value[:5]:
+        if not isinstance(entry, dict):
+            continue
+        options = _sanitize_text_list(entry.get("options"), max_items=5, max_length=280)
+        correct_option = _as_optional_text(entry.get("correct_option"), max_length=1)
+        correct_option = correct_option.upper() if correct_option else None
+        if correct_option not in {"A", "B", "C", "D", "E"}:
+            correct_option = None
+        output.append(
+            {
+                "question": _as_optional_text(entry.get("question"), max_length=1200),
+                "options": options,
+                "correct_option": correct_option,
+                "explanation": _as_optional_text(entry.get("explanation"), max_length=3000),
+            }
+        )
+    return output
+
+
+def _normalize_onboarding_details(
+    value: Any,
+    *,
+    user_id: str,
+    desired_role: str,
+    strict: bool,
+) -> Dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    details: Dict[str, Any] = {
+        "current_occupation": _as_optional_text(raw.get("current_occupation"), max_length=180),
+        "professional_headshot": _normalize_onboarding_asset(raw.get("professional_headshot"), user_id=user_id),
+        "upsc_roll_number": _as_optional_text(raw.get("upsc_roll_number"), max_length=80),
+        "upsc_years": _as_optional_text(raw.get("upsc_years"), max_length=180),
+        "proof_documents": [
+            asset
+            for asset in (
+                _normalize_onboarding_asset(item, user_id=user_id)
+                for item in (raw.get("proof_documents") if isinstance(raw.get("proof_documents"), list) else [])
+            )
+            if asset
+        ][:6],
+        "mains_written_count": _parse_optional_non_negative_int(raw.get("mains_written_count"), max_value=25),
+        "interview_faced_count": _parse_optional_non_negative_int(raw.get("interview_faced_count"), max_value=25),
+        "prelims_cleared_count": _parse_optional_non_negative_int(raw.get("prelims_cleared_count"), max_value=25),
+        "highest_prelims_score": _as_optional_text(raw.get("highest_prelims_score"), max_length=80),
+        "optional_subject": _as_optional_text(raw.get("optional_subject"), max_length=120),
+        "gs_preferences": _sanitize_text_list(raw.get("gs_preferences"), max_items=6, max_length=40),
+        "mentorship_years": _parse_optional_non_negative_int(raw.get("mentorship_years"), max_value=60),
+        "institute_associations": _sanitize_text_list(raw.get("institute_associations"), max_items=8, max_length=160),
+        "sample_evaluation": _normalize_onboarding_asset(raw.get("sample_evaluation"), user_id=user_id),
+        "intro_video_url": _as_optional_text(raw.get("intro_video_url"), max_length=800),
+        "subject_focus": _sanitize_text_list(raw.get("subject_focus"), max_items=10, max_length=80),
+        "content_experience": _as_optional_text(raw.get("content_experience"), max_length=3000),
+        "short_bio": _as_optional_text(raw.get("short_bio"), max_length=600),
+        "preparation_strategy": _as_optional_text(raw.get("preparation_strategy"), max_length=12000),
+        "sample_mcqs": _normalize_quiz_master_sample_mcqs(raw.get("sample_mcqs")),
+    }
+
+    if strict:
+        if not details["current_occupation"]:
+            raise HTTPException(status_code=400, detail="Current occupation is required.")
+        if not details["professional_headshot"]:
+            raise HTTPException(status_code=400, detail="Professional headshot is required.")
+        if not details["upsc_roll_number"]:
+            raise HTTPException(status_code=400, detail="UPSC roll number is required.")
+        if not details["upsc_years"]:
+            raise HTTPException(status_code=400, detail="UPSC year details are required.")
+        if len(details["proof_documents"]) == 0:
+            raise HTTPException(status_code=400, detail="Upload at least one official proof document.")
+
+        if desired_role == "mentor":
+            if details["mains_written_count"] is None:
+                raise HTTPException(status_code=400, detail="Number of UPSC Mains written is required.")
+            if details["interview_faced_count"] is None:
+                raise HTTPException(status_code=400, detail="Number of UPSC interviews faced is required.")
+            if not details["optional_subject"] and len(details["gs_preferences"]) == 0:
+                raise HTTPException(status_code=400, detail="Add optional subject or at least one GS preference.")
+            if details["mentorship_years"] is None:
+                raise HTTPException(status_code=400, detail="Mentorship experience years are required.")
+            if not details["sample_evaluation"]:
+                raise HTTPException(status_code=400, detail="Upload a sample evaluated Mains copy.")
+            if not details["intro_video_url"]:
+                raise HTTPException(status_code=400, detail="Introduction video link is required.")
+        else:
+            if details["prelims_cleared_count"] is None:
+                raise HTTPException(status_code=400, detail="Number of UPSC Prelims cleared is required.")
+            if not details["highest_prelims_score"]:
+                raise HTTPException(status_code=400, detail="Highest Prelims score is required.")
+            if len(details["subject_focus"]) == 0:
+                raise HTTPException(status_code=400, detail="Select at least one subject focus.")
+            if not details["content_experience"]:
+                raise HTTPException(status_code=400, detail="Content experience is required.")
+
+    return details
+
+
+def _present_onboarding_details(
+    value: Any,
+    *,
+    user_id: str,
+    desired_role: str,
+    supabase: Client,
+) -> Dict[str, Any]:
+    details = _normalize_onboarding_details(value, user_id=user_id, desired_role=desired_role, strict=False)
+    presented = dict(details)
+    presented["professional_headshot"] = _present_onboarding_asset(
+        details.get("professional_headshot"),
+        user_id=user_id,
+        supabase=supabase,
+    )
+    presented["proof_documents"] = [
+        asset
+        for asset in (
+            _present_onboarding_asset(item, user_id=user_id, supabase=supabase)
+            for item in (details.get("proof_documents") or [])
+        )
+        if asset
+    ]
+    presented["sample_evaluation"] = _present_onboarding_asset(
+        details.get("sample_evaluation"),
+        user_id=user_id,
+        supabase=supabase,
+    )
+    return presented
+
+
+def _default_onboarding_about(
+    *,
+    desired_role: str,
+    details: Dict[str, Any],
+) -> Optional[str]:
+    pieces: List[str] = []
+    current_occupation = _as_optional_text(details.get("current_occupation"), max_length=180)
+    if current_occupation:
+        pieces.append(current_occupation)
+    if desired_role == "mentor":
+        if details.get("optional_subject"):
+            pieces.append(f"Optional: {details['optional_subject']}")
+        if details.get("gs_preferences"):
+            pieces.append(f"GS focus: {', '.join(details['gs_preferences'])}")
+        mentorship_years = _parse_optional_non_negative_int(details.get("mentorship_years"), max_value=60)
+        if mentorship_years is not None:
+            pieces.append(f"Mentorship experience: {mentorship_years} years")
+    else:
+        if details.get("short_bio"):
+            pieces.append(str(details["short_bio"]))
+        if details.get("subject_focus"):
+            pieces.append(f"Subject focus: {', '.join(details['subject_focus'])}")
+        if details.get("content_experience"):
+            pieces.append(str(details["content_experience"]))
+    summary = " | ".join(piece for piece in pieces if piece).strip()
+    return summary[:3000] if summary else None
+
+
 def _professional_role_title(value: Any) -> str:
     normalized = _as_role(value)
     if normalized == "mentor":
@@ -790,7 +1177,11 @@ def _professional_role_title(value: Any) -> str:
     return "Professional"
 
 
-def _onboarding_application_response(row: Dict[str, Any]) -> ProfessionalOnboardingApplicationResponse:
+def _onboarding_application_response(
+    row: Dict[str, Any],
+    *,
+    supabase: Client,
+) -> ProfessionalOnboardingApplicationResponse:
     years_raw = row.get("years_experience")
     years_experience: Optional[int] = None
     try:
@@ -800,16 +1191,27 @@ def _onboarding_application_response(row: Dict[str, Any]) -> ProfessionalOnboard
     except (TypeError, ValueError):
         years_experience = None
 
+    user_id = str(row.get("user_id") or "").strip()
+    desired_role = _as_role(row.get("desired_role") or "mentor") or "mentor"
+    phone = _as_optional_text(row.get("phone"), max_length=40)
+
     return ProfessionalOnboardingApplicationResponse(
         id=int(row.get("id") or 0),
-        user_id=str(row.get("user_id") or "").strip(),
+        user_id=user_id,
         email_snapshot=_as_optional_text(row.get("email_snapshot"), max_length=250),
-        desired_role=_as_role(row.get("desired_role") or "mentor") or "mentor",
+        desired_role=desired_role,
         full_name=str(row.get("full_name") or "").strip(),
         city=_as_optional_text(row.get("city"), max_length=120),
         years_experience=years_experience,
-        phone=_as_optional_text(row.get("phone"), max_length=40),
+        phone=phone,
+        phone_link=_phone_contact_url(phone),
         about=_as_optional_text(row.get("about"), max_length=3000),
+        details=_present_onboarding_details(
+            row.get("details"),
+            user_id=user_id,
+            desired_role=desired_role,
+            supabase=supabase,
+        ),
         status=_as_role(row.get("status") or "pending") or "pending",
         reviewer_user_id=_as_optional_text(row.get("reviewer_user_id"), max_length=80),
         reviewer_note=_as_optional_text(row.get("reviewer_note"), max_length=1200),
@@ -823,6 +1225,8 @@ def _raise_onboarding_migration_required(exc: Exception) -> None:
     if _is_missing_table_error(exc, ONBOARDING_REQUESTS_TABLE):
         raise HTTPException(status_code=503, detail=ONBOARDING_REQUESTS_MIGRATION_HINT)
     text = str(exc).lower()
+    if "professional_onboarding_requests" in text and "details" in text and "column" in text:
+        raise HTTPException(status_code=503, detail=ONBOARDING_REQUESTS_MIGRATION_HINT)
     if ONBOARDING_REQUESTS_TABLE.lower() in text and (
         "does not exist" in text
         or "relation" in text
@@ -879,6 +1283,25 @@ def _upsert_professional_profile_from_onboarding(
     city = _as_optional_text(application.get("city"), max_length=120)
     about = _as_optional_text(application.get("about"), max_length=3000)
     years_experience = _parse_optional_non_negative_int(application.get("years_experience"), max_value=60)
+    phone = _as_optional_text(application.get("phone"), max_length=40)
+    details = _normalize_onboarding_details(
+        application.get("details"),
+        user_id=user_id,
+        desired_role=normalized_role,
+        strict=False,
+    )
+    current_occupation = _as_optional_text(details.get("current_occupation"), max_length=180)
+    professional_headshot = _normalize_onboarding_asset(details.get("professional_headshot"), user_id=user_id)
+    profile_image_url = _onboarding_asset_url(professional_headshot, supabase=supabase) if professional_headshot else None
+    phone_link = _phone_contact_url(phone)
+    derived_about = _default_onboarding_about(desired_role=normalized_role, details=details)
+    short_bio = _as_optional_text(details.get("short_bio"), max_length=600)
+    preparation_strategy = _as_optional_text(details.get("preparation_strategy"), max_length=12000)
+    derived_years_experience = (
+        _parse_optional_non_negative_int(details.get("mentorship_years"), max_value=60)
+        if normalized_role == "mentor"
+        else None
+    )
     now_iso = _utc_now().isoformat()
     app_id = _parse_optional_non_negative_int(application.get("id"))
 
@@ -897,6 +1320,11 @@ def _upsert_professional_profile_from_onboarding(
     meta = dict(existing_meta) if isinstance(existing_meta, dict) else {}
     meta["onboarding_source"] = "professional_onboarding"
     meta["onboarding_approved_at"] = now_iso
+    meta["phone"] = phone
+    meta["phone_link"] = phone_link
+    meta["eligibility_details"] = details
+    if preparation_strategy:
+        meta["preparation_strategy"] = preparation_strategy
     if app_id is not None:
         meta["onboarding_application_id"] = app_id
 
@@ -904,17 +1332,83 @@ def _upsert_professional_profile_from_onboarding(
     existing_city = _as_optional_text((existing or {}).get("city"), max_length=120)
     existing_bio = _as_optional_text((existing or {}).get("bio"), max_length=3000)
     existing_years = _parse_optional_non_negative_int((existing or {}).get("years_experience"), max_value=60)
+    existing_profile_image_url = _as_optional_text((existing or {}).get("profile_image_url"), max_length=1200)
+    existing_contact_url = _as_optional_text((existing or {}).get("contact_url"), max_length=1200)
+    existing_public_email = _as_optional_text((existing or {}).get("public_email"), max_length=250)
+    existing_headline = _as_optional_text((existing or {}).get("headline"), max_length=180)
+
+    generated_specialization_tags = (
+        _sanitize_text_list(
+            [details.get("optional_subject"), *(details.get("gs_preferences") or [])],
+            max_items=10,
+            max_length=80,
+        )
+        if normalized_role == "mentor"
+        else _sanitize_text_list(details.get("subject_focus"), max_items=10, max_length=80)
+    )
+    generated_highlights = (
+        _sanitize_text_list(
+            [
+                current_occupation,
+                f"UPSC Mains written: {details['mains_written_count']}" if details.get("mains_written_count") is not None else None,
+                f"Interviews faced: {details['interview_faced_count']}" if details.get("interview_faced_count") is not None else None,
+                f"Mentorship experience: {details['mentorship_years']} years" if details.get("mentorship_years") is not None else None,
+            ],
+            max_items=8,
+            max_length=180,
+        )
+        if normalized_role == "mentor"
+        else _sanitize_text_list(
+            [
+                current_occupation,
+                f"UPSC Prelims cleared: {details['prelims_cleared_count']}" if details.get("prelims_cleared_count") is not None else None,
+                f"Highest Prelims score: {details['highest_prelims_score']}" if details.get("highest_prelims_score") else None,
+                f"Subject focus: {', '.join(details.get('subject_focus') or [])}" if details.get("subject_focus") else None,
+                short_bio,
+            ],
+            max_items=8,
+            max_length=180,
+        )
+    )
+    generated_credentials = (
+        _sanitize_text_list(
+            [
+                "Official UPSC Mains/Interview documents reviewed" if details.get("proof_documents") else None,
+                f"Optional subject: {details['optional_subject']}" if details.get("optional_subject") else None,
+                f"GS specialization: {', '.join(details.get('gs_preferences') or [])}" if details.get("gs_preferences") else None,
+                "Sample evaluated copy reviewed" if details.get("sample_evaluation") else None,
+            ],
+            max_items=12,
+            max_length=220,
+        )
+        if normalized_role == "mentor"
+        else _sanitize_text_list(
+            [
+                "Official UPSC Prelims documents reviewed" if details.get("proof_documents") else None,
+                f"Content focus: {', '.join(details.get('subject_focus') or [])}" if details.get("subject_focus") else None,
+                "Preparation strategy published" if preparation_strategy else None,
+            ],
+            max_items=12,
+            max_length=220,
+        )
+    )
 
     profile_payload: Dict[str, Any] = {
         "role": normalized_role,
         "display_name": existing_display_name or full_name,
-        "headline": _as_optional_text((existing or {}).get("headline"), max_length=180) or f"UPSC {role_title}",
-        "bio": existing_bio or about,
-        "years_experience": existing_years if existing_years is not None else years_experience,
+        "headline": existing_headline or current_occupation or f"UPSC {role_title}",
+        "bio": existing_bio or short_bio or about or derived_about,
+        "years_experience": existing_years if existing_years is not None else (years_experience if years_experience is not None else derived_years_experience),
         "city": existing_city or city,
+        "profile_image_url": existing_profile_image_url or profile_image_url,
+        "contact_url": existing_contact_url or phone_link,
+        "public_email": existing_public_email or _as_optional_text(application.get("email_snapshot"), max_length=250),
         "is_public": True,
         "is_active": True,
         "is_verified": True,
+        "highlights": _sanitize_text_list((existing or {}).get("highlights") or generated_highlights, max_items=8, max_length=180),
+        "credentials": _sanitize_text_list((existing or {}).get("credentials") or generated_credentials, max_items=12, max_length=220),
+        "specialization_tags": _sanitize_text_list((existing or {}).get("specialization_tags") or generated_specialization_tags, max_items=14, max_length=80),
         "meta": meta,
         "updated_at": now_iso,
     }
@@ -929,16 +1423,19 @@ def _upsert_professional_profile_from_onboarding(
             "role": normalized_role,
             "display_name": full_name,
             "headline": f"UPSC {role_title}",
-            "bio": about,
-            "years_experience": years_experience,
+            "bio": short_bio or about or derived_about,
+            "years_experience": years_experience if years_experience is not None else derived_years_experience,
             "city": city,
+            "profile_image_url": profile_image_url,
             "is_public": True,
             "is_active": True,
             "is_verified": True,
-            "highlights": [],
-            "credentials": [],
-            "specialization_tags": [],
+            "highlights": generated_highlights,
+            "credentials": generated_credentials,
+            "specialization_tags": generated_specialization_tags,
             "languages": [],
+            "contact_url": phone_link,
+            "public_email": _as_optional_text(application.get("email_snapshot"), max_length=250),
             "meta": meta,
             "created_at": now_iso,
             "updated_at": now_iso,
@@ -1082,6 +1579,160 @@ def update_user_role(
     )
 
 
+@router.post("/onboarding/assets/upload", response_model=ProfessionalOnboardingAssetResponse)
+async def upload_professional_onboarding_asset(
+    file: UploadFile = File(...),
+    asset_kind: str = Form(...),
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    normalized_asset_kind = str(asset_kind or "").strip().lower()
+    if normalized_asset_kind not in ONBOARDING_ASSET_KINDS:
+        raise HTTPException(status_code=400, detail="Unsupported asset type.")
+
+    filename = _as_optional_text(file.filename, max_length=220) or f"{normalized_asset_kind}.bin"
+    extension = os.path.splitext(filename)[1].strip().lower()
+    content_type = _as_optional_text(file.content_type, max_length=120) or "application/octet-stream"
+    max_bytes = ONBOARDING_ASSET_MAX_SIZE_MB * 1024 * 1024
+
+    image_extensions = {".jpg", ".jpeg", ".png", ".webp"}
+    image_content_types = {"image/jpeg", "image/png", "image/webp"}
+    document_extensions = {".pdf", *image_extensions}
+    document_content_types = {"application/pdf", *image_content_types}
+
+    if normalized_asset_kind == "headshot":
+        if extension not in image_extensions and content_type not in image_content_types:
+            raise HTTPException(status_code=400, detail="Headshot must be JPG, PNG, or WEBP.")
+    elif extension not in document_extensions and content_type not in document_content_types:
+        raise HTTPException(status_code=400, detail="Document must be PDF, JPG, PNG, or WEBP.")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if len(file_bytes) > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File exceeds the {ONBOARDING_ASSET_MAX_SIZE_MB}MB upload limit.",
+        )
+
+    safe_stem = re.sub(r"[^a-zA-Z0-9_-]+", "-", os.path.splitext(filename)[0].strip()).strip("-").lower() or normalized_asset_kind
+    storage_path = f"{user_id}/{normalized_asset_kind}/{uuid.uuid4().hex}-{safe_stem}{extension or ''}"
+    bucket = _onboarding_bucket_for_asset_kind(normalized_asset_kind)
+    storage_client = _get_auth_admin_client(supabase)
+
+    try:
+        storage_client.storage.from_(bucket).upload(
+            storage_path,
+            file_bytes,
+            {"content-type": content_type},
+        )
+    except Exception as exc:
+        if _is_missing_storage_bucket_error(exc):
+            try:
+                storage_client = _ensure_onboarding_storage_buckets(supabase)
+                storage_client.storage.from_(bucket).upload(
+                    storage_path,
+                    file_bytes,
+                    {"content-type": content_type},
+                )
+            except Exception as retry_exc:
+                _raise_onboarding_assets_migration_required(retry_exc)
+                raise HTTPException(status_code=500, detail=str(retry_exc))
+        else:
+            _raise_onboarding_assets_migration_required(exc)
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    asset = {
+        "bucket": bucket,
+        "path": storage_path,
+        "file_name": filename,
+        "mime_type": content_type,
+        "size_bytes": len(file_bytes),
+        "uploaded_at": _utc_now().isoformat(),
+        "asset_kind": normalized_asset_kind,
+    }
+    asset["url"] = _onboarding_asset_url(asset, supabase=storage_client)
+    return ProfessionalOnboardingAssetResponse(**asset)
+
+
+@router.post("/onboarding/applications/draft", response_model=ProfessionalOnboardingApplicationResponse)
+def save_professional_onboarding_application_draft(
+    payload: ProfessionalOnboardingApplicationDraftSave,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    desired_role = _as_role(payload.desired_role)
+    if desired_role == "mentor" and _has_mains_mentor_access(user_ctx):
+        raise HTTPException(status_code=400, detail="You already have Mains Mentor access.")
+    if desired_role == "creator" and _has_quiz_master_access(user_ctx):
+        raise HTTPException(status_code=400, detail="You already have Quiz Master access.")
+
+    normalized_details = _normalize_onboarding_details(
+        payload.details,
+        user_id=user_id,
+        desired_role=desired_role,
+        strict=False,
+    )
+    now_iso = _utc_now().isoformat()
+    row_payload: Dict[str, Any] = {
+        "desired_role": desired_role,
+        "full_name": _as_optional_text(payload.full_name, max_length=120) or "",
+        "city": _as_optional_text(payload.city, max_length=120),
+        "years_experience": payload.years_experience,
+        "phone": _as_optional_text(payload.phone, max_length=40),
+        "about": _as_optional_text(payload.about, max_length=3000),
+        "details": normalized_details,
+        "email_snapshot": _as_optional_text(user_ctx.get("email"), max_length=250),
+        "updated_at": now_iso,
+        "status": "draft",
+        "reviewer_user_id": None,
+        "reviewer_note": None,
+        "reviewed_at": None,
+    }
+
+    try:
+        draft_row = _first(
+            supabase.table(ONBOARDING_REQUESTS_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("status", "draft")
+            .eq("desired_role", desired_role)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        _raise_onboarding_migration_required(exc)
+
+    try:
+        if draft_row:
+            saved = _first(
+                supabase.table(ONBOARDING_REQUESTS_TABLE)
+                .update(row_payload)
+                .eq("id", int(draft_row.get("id") or 0))
+                .execute()
+            )
+        else:
+            create_payload = dict(row_payload)
+            create_payload["user_id"] = user_id
+            create_payload["created_at"] = now_iso
+            saved = _first(supabase.table(ONBOARDING_REQUESTS_TABLE).insert(create_payload).execute())
+    except Exception as exc:
+        _raise_onboarding_migration_required(exc)
+
+    if not saved:
+        raise HTTPException(status_code=400, detail="Failed to save onboarding draft.")
+    return _onboarding_application_response(saved, supabase=supabase)
+
+
 @router.post("/onboarding/applications", response_model=ProfessionalOnboardingApplicationResponse)
 def submit_professional_onboarding_application(
     payload: ProfessionalOnboardingApplicationCreate,
@@ -1100,13 +1751,28 @@ def submit_professional_onboarding_application(
         if _has_quiz_master_access(user_ctx):
             raise HTTPException(status_code=400, detail="You already have Quiz Master access.")
 
+    normalized_details = _normalize_onboarding_details(
+        payload.details,
+        user_id=user_id,
+        desired_role=desired_role,
+        strict=True,
+    )
+    about = _as_optional_text(payload.about, max_length=3000) or _default_onboarding_about(
+        desired_role=desired_role,
+        details=normalized_details,
+    )
+    years_experience = payload.years_experience
+    if years_experience is None and desired_role == "mentor":
+        years_experience = _parse_optional_non_negative_int(normalized_details.get("mentorship_years"), max_value=60)
+
     row_payload: Dict[str, Any] = {
         "desired_role": desired_role,
         "full_name": str(payload.full_name or "").strip(),
         "city": _as_optional_text(payload.city, max_length=120),
-        "years_experience": payload.years_experience,
+        "years_experience": years_experience,
         "phone": _as_optional_text(payload.phone, max_length=40),
-        "about": _as_optional_text(payload.about, max_length=3000),
+        "about": about,
+        "details": normalized_details,
         "email_snapshot": _as_optional_text(user_ctx.get("email"), max_length=250),
         "updated_at": _utc_now().isoformat(),
         "status": "pending",
@@ -1122,12 +1788,28 @@ def submit_professional_onboarding_application(
             .eq("user_id", user_id)
             .eq("status", "pending")
             .eq("desired_role", desired_role)
-            .order("created_at", desc=True)
+            .order("updated_at", desc=True)
             .limit(1)
             .execute()
         )
     except Exception as exc:
         _raise_onboarding_migration_required(exc)
+
+    draft_row: Optional[Dict[str, Any]] = None
+    if not pending_row:
+        try:
+            draft_row = _first(
+                supabase.table(ONBOARDING_REQUESTS_TABLE)
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("status", "draft")
+                .eq("desired_role", desired_role)
+                .order("updated_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            _raise_onboarding_migration_required(exc)
 
     try:
         if pending_row:
@@ -1135,6 +1817,13 @@ def submit_professional_onboarding_application(
                 supabase.table(ONBOARDING_REQUESTS_TABLE)
                 .update(row_payload)
                 .eq("id", int(pending_row.get("id") or 0))
+                .execute()
+            )
+        elif draft_row:
+            saved = _first(
+                supabase.table(ONBOARDING_REQUESTS_TABLE)
+                .update(row_payload)
+                .eq("id", int(draft_row.get("id") or 0))
                 .execute()
             )
         else:
@@ -1147,7 +1836,7 @@ def submit_professional_onboarding_application(
 
     if not saved:
         raise HTTPException(status_code=400, detail="Failed to submit onboarding application.")
-    return _onboarding_application_response(saved)
+    return _onboarding_application_response(saved, supabase=supabase)
 
 
 @router.get("/onboarding/applications/me", response_model=List[ProfessionalOnboardingApplicationResponse])
@@ -1162,13 +1851,14 @@ def list_my_onboarding_applications(
             supabase.table(ONBOARDING_REQUESTS_TABLE)
             .select("*")
             .eq("user_id", user_id)
+            .order("updated_at", desc=True)
             .order("created_at", desc=True)
             .limit(limit)
             .execute()
         )
     except Exception as exc:
         _raise_onboarding_migration_required(exc)
-    return [_onboarding_application_response(row) for row in rows]
+    return [_onboarding_application_response(row, supabase=supabase) for row in rows]
 
 
 @router.get("/admin/onboarding/applications", response_model=List[ProfessionalOnboardingApplicationResponse])
@@ -1181,7 +1871,13 @@ def list_onboarding_applications_for_review(
 ):
     _ = user_ctx
     try:
-        query = supabase.table(ONBOARDING_REQUESTS_TABLE).select("*").order("created_at", desc=True).limit(limit)
+        query = (
+            supabase.table(ONBOARDING_REQUESTS_TABLE)
+            .select("*")
+            .order("updated_at", desc=True)
+            .order("created_at", desc=True)
+            .limit(limit)
+        )
         if status != "all":
             query = query.eq("status", status)
         if desired_role:
@@ -1189,7 +1885,7 @@ def list_onboarding_applications_for_review(
         rows = _rows(query.execute())
     except Exception as exc:
         _raise_onboarding_migration_required(exc)
-    return [_onboarding_application_response(row) for row in rows]
+    return [_onboarding_application_response(row, supabase=supabase) for row in rows]
 
 
 @router.put("/admin/onboarding/applications/{application_id}/review", response_model=ProfessionalOnboardingApplicationResponse)
@@ -1261,7 +1957,7 @@ def review_onboarding_application(
 
     if not saved:
         raise HTTPException(status_code=400, detail="Failed to update onboarding application.")
-    return _onboarding_application_response(saved)
+    return _onboarding_application_response(saved, supabase=supabase)
 
 
 def require_generation_access(
@@ -2234,27 +2930,130 @@ def _split_hint_values(raw: Any) -> List[str]:
     return []
 
 
-def _category_hint_phrases(row: Dict[str, Any]) -> List[str]:
-    phrases: List[str] = []
-    name = str(row.get("name") or "").strip()
-    if name:
-        phrases.append(name)
-    description = str(row.get("description") or "").strip()
-    if description:
-        phrases.append(description)
-    meta = row.get("meta") or {}
-    if isinstance(meta, dict):
-        for key in ("keywords", "tags", "aliases", "topics", "subtopics"):
-            phrases.extend(_split_hint_values(meta.get(key)))
+def _normalize_hint_phrases(values: List[str]) -> List[str]:
     unique: List[str] = []
     seen: Set[str] = set()
-    for phrase in phrases:
-        normalized = re.sub(r"\s+", " ", phrase.strip().lower())
+    for phrase in values:
+        normalized = re.sub(r"\s+", " ", str(phrase or "").strip().lower())
         if len(normalized) < 3 or normalized in seen:
             continue
         seen.add(normalized)
         unique.append(normalized)
     return unique
+
+
+def _hint_phrases_from_meta(meta: Any) -> List[str]:
+    phrases: List[str] = []
+    if isinstance(meta, dict):
+        for key in ("keywords", "tags", "aliases", "topics", "subtopics"):
+            phrases.extend(_split_hint_values(meta.get(key)))
+    return phrases
+
+
+def _category_hint_phrases(row: Dict[str, Any]) -> List[str]:
+    phrases: List[str] = []
+    name = str(row.get("name") or "").strip()
+    if name:
+        phrases.append(name)
+    slug = str(row.get("slug") or "").strip()
+    if slug:
+        phrases.append(slug.replace("-", " "))
+    description = str(row.get("description") or "").strip()
+    if description:
+        phrases.append(description)
+    phrases.extend(_hint_phrases_from_meta(row.get("meta") or {}))
+    return _normalize_hint_phrases(phrases)
+
+
+def _mains_category_hint_phrases(row: Dict[str, Any]) -> List[str]:
+    phrases: List[str] = []
+    name = str(row.get("name") or "").strip()
+    if name:
+        phrases.append(name)
+    slug = str(row.get("slug") or "").strip()
+    if slug:
+        phrases.append(slug.replace("-", " "))
+    description = str(row.get("description") or "").strip()
+    if description:
+        phrases.append(description)
+    phrases.extend(_hint_phrases_from_meta(row.get("meta") or {}))
+    return _normalize_hint_phrases(phrases)
+
+
+def _source_url_hint_text(raw_url: Any) -> str:
+    candidate = _normalize_source_url(raw_url)
+    if not candidate:
+        return ""
+    parsed = urlparse(candidate)
+    parts = [parsed.netloc or "", parsed.path.replace("/", " "), parsed.query.replace("&", " ")]
+    merged = " ".join(part for part in parts if part).replace("-", " ")
+    merged = re.sub(r"[^a-z0-9.\s]", " ", merged.lower())
+    return re.sub(r"\s+", " ", merged).strip()
+
+
+def _stored_source_hint_text_from_row(row: Dict[str, Any], *, max_chars: int = 1200) -> str:
+    chunks: List[str] = []
+    title = str(row.get("title") or "").strip()
+    if title:
+        chunks.append(title)
+
+    explicit_text = _normalize_extracted_source_text(row.get("source_text"), max_chars=max_chars)
+    if explicit_text:
+        chunks.append(explicit_text)
+
+    source_html = str(row.get("source_content_html") or "").strip()
+    if source_html:
+        extracted_html = _extract_text_from_html(source_html, max_chars=max_chars)
+        if extracted_html:
+            chunks.append(extracted_html)
+
+    url_hint = _source_url_hint_text(row.get("source_url"))
+    if url_hint:
+        chunks.append(url_hint)
+
+    chunks.extend(_hint_phrases_from_meta(row.get("meta") or {}))
+    merged = "\n".join(part for part in chunks if str(part or "").strip()).strip()
+    if len(merged) > max_chars:
+        return merged[:max_chars].rstrip()
+    return merged
+
+
+def _taxonomy_source_hint_map(
+    *,
+    source_table: str,
+    foreign_key: str,
+    category_ids: List[int],
+    supabase: Client,
+    max_sources_per_category: int = 2,
+) -> Dict[int, List[str]]:
+    normalized_ids = _normalize_exam_ids(category_ids)
+    if not normalized_ids:
+        return {}
+
+    rows = _safe_rows(
+        supabase.table(source_table)
+        .select("id, title, source_text, source_content_html, source_url, meta, priority, " + foreign_key)
+        .in_(foreign_key, normalized_ids)
+        .eq("is_active", True)
+        .order("priority", desc=True)
+        .order("id", desc=True)
+        .limit(max(100, len(normalized_ids) * max_sources_per_category * 3))
+    )
+    grouped: Dict[int, List[str]] = {}
+    for row in rows:
+        try:
+            resolved_category_id = int(row.get(foreign_key))
+        except (TypeError, ValueError):
+            continue
+        if resolved_category_id <= 0:
+            continue
+        current = grouped.setdefault(resolved_category_id, [])
+        if len(current) >= max_sources_per_category:
+            continue
+        hint_text = _stored_source_hint_text_from_row(row)
+        if hint_text:
+            current.append(hint_text)
+    return grouped
 
 
 def _tokenize_for_category_match(text: str) -> Set[str]:
@@ -2264,6 +3063,58 @@ def _tokenize_for_category_match(text: str) -> Set[str]:
             continue
         tokens.add(token)
     return tokens
+
+
+def _score_taxonomy_row_for_text(
+    *,
+    text: str,
+    text_tokens: Set[str],
+    phrases: List[str],
+    source_hints: List[str],
+) -> float:
+    score = 0.0
+    for phrase in phrases:
+        if " " in phrase and phrase in text:
+            score += 4.0
+        elif phrase in text_tokens:
+            score += 3.0
+        phrase_tokens = _tokenize_for_category_match(phrase)
+        if phrase_tokens:
+            overlap = len(phrase_tokens.intersection(text_tokens))
+            if overlap:
+                score += float(overlap)
+
+    for source_hint in source_hints:
+        source_tokens = _tokenize_for_category_match(source_hint)
+        if not source_tokens:
+            continue
+        overlap = len(source_tokens.intersection(text_tokens))
+        if overlap:
+            score += min(2.5, overlap * 0.4)
+
+    return score
+
+
+def _prune_ancestor_category_matches(category_ids: List[int], parent_by_id: Dict[int, Optional[int]]) -> List[int]:
+    selected = set(category_ids)
+    output: List[int] = []
+    for category_id in category_ids:
+        is_ancestor_of_selected = False
+        for other_id in selected:
+            if other_id == category_id:
+                continue
+            ancestor_id = parent_by_id.get(other_id)
+            while ancestor_id is not None:
+                if ancestor_id == category_id:
+                    is_ancestor_of_selected = True
+                    break
+                ancestor_id = parent_by_id.get(ancestor_id)
+            if is_ancestor_of_selected:
+                break
+        if is_ancestor_of_selected:
+            continue
+        output.append(category_id)
+    return output
 
 
 def _extract_category_ids_from_content_data(data: Dict[str, Any], quiz_kind: QuizKind) -> List[int]:
@@ -2354,52 +3205,59 @@ def _infer_category_ids_for_text(
     max_categories: int = 3,
 ) -> List[int]:
     fallback_ids = _normalize_exam_ids(fallback_category_ids or [])
-    if fallback_ids:
-        return fallback_ids
 
     text = str(source_text or "").strip().lower()
     if not text:
-        return []
+        return fallback_ids
     text_tokens = _tokenize_for_category_match(text)
     if not text_tokens:
-        return []
+        return fallback_ids
 
     rows = _safe_rows(
         supabase.table("categories")
-        .select("id, name, description, meta")
+        .select("id, name, slug, parent_id, description, meta")
         .eq("is_active", True)
         .eq("type", category_type)
         .order("name")
     )
     if not rows:
-        return []
+        return fallback_ids
+
+    source_hint_map = _taxonomy_source_hint_map(
+        source_table=CATEGORY_AI_SOURCES_TABLE,
+        foreign_key="category_id",
+        category_ids=[int(row.get("id")) for row in rows if row.get("id") is not None],
+        supabase=supabase,
+    )
 
     scored_rows: List[Tuple[int, float, str]] = []
+    parent_by_id: Dict[int, Optional[int]] = {}
     for row in rows:
         try:
             category_id = int(row.get("id"))
         except (TypeError, ValueError):
             continue
+        parent_raw = row.get("parent_id")
+        try:
+            parent_by_id[category_id] = int(parent_raw) if parent_raw is not None else None
+        except (TypeError, ValueError):
+            parent_by_id[category_id] = None
         phrases = _category_hint_phrases(row)
-        if not phrases:
+        source_hints = source_hint_map.get(category_id, [])
+        if not phrases and not source_hints:
             continue
-        score = 0.0
-        for phrase in phrases:
-            if " " in phrase and phrase in text:
-                score += 4.0
-            elif phrase in text_tokens:
-                score += 3.0
-            phrase_tokens = _tokenize_for_category_match(phrase)
-            if phrase_tokens:
-                overlap = len(phrase_tokens.intersection(text_tokens))
-                if overlap:
-                    score += float(overlap)
+        score = _score_taxonomy_row_for_text(
+            text=text,
+            text_tokens=text_tokens,
+            phrases=phrases,
+            source_hints=source_hints,
+        )
         if score <= 0:
             continue
         scored_rows.append((category_id, score, str(row.get("name") or "")))
 
     if not scored_rows:
-        return []
+        return fallback_ids
 
     scored_rows.sort(key=lambda item: (-item[1], item[2].lower()))
     top_score = scored_rows[0][1]
@@ -2412,7 +3270,110 @@ def _infer_category_ids_for_text(
             output.append(category_id)
         if len(output) >= max_categories:
             break
-    return output
+    pruned = _prune_ancestor_category_matches(output, parent_by_id)
+    return pruned or fallback_ids
+
+
+def _mains_question_match_text(data: Dict[str, Any]) -> str:
+    parts = [
+        str(data.get("question_text") or data.get("question_statement") or data.get("question") or ""),
+        str(data.get("answer_approach") or ""),
+        str(data.get("model_answer") or ""),
+        str(data.get("source_reference") or data.get("source") or ""),
+        str(data.get("description") or ""),
+    ]
+    return "\n".join(part for part in parts if part and part.strip())
+
+
+def _apply_mains_category_ids_to_content_data(data: Dict[str, Any], category_ids: List[int]) -> None:
+    normalized = _normalize_exam_ids(category_ids)
+    if not normalized:
+        return
+    data["mains_category_ids"] = normalized
+    data["mains_category_id"] = normalized[0]
+    data["category_ids"] = normalized
+    if not str(data.get("description") or "").strip():
+        data["description"] = str(
+            data.get("question_text")
+            or data.get("question_statement")
+            or data.get("question")
+            or ""
+        ).strip() or None
+
+
+def _infer_mains_category_ids_for_text(
+    source_text: str,
+    supabase: Client,
+    fallback_category_ids: Optional[List[int]] = None,
+    max_categories: int = 3,
+) -> List[int]:
+    fallback_ids = _normalize_exam_ids(fallback_category_ids or [])
+
+    text = str(source_text or "").strip().lower()
+    if not text:
+        return fallback_ids
+    text_tokens = _tokenize_for_category_match(text)
+    if not text_tokens:
+        return fallback_ids
+
+    rows = _safe_rows(
+        supabase.table(MAINS_CATEGORIES_TABLE)
+        .select("id, name, slug, parent_id, description, meta")
+        .eq("is_active", True)
+        .order("name")
+    )
+    if not rows:
+        return fallback_ids
+
+    source_hint_map = _taxonomy_source_hint_map(
+        source_table=MAINS_CATEGORY_SOURCES_TABLE,
+        foreign_key="mains_category_id",
+        category_ids=[int(row.get("id")) for row in rows if row.get("id") is not None],
+        supabase=supabase,
+    )
+
+    scored_rows: List[Tuple[int, float, str]] = []
+    parent_by_id: Dict[int, Optional[int]] = {}
+    for row in rows:
+        try:
+            category_id = int(row.get("id"))
+        except (TypeError, ValueError):
+            continue
+        parent_raw = row.get("parent_id")
+        try:
+            parent_by_id[category_id] = int(parent_raw) if parent_raw is not None else None
+        except (TypeError, ValueError):
+            parent_by_id[category_id] = None
+        phrases = _mains_category_hint_phrases(row)
+        source_hints = source_hint_map.get(category_id, [])
+        if not phrases and not source_hints:
+            continue
+        score = _score_taxonomy_row_for_text(
+            text=text,
+            text_tokens=text_tokens,
+            phrases=phrases,
+            source_hints=source_hints,
+        )
+        if score <= 0:
+            continue
+        scored_rows.append((category_id, score, str(row.get("name") or "")))
+
+    if not scored_rows:
+        return fallback_ids
+
+    scored_rows.sort(key=lambda item: (-item[1], item[2].lower()))
+    top_score = scored_rows[0][1]
+    threshold = max(1.0, top_score * 0.6)
+    output: List[int] = []
+    for category_id, score, _name in scored_rows:
+        if score < threshold:
+            continue
+        if category_id not in output:
+            output.append(category_id)
+        if len(output) >= max_categories:
+            break
+    pruned = _prune_ancestor_category_matches(output, parent_by_id)
+    return pruned or fallback_ids
 
 
 def _category_rows_for_quiz_kind(
@@ -2529,15 +3490,104 @@ def _category_structure_instruction_block(
     return "\n".join([header, *lines]).strip()
 
 
+def _mains_category_structure_instruction_block(
+    supabase: Client,
+    *,
+    requested_mains_category_ids: Optional[List[int]] = None,
+    max_lines: int = 40,
+) -> str:
+    normalized_requested = _normalize_exam_ids(requested_mains_category_ids or [])
+    query = (
+        supabase.table(MAINS_CATEGORIES_TABLE)
+        .select("id, name, parent_id")
+        .eq("is_active", True)
+        .order("name")
+        .limit(400)
+    )
+    if normalized_requested:
+        query = query.in_("id", normalized_requested)
+    rows = _safe_rows(query)
+    if not rows:
+        return ""
+
+    nodes_by_id: Dict[int, Dict[str, Any]] = {}
+    children_by_parent: Dict[Optional[int], List[Dict[str, Any]]] = {}
+    for row in rows:
+        try:
+            row_id = int(row.get("id"))
+        except (TypeError, ValueError):
+            continue
+        nodes_by_id[row_id] = row
+        parent_raw = row.get("parent_id")
+        try:
+            parent_id = int(parent_raw) if parent_raw is not None else None
+        except (TypeError, ValueError):
+            parent_id = None
+        children_by_parent.setdefault(parent_id, []).append(row)
+
+    for values in children_by_parent.values():
+        values.sort(key=lambda item: str(item.get("name") or "").strip().lower())
+
+    lines: List[str] = []
+    visited: Set[int] = set()
+
+    def walk(row: Dict[str, Any], depth: int) -> None:
+        try:
+            row_id = int(row.get("id"))
+        except (TypeError, ValueError):
+            return
+        if row_id in visited:
+            return
+        visited.add(row_id)
+        name = str(row.get("name") or "").strip() or f"Mains Category {row_id}"
+        indent = "  " * max(0, depth)
+        lines.append(f"{indent}- [{row_id}] {name}")
+        for child in children_by_parent.get(row_id, []):
+            walk(child, depth + 1)
+
+    roots = children_by_parent.get(None, [])
+    if not roots:
+        roots = sorted(rows, key=lambda item: str(item.get("name") or "").strip().lower())
+    for row in roots:
+        walk(row, 0)
+    for row in rows:
+        walk(row, 0)
+
+    if len(lines) > max_lines:
+        hidden = len(lines) - max_lines
+        lines = lines[:max_lines]
+        lines.append(f"- ... {hidden} more mains categories available")
+
+    if normalized_requested:
+        header = (
+            "Requested Mains Category Scope (MANDATORY): keep generated questions inside this scope "
+            "and attach matching mains_category_ids/category_ids."
+        )
+    else:
+        header = (
+            "Available Mains Category Structure (MANDATORY): align each generated question to this taxonomy "
+            "and attach matching mains_category_ids/category_ids."
+        )
+    return "\n".join([header, *lines]).strip()
+
+
 def _assign_category_ids_to_generated_items(
     items: List[Dict[str, Any]],
     *,
     quiz_kind: QuizKind,
     supabase: Client,
     requested_category_ids: Optional[List[int]] = None,
+    source_text: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     requested_ids = _normalize_exam_ids(requested_category_ids or [])
     category_type = _category_type_for_quiz_kind(quiz_kind)
+    source_level_category_ids = requested_ids
+    if not source_level_category_ids:
+        source_level_category_ids = _infer_category_ids_for_text(
+            str(source_text or "").strip(),
+            category_type,
+            supabase,
+        )
     output: List[Dict[str, Any]] = []
     for raw_item in items:
         if not isinstance(raw_item, dict):
@@ -2550,6 +3600,7 @@ def _assign_category_ids_to_generated_items(
                 _content_data_match_text(item, quiz_kind),
                 category_type,
                 supabase,
+                fallback_category_ids=source_level_category_ids,
             )
         if resolved_ids:
             _apply_category_ids_to_content_data(item, quiz_kind, resolved_ids)
@@ -2657,67 +3708,17 @@ def _apply_example_analysis_to_generate_request(
         request.example_questions = merged_examples
 
 
-def _sync_category_exam_links(category_id: int, exam_ids: List[int], supabase: Client) -> None:
-    # Keep linking best-effort; fallback to category meta if join table is absent.
-    try:
-        supabase.table("category_exams").delete().eq("category_id", category_id).execute()
-        if exam_ids:
-            supabase.table("category_exams").insert(
-                [{"category_id": category_id, "exam_id": exam_id} for exam_id in exam_ids]
-            ).execute()
-    except Exception:
-        return
+def _normalize_category_meta(raw_meta: Any) -> Dict[str, Any]:
+    meta = dict(raw_meta or {}) if isinstance(raw_meta, dict) else {}
+    meta.pop("exam_ids", None)
+    return meta
 
 
-def _category_exam_links(supabase: Client) -> Dict[int, List[int]]:
-    rows = _safe_rows(supabase.table("category_exams").select("category_id, exam_id"))
-    mapping: Dict[int, List[int]] = {}
-    for row in rows:
-        try:
-            category_id = int(row.get("category_id"))
-            exam_id = int(row.get("exam_id"))
-        except (TypeError, ValueError):
-            continue
-        mapping.setdefault(category_id, [])
-        if exam_id not in mapping[category_id]:
-            mapping[category_id].append(exam_id)
-    return mapping
-
-
-def _category_exam_map(supabase: Client) -> Dict[int, Dict[str, Any]]:
-    rows = _safe_rows(supabase.table("exams").select("*").eq("is_active", True).order("name"))
-    return {int(row["id"]): row for row in rows if row.get("id") is not None}
-
-
-def _hydrate_category(row: Dict[str, Any], exam_links: Dict[int, List[int]], exam_map: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
-    category_id = int(row["id"])
-    meta = dict(row.get("meta") or {})
-    meta_exam_ids = _normalize_exam_ids(meta.get("exam_ids"))
-    join_exam_ids = exam_links.get(category_id, [])
-    merged_exam_ids = []
-    for exam_id in [*meta_exam_ids, *join_exam_ids]:
-        if exam_id not in merged_exam_ids:
-            merged_exam_ids.append(exam_id)
-    exams = [exam_map[exam_id] for exam_id in merged_exam_ids if exam_id in exam_map]
+def _category_view(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         **row,
-        "meta": meta,
-        "exam_ids": merged_exam_ids,
-        "exams": exams,
+        "meta": _normalize_category_meta(row.get("meta")),
     }
-
-
-def _category_row_exam_ids(row: Dict[str, Any], exam_links: Dict[int, List[int]]) -> List[int]:
-    try:
-        category_id = int(row.get("id"))
-    except (TypeError, ValueError):
-        category_id = -1
-    meta = dict(row.get("meta") or {})
-    merged_exam_ids: List[int] = []
-    for exam_id in [*_normalize_exam_ids(meta.get("exam_ids")), *exam_links.get(category_id, [])]:
-        if exam_id not in merged_exam_ids:
-            merged_exam_ids.append(exam_id)
-    return merged_exam_ids
 
 
 def _load_exam_rows_by_ids(exam_ids: List[int], supabase: Client) -> List[Dict[str, Any]]:
@@ -2743,13 +3744,43 @@ def _load_exam_rows_by_ids(exam_ids: List[int], supabase: Client) -> List[Dict[s
     return [rows_by_id[exam_id] for exam_id in normalized_exam_ids]
 
 
-def _find_existing_category_for_exam(
+def _sync_collection_exam_links(collection_id: int, exam_ids: List[int], supabase: Client) -> None:
+    normalized_exam_ids = _normalize_exam_ids(exam_ids)
+    try:
+        supabase.table("collection_exams").delete().eq("collection_id", collection_id).execute()
+        if normalized_exam_ids:
+            supabase.table("collection_exams").insert(
+                [{"collection_id": collection_id, "exam_id": exam_id} for exam_id in normalized_exam_ids]
+            ).execute()
+    except Exception:
+        return
+
+
+def _collection_exam_ids(row: Dict[str, Any], supabase: Client) -> List[int]:
+    meta = dict(row.get("meta") or {}) if isinstance(row.get("meta"), dict) else {}
+    merged_exam_ids = _normalize_exam_ids(meta.get("exam_ids"))
+    collection_id = _safe_int(row.get("id"), 0)
+    if collection_id > 0:
+        try:
+            mapping_rows = _safe_rows(
+                supabase.table("collection_exams")
+                .select("exam_id")
+                .eq("collection_id", collection_id)
+            )
+            for mapping_row in mapping_rows:
+                exam_id = _safe_int(mapping_row.get("exam_id"), 0)
+                if exam_id > 0 and exam_id not in merged_exam_ids:
+                    merged_exam_ids.append(exam_id)
+        except Exception:
+            pass
+    return merged_exam_ids
+
+
+def _find_existing_category(
     *,
     name: str,
     category_type: str,
     parent_id: Optional[int],
-    exam_id: int,
-    exam_links: Dict[int, List[int]],
     supabase: Client,
 ) -> Optional[Dict[str, Any]]:
     rows = _rows(supabase.table("categories").select("*").eq("type", category_type).eq("name", name).execute())
@@ -2761,16 +3792,14 @@ def _find_existing_category_for_exam(
             continue
         if row_parent_id != parent_id:
             continue
-        if exam_id in _category_row_exam_ids(row, exam_links):
-            return row
+        return row
     return None
 
 
-def _create_premium_categories_by_exam(
+def _create_premium_categories(
     *,
     quiz_type: str,
     parent_id: Optional[int],
-    exam_ids: List[int],
     categories: List[Dict[str, Any]],
     supabase: Client,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
@@ -2778,12 +3807,6 @@ def _create_premium_categories_by_exam(
         return [], []
 
     category_type = _category_type_from_quiz_type(quiz_type)
-    exam_rows = _load_exam_rows_by_ids(exam_ids, supabase)
-    normalized_exam_ids = [int(row["id"]) for row in exam_rows if row.get("id") is not None]
-    exam_name_by_id = {int(row["id"]): str(row.get("name") or row["id"]) for row in exam_rows if row.get("id") is not None}
-
-    exam_links = _category_exam_links(supabase)
-    parent_exam_ids: Set[int] = set()
     if parent_id is not None:
         parent_row = _first(
             supabase.table("categories")
@@ -2795,77 +3818,67 @@ def _create_premium_categories_by_exam(
         )
         if not parent_row:
             raise HTTPException(status_code=400, detail=f"Parent category ID {parent_id} not found or wrong type.")
-        parent_exam_ids = set(_category_row_exam_ids(parent_row, exam_links))
 
     created_categories: List[Dict[str, Any]] = []
     skipped_details: List[str] = []
-    payload_seen_by_exam: Dict[int, Set[str]] = {exam_id: set() for exam_id in normalized_exam_ids}
+    payload_seen: Set[str] = set()
 
-    for exam_id in normalized_exam_ids:
-        exam_name = exam_name_by_id.get(exam_id, str(exam_id))
-        if parent_id is not None and parent_exam_ids and exam_id not in parent_exam_ids:
-            skipped_details.append(f"Parent category is not linked to exam '{exam_name}' (ID {exam_id}).")
+    for category_data in categories:
+        category_name = str(category_data.get("name") or "").strip()
+        if not category_name:
+            skipped_details.append("Skipped empty category name.")
             continue
 
-        for category_data in categories:
-            category_name = str(category_data.get("name") or "").strip()
-            if not category_name:
-                skipped_details.append(f"Skipped empty category name for exam '{exam_name}' (ID {exam_id}).")
-                continue
+        normalized_name = category_name.lower()
+        if normalized_name in payload_seen:
+            skipped_details.append(f"Duplicate name '{category_name}' provided more than once.")
+            continue
+        payload_seen.add(normalized_name)
 
-            normalized_name = category_name.lower()
-            if normalized_name in payload_seen_by_exam[exam_id]:
-                skipped_details.append(f"Duplicate name '{category_name}' provided more than once for exam '{exam_name}'.")
-                continue
-            payload_seen_by_exam[exam_id].add(normalized_name)
-
-            existing = _find_existing_category_for_exam(
-                name=category_name,
-                category_type=category_type,
-                parent_id=parent_id,
-                exam_id=exam_id,
-                exam_links=exam_links,
-                supabase=supabase,
+        existing = _find_existing_category(
+            name=category_name,
+            category_type=category_type,
+            parent_id=parent_id,
+            supabase=supabase,
+        )
+        if existing:
+            skipped_details.append(
+                f"Category '{category_name}' already exists under this parent."
             )
-            if existing:
-                skipped_details.append(
-                    f"Category '{category_name}' already exists for exam '{exam_name}' under this parent."
-                )
+            continue
+
+        description_value = category_data.get("description")
+        description = str(description_value).strip() if isinstance(description_value, str) else None
+        if description == "":
+            description = None
+
+        meta_value = category_data.get("meta")
+        meta = _normalize_category_meta(meta_value)
+
+        slug_value = category_data.get("slug")
+        slug: Optional[str] = None
+        if isinstance(slug_value, str):
+            base_slug = slug_value.strip()
+            if base_slug:
+                slug = base_slug
+
+        create_payload = CategoryCreate(
+            name=category_name,
+            type=CategoryType(category_type),
+            parent_id=parent_id,
+            description=description,
+            slug=slug,
+            meta=meta,
+        )
+        try:
+            created_row = create_category(create_payload, supabase)
+        except Exception as exc:
+            exc_text = str(exc).lower()
+            if slug and "categories_slug_key" in exc_text and "duplicate key value violates unique constraint" in exc_text:
+                skipped_details.append(f"Slug '{slug}' already exists.")
                 continue
-
-            description_value = category_data.get("description")
-            description = str(description_value).strip() if isinstance(description_value, str) else None
-            if description == "":
-                description = None
-
-            meta_value = category_data.get("meta")
-            meta = dict(meta_value) if isinstance(meta_value, dict) else {}
-
-            slug_value = category_data.get("slug")
-            slug: Optional[str] = None
-            if isinstance(slug_value, str):
-                base_slug = slug_value.strip()
-                if base_slug:
-                    slug = base_slug if len(normalized_exam_ids) == 1 else f"{base_slug}-{exam_id}"
-
-            create_payload = CategoryCreate(
-                name=category_name,
-                type=CategoryType(category_type),
-                parent_id=parent_id,
-                description=description,
-                slug=slug,
-                exam_ids=[exam_id],
-                meta=meta,
-            )
-            try:
-                created_row = create_category(create_payload, supabase)
-            except Exception as exc:
-                exc_text = str(exc).lower()
-                if slug and "categories_slug_key" in exc_text and "duplicate key value violates unique constraint" in exc_text:
-                    skipped_details.append(f"Slug '{slug}' already exists for exam '{exam_name}'.")
-                    continue
-                raise
-            created_categories.append(created_row)
+            raise
+        created_categories.append(created_row)
 
     return created_categories, skipped_details
 
@@ -3001,6 +4014,7 @@ def _example_analysis_view(row: Dict[str, Any]) -> Dict[str, Any]:
         "style_profile": row.get("style_profile") or {},
         "example_questions": row.get("example_questions") or [],
         "tags": row.get("tags") or [],
+        "exam_ids": _normalize_exam_ids(row.get("exam_ids")),
         "is_active": bool(row.get("is_active", True)),
         "author_id": row.get("author_id"),
         "created_at": str(row.get("created_at") or ""),
@@ -3138,7 +4152,7 @@ def _next_order(collection_id: int, supabase: Client) -> int:
     return int(row.get("order") or 0) + 1 if row else 0
 
 
-def _collection_view(row: Dict[str, Any]) -> Dict[str, Any]:
+def _collection_view(row: Dict[str, Any], supabase: Client) -> Dict[str, Any]:
     meta_value = row.get("meta")
     meta = meta_value if isinstance(meta_value, dict) else {}
     test_kind = _resolve_collection_test_kind(meta)
@@ -3153,6 +4167,7 @@ def _collection_view(row: Dict[str, Any]) -> Dict[str, Any]:
         "collection_mode": _normalize_collection_mode(meta.get("collection_mode")) or (
             "mains_ai" if test_kind == CollectionTestKind.MAINS else "prelims_quiz"
         ),
+        "exam_ids": _collection_exam_ids(row, supabase),
         "category_ids": meta.get("category_ids", []),
         "source_list": meta.get("source_list", []),
         "source_category_ids": meta.get("source_category_ids", []),
@@ -3832,12 +4847,7 @@ def get_categories(
         query = query.eq("parent_id", parent_id)
 
     rows = _rows(query.execute())
-    exam_links = _category_exam_links(supabase)
-    exam_map = _category_exam_map(supabase)
-    hydrated = [_hydrate_category(row, exam_links, exam_map) for row in rows]
-
-    if exam_id is not None:
-        hydrated = [row for row in hydrated if exam_id in row.get("exam_ids", [])]
+    hydrated = [_category_view(row) for row in rows]
 
     if not hierarchical:
         return hydrated
@@ -3846,21 +4856,15 @@ def get_categories(
 
 @router.post("/categories", response_model=CategoryResponse)
 def create_category(category: CategoryCreate, supabase: Client = Depends(get_supabase_client)):
-    data = category.model_dump(exclude_none=True, exclude={"exam_ids"})
+    data = category.model_dump(exclude_none=True)
     data["type"] = category.type.value
-    meta = dict(data.get("meta") or {})
-    exam_ids = _normalize_exam_ids(category.exam_ids)
-    meta["exam_ids"] = exam_ids
-    data["meta"] = meta
+    data["meta"] = _normalize_category_meta(data.get("meta"))
 
     row = _first(supabase.table("categories").insert(data).execute())
     if not row:
         raise HTTPException(status_code=400, detail="Failed to create category")
 
-    _sync_category_exam_links(int(row["id"]), exam_ids, supabase)
-    exam_map = _category_exam_map(supabase)
-    hydrated = _hydrate_category(row, _category_exam_links(supabase), exam_map)
-    return hydrated
+    return _category_view(row)
 
 
 @router.put("/categories/{category_id}", response_model=CategoryResponse)
@@ -3873,24 +4877,17 @@ def update_category(
     if not current:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    updates = payload.model_dump(exclude_none=True, exclude={"exam_ids"})
+    updates = payload.model_dump(exclude_none=True)
     if isinstance(updates.get("type"), CategoryType):
         updates["type"] = updates["type"].value
 
-    if payload.exam_ids is not None:
-        merged_meta = dict(current.get("meta") or {})
-        exam_ids = _normalize_exam_ids(payload.exam_ids)
-        merged_meta["exam_ids"] = exam_ids
-        updates["meta"] = merged_meta
+    if "meta" in updates:
+        updates["meta"] = _normalize_category_meta(updates.get("meta"))
     row = _first(supabase.table("categories").update(updates).eq("id", category_id).execute())
     if not row:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    if payload.exam_ids is not None:
-        _sync_category_exam_links(category_id, _normalize_exam_ids(payload.exam_ids), supabase)
-    exam_map = _category_exam_map(supabase)
-    hydrated = _hydrate_category(row, _category_exam_links(supabase), exam_map)
-    return hydrated
+    return _category_view(row)
 
 
 @router.delete("/categories/{category_id}")
@@ -4683,12 +5680,7 @@ def get_premium_categories(
     if parent_id is not None:
         query = query.eq("parent_id", parent_id)
     rows = _rows(query.execute())
-
-    exam_links = _category_exam_links(supabase)
-    exam_map = _category_exam_map(supabase)
-    hydrated = [_hydrate_category(row, exam_links, exam_map) for row in rows]
-    if exam_id is not None:
-        hydrated = [row for row in hydrated if exam_id in row.get("exam_ids", [])]
+    hydrated = [_category_view(row) for row in rows]
     if hierarchical:
         return _build_category_tree(hydrated)
     return hydrated
@@ -4700,10 +5692,9 @@ def create_premium_category(
     payload: CategoryCreate,
     supabase: Client = Depends(get_supabase_client),
 ):
-    created_categories, skipped_details = _create_premium_categories_by_exam(
+    created_categories, skipped_details = _create_premium_categories(
         quiz_type=quiz_type,
         parent_id=payload.parent_id,
-        exam_ids=payload.exam_ids,
         categories=[
             {
                 "name": payload.name,
@@ -4737,10 +5728,9 @@ def create_premium_categories_bulk(
         for category in payload.categories
     ]
 
-    created_categories, skipped_details = _create_premium_categories_by_exam(
+    created_categories, skipped_details = _create_premium_categories(
         quiz_type=quiz_type,
         parent_id=payload.parent_id,
-        exam_ids=payload.exam_ids,
         categories=categories_payload,
         supabase=supabase,
     )
@@ -4764,6 +5754,49 @@ def create_premium_categories_bulk(
     )
 
 
+@compat_router.post("/premium-categories/{quiz_type}/bulk-delete/", response_model=CategoryBulkDeleteResponse)
+def delete_premium_categories_bulk(
+    quiz_type: str,
+    payload: CategoryBulkDeleteRequest,
+    supabase: Client = Depends(get_supabase_client),
+):
+    requested_ids = _normalize_exam_ids(payload.category_ids)
+    if not requested_ids:
+        raise HTTPException(status_code=400, detail="At least one category ID is required.")
+
+    category_type = _category_type_from_quiz_type(quiz_type)
+    expanded_ids, names_by_id = _expand_category_ids_with_descendants(
+        requested_ids,
+        category_type=category_type,
+        supabase=supabase,
+    )
+
+    missing_ids = [category_id for category_id in requested_ids if category_id not in names_by_id]
+    if not expanded_ids:
+        detail = f"No matching categories found for IDs: {missing_ids}" if missing_ids else "No matching categories found."
+        raise HTTPException(status_code=404, detail=detail)
+
+    try:
+        supabase.table("categories").delete().in_("id", expanded_ids).eq("type", category_type).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    skipped_details = [f"Category ID {category_id} not found." for category_id in missing_ids]
+    descendant_count = max(0, len(expanded_ids) - len([category_id for category_id in requested_ids if category_id in names_by_id]))
+    message_parts = [f"Deleted {len(expanded_ids)} categories."]
+    if descendant_count > 0:
+        message_parts.append(f"Included {descendant_count} descendant categories.")
+    if skipped_details:
+        message_parts.append(f"Skipped {len(skipped_details)} missing selections.")
+
+    return CategoryBulkDeleteResponse(
+        message=" ".join(message_parts),
+        deleted_count=len(expanded_ids),
+        deleted_category_ids=expanded_ids,
+        skipped_details=skipped_details,
+    )
+
+
 @compat_router.get("/premium-categories/{quiz_type}/{category_id}")
 def get_premium_category(
     quiz_type: str,
@@ -4781,8 +5814,7 @@ def get_premium_category(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Category not found")
-    exam_map = _category_exam_map(supabase)
-    return _hydrate_category(row, _category_exam_links(supabase), exam_map)
+    return _category_view(row)
 
 
 @compat_router.put("/premium-categories/{quiz_type}/{category_id}")
@@ -4882,6 +5914,9 @@ def create_premium_ai_example_analysis(
     supabase: Client = Depends(get_supabase_client),
 ):
     normalized_l1, normalized_l2 = _validate_tag_hierarchy(payload.tag_level1, payload.tag_level2)
+    exam_ids = _normalize_exam_ids(payload.exam_ids)
+    if exam_ids:
+        _load_exam_rows_by_ids(exam_ids, supabase)
     try:
         row = _first(
             supabase.table(EXAMPLE_ANALYSES_TABLE)
@@ -4895,6 +5930,7 @@ def create_premium_ai_example_analysis(
                     "style_profile": payload.style_profile,
                     "example_questions": payload.example_questions,
                     "tags": [str(tag).strip().lower() for tag in payload.tags if str(tag).strip()],
+                    "exam_ids": exam_ids,
                     "is_active": payload.is_active,
                 }
             )
@@ -4946,6 +5982,10 @@ def update_premium_ai_example_analysis(
         updates["tag_level2"] = normalized_l2
     if "tags" in updates:
         updates["tags"] = [str(tag).strip().lower() for tag in updates["tags"] if str(tag).strip()]
+    if "exam_ids" in updates:
+        updates["exam_ids"] = _normalize_exam_ids(updates.get("exam_ids"))
+        if updates["exam_ids"]:
+            _load_exam_rows_by_ids(updates["exam_ids"], supabase)
     try:
         row = _first(supabase.table(EXAMPLE_ANALYSES_TABLE).update(updates).eq("id", analysis_id).execute())
     except Exception as exc:
@@ -5556,6 +6596,7 @@ async def _generate_preview_items(
         quiz_kind=quiz_kind,
         supabase=supabase,
         requested_category_ids=request.category_ids,
+        source_text=generate_request.content,
     )
 
 
@@ -6435,12 +7476,25 @@ def _save_draft_quiz(
         raise HTTPException(status_code=400, detail="parsed_quiz_data must be an object.")
     content_type = _draft_content_type_for_kind(quiz_kind)
 
+    def _resolved_draft_category_ids(parsed_payload: Dict[str, Any], explicit_category_ids: Optional[List[int]] = None) -> List[int]:
+        explicit_ids = _normalize_exam_ids(explicit_category_ids or [])
+        if explicit_ids:
+            return explicit_ids
+        existing_ids = _extract_category_ids_from_content_data(parsed_payload, quiz_kind)
+        if existing_ids:
+            return existing_ids
+        return _infer_category_ids_for_text(
+            _content_data_match_text(parsed_payload, quiz_kind),
+            _category_type_for_quiz_kind(quiz_kind),
+            supabase,
+        )
+
     def _insert_draft(parsed_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         row_data = {
             "quiz_kind": quiz_kind.value,
             "content_type": content_type.value,
             "parsed_quiz_data": parsed_payload,
-            "category_ids": _normalize_exam_ids(payload.category_ids),
+            "category_ids": _resolved_draft_category_ids(parsed_payload, payload.category_ids),
             "exam_id": payload.exam_id,
             "ai_instruction_id": payload.ai_instruction_id,
             "source_url": payload.source_url,
@@ -6608,10 +7662,25 @@ def _update_draft_or_404(
     supabase: Client,
     user_ctx: Dict[str, Any],
 ) -> Dict[str, Any]:
-    _get_single_draft_or_404(draft_id, expected_kind, supabase, user_ctx=user_ctx)
+    existing_row = _get_single_draft_or_404(draft_id, expected_kind, supabase, user_ctx=user_ctx)
     updates = update.model_dump(exclude_none=True)
     if "category_ids" in updates:
         updates["category_ids"] = _normalize_exam_ids(updates["category_ids"])
+    elif "parsed_quiz_data" in updates and isinstance(updates["parsed_quiz_data"], dict):
+        resolved_kind = expected_kind
+        if resolved_kind is None:
+            try:
+                resolved_kind = QuizKind(str(existing_row.get("quiz_kind") or "").strip().lower())
+            except Exception:
+                resolved_kind = None
+        if resolved_kind is not None:
+            updates["category_ids"] = _extract_category_ids_from_content_data(updates["parsed_quiz_data"], resolved_kind)
+            if not updates["category_ids"]:
+                updates["category_ids"] = _infer_category_ids_for_text(
+                    _content_data_match_text(updates["parsed_quiz_data"], resolved_kind),
+                    _category_type_for_quiz_kind(resolved_kind),
+                    supabase,
+                )
     try:
         row = _first(supabase.table(DRAFT_QUIZZES_TABLE).update(updates).eq("id", draft_id).execute())
     except Exception as exc:
@@ -6739,6 +7808,14 @@ def convert_draft_to_premium_quiz(
     quiz_kind = view["quiz_kind"]
     parsed = view["parsed_quiz_data"] or {}
     category_ids = _normalize_exam_ids(view["category_ids"])
+    if not category_ids and isinstance(parsed, dict):
+        category_ids = _extract_category_ids_from_content_data(parsed, quiz_kind)
+    if not category_ids and isinstance(parsed, dict):
+        category_ids = _infer_category_ids_for_text(
+            _content_data_match_text(parsed, quiz_kind),
+            _category_type_for_quiz_kind(quiz_kind),
+            supabase,
+        )
     exam_id = view["exam_id"]
 
     if quiz_kind == QuizKind.PASSAGE:
@@ -6806,7 +7883,7 @@ def list_collections(
     rows = _rows(query.execute())
     output = []
     for row in rows:
-        shaped = _collection_view(row)
+        shaped = _collection_view(row, supabase)
         if test_kind and str(shaped.get("test_kind") or "") != test_kind.value:
             continue
         if include_items:
@@ -6821,9 +7898,13 @@ def create_collection(
     user_id: Optional[str] = Depends(get_user_id),
     supabase: Client = Depends(get_supabase_client),
 ):
+    exam_ids = _normalize_exam_ids(payload.exam_ids)
+    if exam_ids:
+        _load_exam_rows_by_ids(exam_ids, supabase)
     meta = dict(payload.meta or {})
     meta.update(
         {
+            "exam_ids": exam_ids,
             "category_ids": payload.category_ids,
             "source_list": [item.model_dump(exclude_none=True) for item in payload.source_list],
             "source_category_ids": payload.source_category_ids,
@@ -6858,7 +7939,8 @@ def create_collection(
     )
     if not row:
         raise HTTPException(status_code=400, detail="Failed to create collection")
-    return _collection_view(row)
+    _sync_collection_exam_links(int(row["id"]), exam_ids, supabase)
+    return _collection_view(row, supabase)
 
 
 @router.get("/collections/{collection_id}")
@@ -6868,7 +7950,7 @@ def get_collection(
     supabase: Client = Depends(get_supabase_client),
 ):
     row = _fetch_collection(collection_id, supabase)
-    shaped = _collection_view(row)
+    shaped = _collection_view(row, supabase)
     if include_items:
         shaped["items"] = _fetch_collection_items(collection_id, supabase)
     return shaped
@@ -6892,6 +7974,7 @@ def update_collection(
     meta_updates_requested = any(
         (
             payload.meta is not None,
+            payload.exam_ids is not None,
             payload.category_ids is not None,
             payload.source_list is not None,
             payload.source_category_ids is not None,
@@ -6907,6 +7990,11 @@ def update_collection(
         merged_meta = dict(current.get("meta") or {})
         if payload.meta is not None:
             merged_meta.update(payload.meta)
+        if payload.exam_ids is not None:
+            exam_ids = _normalize_exam_ids(payload.exam_ids)
+            if exam_ids:
+                _load_exam_rows_by_ids(exam_ids, supabase)
+            merged_meta["exam_ids"] = exam_ids
         if payload.category_ids is not None:
             merged_meta["category_ids"] = payload.category_ids
         if payload.source_list is not None:
@@ -6930,7 +8018,9 @@ def update_collection(
     row = _first(supabase.table("collections").update(updates).eq("id", collection_id).execute())
     if not row:
         raise HTTPException(status_code=404, detail="Collection not found")
-    return _collection_view(row)
+    if payload.exam_ids is not None:
+        _sync_collection_exam_links(collection_id, _normalize_exam_ids(payload.exam_ids), supabase)
+    return _collection_view(row, supabase)
 
 
 @router.get("/collections/{collection_id}/items")
@@ -7172,6 +8262,25 @@ def create_content_item(item: ContentItemCreate, supabase: Client = Depends(get_
             )
         if resolved_category_ids:
             _apply_category_ids_to_content_data(payload_data, quiz_kind, resolved_category_ids)
+            data["data"] = payload_data
+    elif isinstance(payload_data, dict) and _is_mains_collection_content(data.get("type"), payload_data):
+        explicit_mains_category_ids: List[int] = []
+        if item.category_id is not None:
+            try:
+                explicit_category_id = int(item.category_id)
+                if explicit_category_id > 0:
+                    explicit_mains_category_ids = [explicit_category_id]
+            except (TypeError, ValueError):
+                explicit_mains_category_ids = []
+
+        resolved_mains_category_ids = _extract_mains_category_ids_from_content_data(payload_data) or explicit_mains_category_ids
+        if not resolved_mains_category_ids:
+            resolved_mains_category_ids = _infer_mains_category_ids_for_text(
+                _mains_question_match_text(payload_data),
+                supabase,
+            )
+        if resolved_mains_category_ids:
+            _apply_mains_category_ids_to_content_data(payload_data, resolved_mains_category_ids)
             data["data"] = payload_data
 
     row = _first(supabase.table("content_items").insert(data).execute())
@@ -8593,6 +9702,7 @@ async def generate_ai_content(
         quiz_kind=kind,
         supabase=supabase,
         requested_category_ids=explicit_request_category_ids,
+        source_text=request.content or request.url,
     )
     saved_content_item_ids: List[int] = []
 
@@ -9135,7 +10245,7 @@ def list_example_analyses(
     
     try:
         result = query.execute()
-        items = [PremiumAIExampleAnalysis(**row) for row in (result.data or [])]
+        items = [PremiumAIExampleAnalysis(**_example_analysis_view(row)) for row in (result.data or [])]
         return PremiumAIExampleAnalysisListResponse(items=items, total=result.count or 0)
     except Exception as e:
         if _is_missing_table_error(e, EXAMPLE_ANALYSES_TABLE):
@@ -9155,6 +10265,9 @@ def create_example_analysis(
     data["tag_level1"] = normalized_l1
     data["tag_level2"] = normalized_l2
     data["tags"] = [str(tag).strip().lower() for tag in payload.tags if str(tag).strip()]
+    data["exam_ids"] = _normalize_exam_ids(payload.exam_ids)
+    if data["exam_ids"]:
+        _load_exam_rows_by_ids(data["exam_ids"], supabase)
     if user_id:
         data["author_id"] = user_id
 
@@ -9162,7 +10275,7 @@ def create_example_analysis(
         row = _first(supabase.table(EXAMPLE_ANALYSES_TABLE).insert(data).execute())
         if not row:
             raise HTTPException(status_code=400, detail="Failed to create analysis")
-        return PremiumAIExampleAnalysis(**row)
+        return PremiumAIExampleAnalysis(**_example_analysis_view(row))
     except Exception as e:
         if _is_missing_table_error(e, EXAMPLE_ANALYSES_TABLE):
             _raise_example_analyses_migration_required(e)
@@ -9178,7 +10291,7 @@ def get_example_analysis(
         row = _first(supabase.table(EXAMPLE_ANALYSES_TABLE).select("*").eq("id", analysis_id).limit(1).execute())
         if not row:
             raise HTTPException(status_code=404, detail="Analysis not found")
-        return PremiumAIExampleAnalysis(**row)
+        return PremiumAIExampleAnalysis(**_example_analysis_view(row))
     except Exception as e:
         if _is_missing_table_error(e, EXAMPLE_ANALYSES_TABLE):
              _raise_example_analyses_migration_required(e)
@@ -9208,12 +10321,16 @@ def update_example_analysis(
         updates["tag_level2"] = normalized_l2
     if "tags" in updates:
         updates["tags"] = [str(tag).strip().lower() for tag in updates["tags"] if str(tag).strip()]
+    if "exam_ids" in updates:
+        updates["exam_ids"] = _normalize_exam_ids(updates.get("exam_ids"))
+        if updates["exam_ids"]:
+            _load_exam_rows_by_ids(updates["exam_ids"], supabase)
         
     try:
         row = _first(supabase.table(EXAMPLE_ANALYSES_TABLE).update(updates).eq("id", analysis_id).execute())
         if not row:
              raise HTTPException(status_code=404, detail="Analysis not found or update failed")
-        return PremiumAIExampleAnalysis(**row)
+        return PremiumAIExampleAnalysis(**_example_analysis_view(row))
     except Exception as e:
         if _is_missing_table_error(e, EXAMPLE_ANALYSES_TABLE):
              _raise_example_analyses_migration_required(e)
@@ -9254,13 +10371,22 @@ def _mains_question_row_payload(
     default_word_limit: int,
     source_reference: Optional[str],
     author_id: Optional[str],
+    category_ids: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
+    question_text = str(raw_question.get("question_text") or "").strip()
+    normalized_category_ids = _normalize_exam_ids(
+        category_ids or _extract_mains_category_ids_from_content_data(raw_question)
+    )
     return {
-        "question_text": str(raw_question.get("question_text") or "").strip(),
+        "question_text": question_text,
         "answer_approach": _normalize_optional_text(raw_question.get("answer_approach")),
         "model_answer": _normalize_optional_text(raw_question.get("model_answer")),
         "word_limit": _normalize_word_limit(raw_question.get("word_limit"), fallback=default_word_limit),
-        "source_reference": source_reference,
+        "source_reference": source_reference or _normalize_optional_text(raw_question.get("source_reference")),
+        "mains_category_ids": normalized_category_ids,
+        "mains_category_id": normalized_category_ids[0] if normalized_category_ids else None,
+        "category_ids": normalized_category_ids,
+        "description": question_text or None,
         "author_id": author_id,
     }
 
@@ -9311,6 +10437,13 @@ async def _generate_mains_questions_core(
         content_type=AISystemInstructionContentType.MAINS_QUESTION_GENERATION,
         fallback_text=_default_mains_question_generation_instructions(),
     )
+    system_instructions = _merge_instruction_parts(
+        system_instructions,
+        _mains_category_structure_instruction_block(
+            supabase,
+            requested_mains_category_ids=working_request.mains_category_ids,
+        ) or None,
+    ) or system_instructions
 
     if working_request.user_instructions:
         system_instructions += f"\n\nUser Instructions: {working_request.user_instructions}"
@@ -9394,15 +10527,31 @@ async def _generate_mains_questions_core(
         evaluation_sync_guidance=evaluation_sync_guidance,
     )
 
+    requested_mains_category_ids = _normalize_exam_ids(working_request.mains_category_ids or [])
+    source_inferred_mains_category_ids = requested_mains_category_ids
+    if not source_inferred_mains_category_ids:
+        source_inferred_mains_category_ids = _infer_mains_category_ids_for_text(
+            str(working_request.content or "").strip(),
+            supabase,
+        )
+
     created_questions: List[UserAIMainsQuestion] = []
     for raw_question in questions_data:
         if not isinstance(raw_question, dict):
             continue
+        resolved_category_ids = requested_mains_category_ids or _extract_mains_category_ids_from_content_data(raw_question)
+        if not resolved_category_ids:
+            resolved_category_ids = _infer_mains_category_ids_for_text(
+                _mains_question_match_text(raw_question),
+                supabase,
+                fallback_category_ids=source_inferred_mains_category_ids,
+            )
         question_row = _mains_question_row_payload(
             raw_question,
             default_word_limit=working_request.word_limit,
             source_reference=source_reference,
             author_id=user_id if persist_generated else None,
+            category_ids=resolved_category_ids,
         )
         if not question_row["question_text"]:
             continue
@@ -9412,8 +10561,28 @@ async def _generate_mains_questions_core(
                 if row:
                     created_questions.append(UserAIMainsQuestion(**row))
                     continue
-            except Exception:
-                pass
+            except Exception as exc:
+                if any(
+                    _is_missing_column_error(exc, "user_ai_mains_questions", column_name)
+                    for column_name in ("mains_category_ids", "mains_category_id", "category_ids", "description")
+                ):
+                    legacy_row = {
+                        key: question_row[key]
+                        for key in ("question_text", "answer_approach", "model_answer", "word_limit", "source_reference", "author_id")
+                    }
+                    try:
+                        row = _first(supabase.table("user_ai_mains_questions").insert(legacy_row).execute())
+                        if row:
+                            row.update({
+                                "mains_category_ids": question_row.get("mains_category_ids") or [],
+                                "mains_category_id": question_row.get("mains_category_id"),
+                                "category_ids": question_row.get("category_ids") or [],
+                                "description": question_row.get("description"),
+                            })
+                            created_questions.append(UserAIMainsQuestion(**row))
+                            continue
+                    except Exception:
+                        pass
         created_questions.append(UserAIMainsQuestion(**question_row))
 
     return MainsAIGenerateResponse(questions=created_questions)

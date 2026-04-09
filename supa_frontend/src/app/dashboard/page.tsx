@@ -107,8 +107,8 @@ const QUIZ_MASTER_ROLES = new Set(["provider", "institute", "creator", "quiz_mas
 
 const dashboardCopy: Record<DashboardKind, { title: string; subtitle: string }> = {
   learner: {
-    title: "Learner Dashboard",
-    subtitle: "Track mentorship requests first, then review prep analytics.",
+    title: "Performance Evaluation",
+    subtitle: "Track mentorship requests, review prep analytics, and focus on the next improvement area.",
   },
   mains_mentor: {
     title: "Mains Mentor Dashboard",
@@ -950,13 +950,13 @@ export default function DashboardPage() {
         {loading ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-8 text-slate-600 flex items-center gap-3">
             <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
-            Loading dashboard...
+            Loading workspace...
           </div>
         ) : null}
 
         {!loading && !isAuthenticated ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-8 space-y-4">
-            <p className="text-slate-700">Login is required to view your dashboard.</p>
+            <p className="text-slate-700">Login is required to view your performance evaluation and workspace.</p>
             <button type="button" onClick={showLoginModal} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
               Login
             </button>
@@ -1535,11 +1535,10 @@ export default function DashboardPage() {
 
         {!loading && isAuthenticated && !error && kind === "quiz_master" && quizMasterData ? (
           <>
-            <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
+            <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
               <StatCard label="Prelims Series" value={quizMasterSeries.length} />
               <StatCard label="Prelims Tests" value={quizMasterTestCount} />
               <StatCard label="Active Enrollments" value={quizMasterData.summary.active_enrollments} />
-              <StatCard label="Pending Copy Checks" value={quizMasterData.summary.pending_copy_checks} hint="Mains checks need mentor role" />
               <StatCard label="Reviews" value={quizMasterReviewSummary?.total_reviews ?? 0} />
               <StatCard
                 label="Avg Rating"

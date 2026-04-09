@@ -3,7 +3,6 @@ import Link from "next/link";
 import AdminOnly from "@/components/auth/AdminOnly";
 import AppLayout from "@/components/layouts/AppLayout";
 import CategoryAISourceManager from "@/components/premium/CategoryAISourceManager";
-import CategoryManager from "@/components/premium/CategoryManager";
 import MainsCategorySourceManager from "@/components/premium/MainsCategorySourceManager";
 
 export default function PremiumWorkspacePage() {
@@ -40,6 +39,9 @@ export default function PremiumWorkspacePage() {
             <Link href="/ai-quiz-generator/gk" className="rounded border border-slate-200 px-4 py-3 text-sm font-medium hover:bg-slate-50">
               AI quiz generator
             </Link>
+            <Link href="/admin/prelims-categories" className="rounded border border-slate-200 px-4 py-3 text-sm font-medium hover:bg-slate-50">
+              Prelims category manager
+            </Link>
             <Link href="#category-ai-sources" className="rounded border border-slate-200 px-4 py-3 text-sm font-medium hover:bg-slate-50">
               Quiz category source manager
             </Link>
@@ -48,8 +50,17 @@ export default function PremiumWorkspacePage() {
             </Link>
           </div>
 
-          <div id="taxonomy">
-            <CategoryManager />
+          <div id="taxonomy" className="rounded-xl border border-slate-200 bg-white p-5">
+            <h2 className="text-lg font-semibold text-slate-900">Prelims taxonomy moved</h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Prelims category creation, bulk create, and bulk delete now live on a dedicated page.
+            </p>
+            <Link
+              href="/admin/prelims-categories"
+              className="mt-4 inline-flex rounded border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Open prelims category manager
+            </Link>
           </div>
 
           <div id="category-ai-sources">

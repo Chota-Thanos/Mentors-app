@@ -104,7 +104,6 @@ class CategoryCreate(BaseModel):
     parent_id: Optional[int] = None
     description: Optional[str] = None
     slug: Optional[str] = None
-    exam_ids: List[int] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -115,7 +114,6 @@ class CategoryUpdate(BaseModel):
     description: Optional[str] = None
     slug: Optional[str] = None
     is_active: Optional[bool] = None
-    exam_ids: Optional[List[int]] = None
     meta: Optional[Dict[str, Any]] = None
 
 
@@ -126,7 +124,6 @@ class CategoryBulkCreateItem(BaseModel):
 
 class CategoryBulkCreateRequest(BaseModel):
     parent_id: Optional[int] = None
-    exam_ids: List[int] = Field(default_factory=list)
     categories: List[CategoryBulkCreateItem] = Field(default_factory=list)
 
 
@@ -141,6 +138,17 @@ class CategoryBulkCreateResponse(BaseModel):
     message: str
     created_count: int
     created_categories: List[CategoryResponse] = Field(default_factory=list)
+    skipped_details: List[str] = Field(default_factory=list)
+
+
+class CategoryBulkDeleteRequest(BaseModel):
+    category_ids: List[int] = Field(default_factory=list)
+
+
+class CategoryBulkDeleteResponse(BaseModel):
+    message: str
+    deleted_count: int
+    deleted_category_ids: List[int] = Field(default_factory=list)
     skipped_details: List[str] = Field(default_factory=list)
 
 
@@ -275,6 +283,7 @@ class CollectionCreate(BaseModel):
     is_finalized: bool = False
     parent_id: Optional[int] = None
     meta: Dict[str, Any] = Field(default_factory=dict)
+    exam_ids: List[int] = Field(default_factory=list)
     category_ids: List[int] = Field(default_factory=list)
     source_list: List[SourceLink] = Field(default_factory=list)
     source_category_ids: List[int] = Field(default_factory=list)
@@ -298,6 +307,7 @@ class CollectionUpdate(BaseModel):
     parent_id: Optional[int] = None
     is_active: Optional[bool] = None
     meta: Optional[Dict[str, Any]] = None
+    exam_ids: Optional[List[int]] = None
     category_ids: Optional[List[int]] = None
     source_list: Optional[List[SourceLink]] = None
     source_category_ids: Optional[List[int]] = None
@@ -321,6 +331,7 @@ class CollectionResponse(BaseModel):
     price: Optional[float] = None
     is_finalized: bool
     meta: Dict[str, Any] = Field(default_factory=dict)
+    exam_ids: List[int] = Field(default_factory=list)
     created_at: str
     updated_at: Optional[str] = None
 
@@ -789,6 +800,7 @@ class PremiumAIExampleAnalysisCreate(BaseModel):
     style_profile: Dict[str, Any] = Field(default_factory=dict)
     example_questions: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
+    exam_ids: List[int] = Field(default_factory=list)
     is_active: bool = True
 
 
@@ -800,6 +812,7 @@ class PremiumAIExampleAnalysisUpdate(BaseModel):
     style_profile: Optional[Dict[str, Any]] = None
     example_questions: Optional[List[str]] = None
     tags: Optional[List[str]] = None
+    exam_ids: Optional[List[int]] = None
     is_active: Optional[bool] = None
 
 
@@ -813,6 +826,7 @@ class PremiumAIExampleAnalysis(BaseModel):
     style_profile: Dict[str, Any] = Field(default_factory=dict)
     example_questions: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
+    exam_ids: List[int] = Field(default_factory=list)
     is_active: bool = True
     author_id: Optional[str] = None
     created_at: str
@@ -1036,6 +1050,10 @@ class UserAIMainsQuestion(BaseModel):
     model_answer: Optional[str] = None
     word_limit: int
     source_reference: Optional[str] = None
+    mains_category_ids: List[int] = Field(default_factory=list)
+    mains_category_id: Optional[int] = None
+    category_ids: List[int] = Field(default_factory=list)
+    description: Optional[str] = None
     author_id: Optional[str] = None
     created_at: Optional[str] = None
     expires_at: Optional[str] = None
@@ -1147,6 +1165,7 @@ class TestSeriesCreate(BaseModel):
     is_public: bool = False
     is_active: bool = True
     provider_user_id: Optional[str] = None
+    exam_ids: List[int] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -1159,6 +1178,7 @@ class TestSeriesUpdate(BaseModel):
     price: Optional[float] = None
     is_public: Optional[bool] = None
     is_active: Optional[bool] = None
+    exam_ids: Optional[List[int]] = None
     meta: Optional[Dict[str, Any]] = None
 
 
@@ -1174,6 +1194,7 @@ class TestSeriesResponse(BaseModel):
     is_public: bool = False
     is_active: bool = True
     meta: Dict[str, Any] = Field(default_factory=dict)
+    exam_ids: List[int] = Field(default_factory=list)
     test_count: int = 0
     created_at: str
     updated_at: Optional[str] = None
@@ -1237,6 +1258,7 @@ class TestSeriesTestCreate(BaseModel):
     price: float = 0.0
     is_finalized: bool = False
     series_order: int = 0
+    exam_ids: List[int] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -1251,6 +1273,7 @@ class TestSeriesTestUpdate(BaseModel):
     is_finalized: Optional[bool] = None
     is_active: Optional[bool] = None
     series_order: Optional[int] = None
+    exam_ids: Optional[List[int]] = None
     meta: Optional[Dict[str, Any]] = None
 
 
@@ -1270,6 +1293,7 @@ class TestSeriesTestResponse(BaseModel):
     series_order: int = 0
     question_count: int = 0
     meta: Dict[str, Any] = Field(default_factory=dict)
+    exam_ids: List[int] = Field(default_factory=list)
     created_at: str
     updated_at: Optional[str] = None
 
@@ -1353,6 +1377,7 @@ class ProfessionalProfileUpdate(BaseModel):
     public_email: Optional[str] = None
     is_public: Optional[bool] = None
     is_active: Optional[bool] = None
+    exam_ids: Optional[List[int]] = None
     meta: Optional[Dict[str, Any]] = None
 
 
@@ -1375,6 +1400,7 @@ class ProfessionalProfileResponse(BaseModel):
     public_email: Optional[str] = None
     is_public: bool = True
     is_active: bool = True
+    exam_ids: List[int] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
     created_at: str
     updated_at: Optional[str] = None

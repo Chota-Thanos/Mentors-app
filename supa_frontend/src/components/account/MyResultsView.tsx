@@ -330,7 +330,7 @@ export default function MyResultsView() {
         <h2 className="text-lg font-semibold text-slate-900">Quick Result Views</h2>
         <div className="mt-3 flex flex-wrap gap-2">
           <Link href="/dashboard" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
-            Full Dashboard
+            Full Performance Evaluation
           </Link>
           <Link href="/dashboard/gk" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
             GK Detail

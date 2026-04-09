@@ -54,6 +54,11 @@ function cleanBio(value?: string | null, fallback = "Mentor bio will be updated 
   return normalized || fallback;
 }
 
+function profileMetaText(meta: Record<string, unknown> | null | undefined, key: string): string {
+  const value = meta && typeof meta === "object" ? meta[key] : null;
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function activeRequestForMentor(requests: MentorshipRequest[], providerUserId: string): MentorshipRequest | null {
   return (
     requests
@@ -157,6 +162,7 @@ export default function ProfessionalPublicProfileView({
   const profile = detail?.profile || null;
   const ownProfile = profile ? String(user?.id || "").trim() === String(profile.user_id || "").trim() : false;
   const roleLabel = profile && detail ? detail.role_label || toDisplayRoleLabel(profile.role) : "";
+  const preparationStrategy = profileMetaText(profile?.meta, "preparation_strategy");
 
   useEffect(() => {
     if (!isAuthenticated || ownProfile) {
@@ -372,6 +378,15 @@ export default function ProfessionalPublicProfileView({
           ) : null}
         </section>
 
+        {preparationStrategy ? (
+          <section className="space-y-4">
+            <h2 className="font-sans text-2xl font-extrabold tracking-tight text-[#191c1e]">Preparation Strategy</h2>
+            <div className="rounded-[1.75rem] bg-white p-6 shadow-[0_12px_28px_rgba(25,28,30,0.05)]">
+              <p className="whitespace-pre-wrap text-sm leading-8 text-[#454652]">{preparationStrategy}</p>
+            </div>
+          </section>
+        ) : null}
+
         <section className="space-y-5">
           <div className="flex items-center justify-between gap-4">
             <h2 className="font-sans text-2xl font-extrabold tracking-tight text-[#191c1e]">What mentees say</h2>
@@ -437,7 +452,7 @@ export default function ProfessionalPublicProfileView({
 
           {ownProfile ? <p className="mt-4 text-sm text-[#767683]">You cannot request your own profile.</p> : null}
           <p className="mt-4 text-[11px] leading-5 text-[#767683]">
-            You won't be charged yet. First, introduce yourself and confirm fit. Once accepted, you can securely book your slot.
+            You won&apos;t be charged yet. First, introduce yourself and confirm fit. Once accepted, you can securely book your slot.
           </p>
         </section>
       </aside>

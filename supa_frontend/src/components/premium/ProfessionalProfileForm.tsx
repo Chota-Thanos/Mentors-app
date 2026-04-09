@@ -20,6 +20,7 @@ import FormFieldShell from "@/components/ui/FormFieldShell";
 import RichTextField from "@/components/ui/RichTextField";
 import type {
   MentorshipCallProvider,
+  PremiumExam,
   ProfessionalProfile,
   ProfessionalProfilePayload,
   ProfessionalProfileRole,
@@ -46,6 +47,17 @@ const parseList = (value: string): string[] =>
     .filter(Boolean);
 
 const stringifyList = (value?: string[] | null): string => (value || []).join("\n");
+const normalizeExamIds = (value: unknown): number[] => {
+  if (!Array.isArray(value)) return [];
+  const output: number[] = [];
+  value.forEach((item) => {
+    const parsed = Number(item);
+    if (Number.isFinite(parsed) && parsed > 0 && !output.includes(parsed)) {
+      output.push(parsed);
+    }
+  });
+  return output;
+};
 
 const asText = (value: unknown): string => (typeof value === "string" ? value : "");
 const normalizeCallProvider = (value: unknown, zoomMeetingLink?: unknown): MentorshipCallProvider => {
@@ -119,6 +131,8 @@ export default function ProfessionalProfileForm() {
   const [currency, setCurrency] = useState("INR");
   const [responseTimeText, setResponseTimeText] = useState("");
   const [examFocus, setExamFocus] = useState("");
+  const [availableExams, setAvailableExams] = useState<PremiumExam[]>([]);
+  const [selectedExamIds, setSelectedExamIds] = useState<number[]>([]);
   const [studentsMentored, setStudentsMentored] = useState("");
   const [sessionsCompleted, setSessionsCompleted] = useState("");
   const [defaultCallProvider, setDefaultCallProvider] = useState<MentorshipCallProvider>("custom");
@@ -129,6 +143,40 @@ export default function ProfessionalProfileForm() {
   const achievementRows = useMemo(() => parseList(achievements), [achievements]);
   const specializationRows = useMemo(() => parseList(specializationTags), [specializationTags]);
   const languageRows = useMemo(() => parseList(languages), [languages]);
+  const toggleExamId = (examId: number) => {
+    setSelectedExamIds((prev) =>
+      prev.includes(examId) ? prev.filter((item) => item !== examId) : [...prev, examId],
+    );
+  };
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    let active = true;
+
+    const loadExams = async () => {
+      if (!isAuthenticated || !canEdit) {
+        if (active) setAvailableExams([]);
+        return;
+      }
+      try {
+        const response = await premiumApi.get<PremiumExam[]>("/exams", { params: { active_only: true } });
+        if (!active) return;
+        setAvailableExams(Array.isArray(response.data) ? response.data : []);
+      } catch (error: unknown) {
+        if (active) {
+          toast.error("Failed to load exams", { description: toError(error) });
+        }
+      }
+    };
+
+    void loadExams();
+    return () => {
+      active = false;
+    };
+  }, [loading, canEdit, isAuthenticated]);
 
   useEffect(() => {
     if (loading) {
@@ -189,6 +237,11 @@ export default function ProfessionalProfileForm() {
         setCurrency(asText(meta.currency) || "INR");
         setResponseTimeText(asText(meta.response_time_text));
         setExamFocus(asText(meta.exam_focus));
+        setSelectedExamIds(
+          normalizeExamIds(profile.exam_ids).length > 0
+            ? normalizeExamIds(profile.exam_ids)
+            : normalizeExamIds(meta.exam_ids),
+        );
         setStudentsMentored(
           meta.students_mentored !== undefined && meta.students_mentored !== null ? String(meta.students_mentored) : "",
         );
@@ -211,6 +264,7 @@ export default function ProfessionalProfileForm() {
           setCurrency("INR");
           setResponseTimeText("");
           setExamFocus("");
+          setSelectedExamIds([]);
           setStudentsMentored("");
           setSessionsCompleted("");
         } else {
@@ -251,6 +305,7 @@ export default function ProfessionalProfileForm() {
         highlights: parseList(highlights),
         credentials: parseList(credentials),
         is_public: isPublic,
+        exam_ids: selectedExamIds,
         meta: {
           achievements: parseList(achievements),
           service_specifications: parseList(serviceSpecifications),
@@ -518,12 +573,33 @@ export default function ProfessionalProfileForm() {
               </div>
             ) : null}
 
+            <div className="rounded-[24px] border border-[#e4d6f7] bg-[#f8efff] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className={eyebrowClass}>Target exams</p>
+                <span className="text-xs text-[#6b5f83]">This profile is discoverable under one or more exams.</span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {availableExams.length === 0 ? (
+                  <span className="text-sm text-[#6b5f83]">No active exams available.</span>
+                ) : availableExams.map((exam) => (
+                  <button
+                    key={exam.id}
+                    type="button"
+                    onClick={() => toggleExamId(exam.id)}
+                    className={pillClass(selectedExamIds.includes(exam.id))}
+                  >
+                    {exam.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {isMentorProfile ? (
               <div className="rounded-[24px] border border-[#e4d6f7] bg-[#f8efff] p-4">
                 <p className={eyebrowClass}>Public trust stats</p>
                 <div className="mt-4 grid gap-4 md:grid-cols-3">
-                  <FormFieldShell label="Exam focus">
-                    <input value={examFocus} onChange={(event) => setExamFocus(event.target.value)} className={inputClass} placeholder="UPSC GS, Essay, Ethics" />
+                  <FormFieldShell label="Exam focus note">
+                    <input value={examFocus} onChange={(event) => setExamFocus(event.target.value)} className={inputClass} placeholder="Optional note on your strongest areas inside the selected exams" />
                   </FormFieldShell>
                   <FormFieldShell label="Students mentored">
                     <input type="number" min={0} value={studentsMentored} onChange={(event) => setStudentsMentored(event.target.value)} className={inputClass} placeholder="1200" />

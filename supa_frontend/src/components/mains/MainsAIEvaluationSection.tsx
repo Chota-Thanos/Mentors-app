@@ -26,7 +26,7 @@ import { useAuth } from "@/context/AuthContext";
 import { hasGenerationSubscription } from "@/lib/accessControl";
 import { OUTPUT_LANGUAGE_OPTIONS, persistOutputLanguage, readOutputLanguage, type OutputLanguage } from "@/lib/outputLanguage";
 import { premiumApi } from "@/lib/premiumApi";
-import type { PremiumAIExampleAnalysisListResponse } from "@/types/premium";
+import type { PremiumAIExampleAnalysisListResponse, PremiumExam } from "@/types/premium";
 
 interface MainsAIEvaluationSectionProps {
     mainsQuestionId?: number;
@@ -141,6 +141,8 @@ const MainsAIEvaluationSection: React.FC<MainsAIEvaluationSectionProps> = ({
     const [isSaveFormatDialogOpen, setIsSaveFormatDialogOpen] = useState(false);
     const [saveFormatTitle, setSaveFormatTitle] = useState("");
     const [saveFormatDescription, setSaveFormatDescription] = useState("");
+    const [availableExams, setAvailableExams] = useState<PremiumExam[]>([]);
+    const [selectedSaveFormatExamIds, setSelectedSaveFormatExamIds] = useState<number[]>([]);
     const [isSavingFormat, setIsSavingFormat] = useState(false);
     const [ocrFiles, setOcrFiles] = useState<OcrFile[]>([]);
     const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>("en");
@@ -154,6 +156,27 @@ const MainsAIEvaluationSection: React.FC<MainsAIEvaluationSectionProps> = ({
         }
         setOutputLanguage(readOutputLanguage());
     }, [preferredOutputLanguage]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            setAvailableExams([]);
+            return;
+        }
+        let active = true;
+        premiumApi
+            .get<PremiumExam[]>("/exams", { params: { active_only: true } })
+            .then((response) => {
+                if (!active) return;
+                setAvailableExams(Array.isArray(response.data) ? response.data : []);
+            })
+            .catch(() => {
+                if (!active) return;
+                setAvailableExams([]);
+            });
+        return () => {
+            active = false;
+        };
+    }, [isAuthenticated]);
 
     const { data: evaluationStylesResponse, mutate: mutateEvaluationStyles } = useSWR<PremiumAIExampleAnalysisListResponse>(
         isAuthenticated ? `/ai/example-analyses?content_type=mains_evaluation&include_admin=true` : null,
@@ -338,6 +361,7 @@ const MainsAIEvaluationSection: React.FC<MainsAIEvaluationSectionProps> = ({
                     style_instructions: formattingInstructions,
                 },
                 example_questions: evaluationExampleInput.trim() ? [evaluationExampleInput.trim()] : [],
+                exam_ids: selectedSaveFormatExamIds,
                 is_active: true,
             };
 
@@ -346,6 +370,7 @@ const MainsAIEvaluationSection: React.FC<MainsAIEvaluationSectionProps> = ({
             setIsSaveFormatDialogOpen(false);
             setSaveFormatTitle("");
             setSaveFormatDescription("");
+            setSelectedSaveFormatExamIds([]);
             mutateEvaluationStyles();
         } catch (error: unknown) {
             toast.error("Failed to save", {
@@ -354,6 +379,12 @@ const MainsAIEvaluationSection: React.FC<MainsAIEvaluationSectionProps> = ({
         } finally {
             setIsSavingFormat(false);
         }
+    };
+
+    const toggleSaveFormatExamId = (examId: number) => {
+        setSelectedSaveFormatExamIds((prev) =>
+            prev.includes(examId) ? prev.filter((item) => item !== examId) : [...prev, examId],
+        );
     };
 
     const handleEvaluate = async () => {
@@ -769,10 +800,37 @@ const MainsAIEvaluationSection: React.FC<MainsAIEvaluationSectionProps> = ({
                                                                             rows={3}
                                                                         />
                                                                     </div>
+                                                                    <div className="space-y-2 text-left">
+                                                                        <div className="flex items-center justify-between gap-3">
+                                                                            <label className="text-xs font-bold text-slate-700 block">Target Exams</label>
+                                                                            <span className="text-[11px] text-slate-500">This saved persona can be reused across multiple exams.</span>
+                                                                        </div>
+                                                                        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                                                            {availableExams.length === 0 ? (
+                                                                                <span className="text-sm text-slate-500">No active exams available.</span>
+                                                                            ) : availableExams.map((exam) => (
+                                                                                <button
+                                                                                    key={exam.id}
+                                                                                    type="button"
+                                                                                    onClick={() => toggleSaveFormatExamId(exam.id)}
+                                                                                    className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                                                                                        selectedSaveFormatExamIds.includes(exam.id)
+                                                                                            ? "border-indigo-500 bg-indigo-600 text-white"
+                                                                                            : "border-slate-300 bg-white text-slate-700"
+                                                                                    }`}
+                                                                                >
+                                                                                    {exam.name}
+                                                                                </button>
+                                                                            ))}
+                                                                        </div>
+                                                                    </div>
                                                                 </div>
                                                                 <div className="mt-8 flex justify-end gap-3">
                                                                     <button
-                                                                        onClick={() => setIsSaveFormatDialogOpen(false)}
+                                                                        onClick={() => {
+                                                                            setIsSaveFormatDialogOpen(false);
+                                                                            setSelectedSaveFormatExamIds([]);
+                                                                        }}
                                                                         className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
                                                                     >
                                                                         Cancel

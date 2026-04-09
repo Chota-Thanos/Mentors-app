@@ -140,6 +140,10 @@ export function canAccessManualQuizBuilder(user: GenericUser): boolean {
   return canManagePrelimsSeries(user);
 }
 
+export function canAccessStandaloneManualQuizBuilder(user: GenericUser): boolean {
+  return isAdminLike(user) || isModeratorLike(user);
+}
+
 export function canAccessMainsAuthoring(user: GenericUser): boolean {
   return canManageMainsSeries(user);
 }

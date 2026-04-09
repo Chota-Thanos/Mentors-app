@@ -20,6 +20,7 @@ import type {
   PremiumAIDraftQuiz,
   PremiumAIQuizInstruction,
   PremiumPreviewResponse,
+  PremiumExam,
   QuizKind,
   UploadedPDF,
 } from "@/types/premium";
@@ -198,6 +199,18 @@ function normalizeTag(value?: string | null): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function normalizeExamIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const output: number[] = [];
+  value.forEach((item) => {
+    const parsed = Number(item);
+    if (Number.isFinite(parsed) && parsed > 0 && !output.includes(parsed)) {
+      output.push(parsed);
+    }
+  });
+  return output;
+}
+
 type OptionShape = { label: string; text: string; is_correct?: boolean };
 type OcrImageFile = {
   id: string;
@@ -314,6 +327,8 @@ export default function AIStudio() {
   const [showAnalysisEditor, setShowAnalysisEditor] = useState(false);
   const [analysisTitle, setAnalysisTitle] = useState("");
   const [analysisDescription, setAnalysisDescription] = useState("");
+  const [availableExams, setAvailableExams] = useState<PremiumExam[]>([]);
+  const [analysisExamIds, setAnalysisExamIds] = useState<number[]>([]);
   const [analysisTagLevel1, setAnalysisTagLevel1] = useState("");
   const [analysisTagLevel2, setAnalysisTagLevel2] = useState("");
   const [analysisTags, setAnalysisTags] = useState("");
@@ -436,7 +451,13 @@ export default function AIStudio() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      await Promise.all([loadInstructions(), loadAnalyses()]);
+      await Promise.all([
+        loadInstructions(),
+        loadAnalyses(),
+        premiumApi.get<PremiumExam[]>("/exams", { params: { active_only: true } }).then((response) => {
+          setAvailableExams(Array.isArray(response.data) ? response.data : []);
+        }),
+      ]);
     } catch (error: unknown) {
       toast.error("Failed to load premium AI settings", { description: toError(error) });
     } finally {
@@ -471,6 +492,7 @@ export default function AIStudio() {
     setShowAnalysisEditor(true);
     setAnalysisTitle(selectedAnalysis.title || "");
     setAnalysisDescription(selectedAnalysis.description || "");
+    setAnalysisExamIds(normalizeExamIds(selectedAnalysis.exam_ids));
     setAnalysisTagLevel1(selectedAnalysis.tag_level1 || "");
     setAnalysisTagLevel2(selectedAnalysis.tag_level2 || "");
     setAnalysisTags((selectedAnalysis.tags || []).join(", "));
@@ -481,6 +503,7 @@ export default function AIStudio() {
   const clearAnalysisEditor = () => {
     setAnalysisTitle("");
     setAnalysisDescription("");
+    setAnalysisExamIds([]);
     setAnalysisTagLevel1("");
     setAnalysisTagLevel2("");
     setAnalysisTags("");
@@ -510,6 +533,7 @@ export default function AIStudio() {
       const payload = {
         title: analysisTitle.trim(),
         description: analysisDescription.trim() || null,
+        exam_ids: analysisExamIds,
         tag_level1: analysisTagLevel1.trim().toLowerCase() || null,
         tag_level2: analysisTagLevel2.trim().toLowerCase() || null,
         content_type: selectedContentType,
@@ -549,6 +573,12 @@ export default function AIStudio() {
     } catch (error: unknown) {
       toast.error("Failed to delete analysis.", { description: toError(error) });
     }
+  };
+
+  const toggleAnalysisExamId = (examId: number) => {
+    setAnalysisExamIds((prev) =>
+      prev.includes(examId) ? prev.filter((item) => item !== examId) : [...prev, examId],
+    );
   };
 
   const handlePdfUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1079,6 +1109,30 @@ export default function AIStudio() {
                   placeholder="tag level 2"
                   disabled={!analysisTagLevel1.trim()}
                 />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Target exams</p>
+                  <span className="text-[11px] text-slate-500">Reuse this format across one or more exams.</span>
+                </div>
+                <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                  {availableExams.length === 0 ? (
+                    <span className="text-sm text-slate-500">No active exams available.</span>
+                  ) : availableExams.map((exam) => (
+                    <button
+                      key={exam.id}
+                      type="button"
+                      onClick={() => toggleAnalysisExamId(exam.id)}
+                      className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                        analysisExamIds.includes(exam.id)
+                          ? "border-indigo-500 bg-indigo-600 text-white"
+                          : "border-slate-300 bg-white text-slate-700"
+                      }`}
+                    >
+                      {exam.name}
+                    </button>
+                  ))}
+                </div>
               </div>
               <input className="rounded-md border border-slate-300 bg-white w-full px-3 py-2 text-sm" value={analysisTags} onChange={(event) => setAnalysisTags(event.target.value)} placeholder="tags (comma separated)" />
               <textarea className="rounded-md border border-slate-300 bg-white min-h-[90px] w-full px-3 py-2 text-sm" value={analysisExampleQuestions} onChange={(event) => setAnalysisExampleQuestions(event.target.value)} placeholder="example questions (one per line)" />

@@ -3,7 +3,7 @@
 import axios from "axios";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowUpRight, BookOpen, CalendarDays, ClipboardCheck, FileQuestion, FileText, LayoutList, LayoutPanelTop, LineChart, Loader2, MessageSquareWarning, PencilLine, PlayCircle, Plus, RefreshCcw, Trash2, Users, Video } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BookOpen, CalendarDays, ClipboardCheck, FileQuestion, FileText, LayoutList, LineChart, Loader2, MessageSquareWarning, PencilLine, PlayCircle, Plus, RefreshCcw, Trash2, Users, Video } from "lucide-react";
 import { toast } from "sonner";
 
 import RoleWorkspaceSidebar from "@/components/layouts/RoleWorkspaceSidebar";
@@ -15,13 +15,14 @@ import { useAuth } from "@/context/AuthContext";
 import { isAdminLike, isMentorLike, isModeratorLike, isProviderLike } from "@/lib/accessControl";
 import { premiumApi } from "@/lib/premiumApi";
 import { richTextToPlainText, toNullableRichText } from "@/lib/richText";
-import { getDiscussionDraftFromMeta, getDiscussionFromMeta, mergeDiscussionIntoMeta } from "@/lib/testSeriesDiscussion";
+import { getDiscussionDraftFromMeta, mergeDiscussionIntoMeta } from "@/lib/testSeriesDiscussion";
 import { lifecycleCompletionPercent, type UserLifecycleMetrics } from "@/lib/testSeriesLifecycle";
 import RichTextField from "@/components/ui/RichTextField";
 import type {
   MainsCopySubmission,
   MentorshipRequest,
   MentorshipSession,
+  PremiumExam,
   ProfessionalProfile,
   TestSeries,
   TestSeriesEnrollment,
@@ -126,24 +127,6 @@ const learnerLabelFromRequest = (request?: MentorshipRequest | null): string => 
   return emailHandleToLabel(learnerEmail) || "Learner";
 };
 
-function PrelimsMetricCard({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string | number;
-  hint: string;
-}) {
-  return (
-    <article className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">{label}</p>
-      <p className="mt-3 text-3xl font-black tracking-tight text-slate-950">{value}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{hint}</p>
-    </article>
-  );
-}
-
 function testStatusLabel(test: TestSeriesTest): string {
   if (test.is_finalized && test.is_public && test.is_active) return "Published";
   if (test.is_finalized) return "Ready";
@@ -166,6 +149,7 @@ const emptyTestForm: TestSeriesTestCreatePayload = {
   price: 0,
   is_finalized: false,
   series_order: 0,
+  exam_ids: [],
   meta: {},
 };
 
@@ -192,6 +176,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
 
   const [busy, setBusy] = useState(true);
   const [series, setSeries] = useState<TestSeries | null>(null);
+  const [availableExams, setAvailableExams] = useState<PremiumExam[]>([]);
   const [tests, setTests] = useState<TestSeriesTest[]>([]);
   const [programItems, setProgramItems] = useState<TestSeriesProgramItem[]>([]);
   const [enrollments, setEnrollments] = useState<TestSeriesEnrollment[]>([]);
@@ -208,6 +193,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
     price: 0,
     is_public: false,
     is_active: true,
+    exam_ids: [],
     meta: {},
   });
 
@@ -264,7 +250,6 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   const builderFlowDescription = isPrelimsSeries
     ? "Set the program basics first, then move into tests, question methods, and complaint handling."
     : "Set the program basics first, then move into tests, submissions, and learner progress.";
-  const testsStepLabel = isPrelimsSeries ? "Tests + Quiz Add" : "Tests + Mains Add";
   const testsStepDescription = isPrelimsSeries
     ? "Add each test, wire the question builder, and keep the learner-facing flow clean."
     : "Add each mains paper here, then manage submissions and learner progress from the same workspace.";
@@ -380,6 +365,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
         price: Number(nextSeries.price || 0),
         is_public: nextSeries.is_public,
         is_active: nextSeries.is_active,
+        exam_ids: Array.isArray(nextSeries.exam_ids) ? nextSeries.exam_ids : [],
         meta: nextMeta,
       });
       setMentorUserIdsText(parseMentorIdsFromMeta(nextMeta).join(", "));
@@ -444,6 +430,23 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
     void loadPage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seriesId, loading, isAuthenticated, providerLike, mentorLike, moderatorLike, adminLike, currentUserId]);
+
+  useEffect(() => {
+    let active = true;
+    premiumApi
+      .get<PremiumExam[]>("/exams", { params: { active_only: true } })
+      .then((response) => {
+        if (!active) return;
+        setAvailableExams(Array.isArray(response.data) ? response.data : []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setAvailableExams([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!canEditSeriesStructure) {
@@ -548,6 +551,14 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   );
   const selectedMentorIds = useMemo(() => parseMentorIds(mentorUserIdsText), [mentorUserIdsText]);
   const canUseTestBuilder = allowedTestKindOptions.length > 0;
+  const seriesExamIds = useMemo(
+    () => (Array.isArray(seriesForm.exam_ids) ? seriesForm.exam_ids : []),
+    [seriesForm.exam_ids],
+  );
+  const testExamIds = useMemo(
+    () => (Array.isArray(testForm.exam_ids) ? testForm.exam_ids : []),
+    [testForm.exam_ids],
+  );
 
   const toggleMentorId = (mentorId: string) => {
     const current = parseMentorIds(mentorUserIdsText);
@@ -555,6 +566,30 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
       ? current.filter((id) => id !== mentorId)
       : [...current, mentorId];
     setMentorUserIdsText(next.join(", "));
+  };
+
+  const toggleSeriesExamId = (examId: number) => {
+    setSeriesForm((prev) => {
+      const currentIds = Array.isArray(prev.exam_ids) ? prev.exam_ids : [];
+      return {
+        ...prev,
+        exam_ids: currentIds.includes(examId)
+          ? currentIds.filter((item) => item !== examId)
+          : [...currentIds, examId],
+      };
+    });
+  };
+
+  const toggleTestExamId = (examId: number) => {
+    setTestForm((prev) => {
+      const currentIds = Array.isArray(prev.exam_ids) ? prev.exam_ids : [];
+      return {
+        ...prev,
+        exam_ids: currentIds.includes(examId)
+          ? currentIds.filter((item) => item !== examId)
+          : [...currentIds, examId],
+      };
+    });
   };
 
   const saveSeries = async (): Promise<boolean> => {
@@ -574,6 +609,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
         ...seriesForm,
         title,
         description: toNullableRichText(seriesForm.description || ""),
+        exam_ids: seriesExamIds,
         meta: mergedMeta,
       });
       toast.success("Series updated");
@@ -620,6 +656,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
           ...testForm,
           title,
           description: toNullableRichText(testForm.description || ""),
+          exam_ids: testExamIds,
         });
         toast.success("Test updated");
       } else {
@@ -627,6 +664,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
           ...testForm,
           title,
           description: toNullableRichText(testForm.description || ""),
+          exam_ids: testExamIds,
         });
         toast.success("Test created");
       }
@@ -701,6 +739,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
       price: Number(test.price || 0),
       is_finalized: test.is_finalized,
       series_order: test.series_order,
+      exam_ids: Array.isArray(test.exam_ids) ? test.exam_ids : [],
       meta: test.meta || {},
     });
   };
@@ -710,6 +749,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
     setTestForm({
       ...emptyTestForm,
       test_kind: allowedTestKindOptions[0]?.value || "prelims",
+      exam_ids: Array.isArray(series?.exam_ids) ? series.exam_ids : [],
     });
     setTestModalOpen(true);
   };
@@ -796,7 +836,6 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
 
   const selectedMetrics = lifecycleRows.find((row) => row.userId === selectedLearnerId)?.metrics;
   const finalDiscussion = getDiscussionDraftFromMeta(seriesForm.meta, "final_discussion");
-  const activeTestDiscussion = getDiscussionDraftFromMeta(testForm.meta, "test_discussion");
   const publishedTests = orderedTests.filter((test) => Boolean(test.is_finalized && test.is_public && test.is_active));
   const totalQuestions = orderedTests.reduce((sum, test) => sum + Number(test.question_count || 0), 0);
   const builderIntegrity = orderedTests.length > 0
@@ -867,7 +906,34 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
                     <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                         <input type="checkbox" checked={Boolean(testForm.is_public)} onChange={(e) => setTestForm(prev => ({ ...prev, is_public: e.target.checked }))} className="h-4 w-4 rounded border-slate-300" />
                         Publicly Visible
-                    </label>
+                      </label>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Target exams</label>
+                    <span className="text-xs text-slate-500">This test appears under these exams.</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    {availableExams.length === 0 ? (
+                      <span className="text-sm text-slate-500">No active exams available.</span>
+                    ) : availableExams.map((exam) => {
+                      const active = testExamIds.includes(exam.id);
+                      return (
+                        <button
+                          key={exam.id}
+                          type="button"
+                          onClick={() => toggleTestExamId(exam.id)}
+                          className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                            active
+                              ? "border-indigo-500 bg-indigo-600 text-white"
+                              : "border-slate-300 bg-white text-slate-700"
+                          }`}
+                        >
+                          {exam.name}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
                 <RichTextField
@@ -1145,6 +1211,34 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
                     <input type="checkbox" checked={Boolean(seriesForm.is_public)} onChange={(event) => setSeriesForm((prev) => ({ ...prev, is_public: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600" />
                     Public
                   </label>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-sm font-bold text-slate-800">Target exams</label>
+                    <span className="text-xs text-slate-500">Programs and tests show under these exams.</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    {availableExams.length === 0 ? (
+                      <span className="text-sm text-slate-500">No active exams available.</span>
+                    ) : availableExams.map((exam) => {
+                      const active = seriesExamIds.includes(exam.id);
+                      return (
+                        <button
+                          key={exam.id}
+                          type="button"
+                          onClick={() => toggleSeriesExamId(exam.id)}
+                          className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                            active
+                              ? "border-indigo-500 bg-indigo-600 text-white"
+                              : "border-slate-300 bg-white text-slate-700"
+                          }`}
+                        >
+                          {exam.name}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <RichTextField
@@ -1518,6 +1612,33 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
               <label className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm">
                 <input type="checkbox" checked={Boolean(seriesForm.is_public)} onChange={(event) => setSeriesForm((prev) => ({ ...prev, is_public: event.target.checked }))} /> Public
               </label>
+            </div>
+            <div className="mt-4 space-y-3 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-slate-900">Target exams</p>
+                <span className="text-xs text-slate-500">Programs and tests show under these exams.</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {availableExams.length === 0 ? (
+                  <span className="text-sm text-slate-500">No active exams available.</span>
+                ) : availableExams.map((exam) => {
+                  const active = seriesExamIds.includes(exam.id);
+                  return (
+                    <button
+                      key={exam.id}
+                      type="button"
+                      onClick={() => toggleSeriesExamId(exam.id)}
+                      className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                        active
+                          ? "border-indigo-500 bg-indigo-600 text-white"
+                          : "border-slate-300 bg-white text-slate-700"
+                      }`}
+                    >
+                      {exam.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div className="mt-2">
               <RichTextField
