@@ -32,6 +32,14 @@ Use `supa_back/backend` as the Railway service root directory.
 
 - Build uses `requirements.txt`
 - Start uses `gunicorn` via both `Procfile` and `railway.toml`
+- `railpack.json` is included for explicit Railpack provider detection
+
+Fallback root support:
+
+- If Railway service root is `supa_back` (not `supa_back/backend`), deployment still works via:
+  - `supa_back/railpack.json`
+  - `supa_back/railway.toml`
+  - `supa_back/Procfile`
 
 Default production start command:
 
