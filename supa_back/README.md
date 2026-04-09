@@ -26,17 +26,44 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8002
 ```
 
+## Railway Deployment (Backend)
+
+Use `supa_back/backend` as the Railway service root directory.
+
+- Build uses `requirements.txt`
+- Start uses `gunicorn` via both `Procfile` and `railway.toml`
+
+Default production start command:
+
+```bash
+gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers ${WEB_CONCURRENCY:-2} --timeout ${GUNICORN_TIMEOUT:-120}
+```
+
+Note: `gunicorn` is for Linux deploy targets (Railway). For local Windows development, continue to run `uvicorn` directly.
+
+Recommended Railway variables:
+
+- `PORT` (set automatically by Railway)
+- `WEB_CONCURRENCY` (optional, default `2`)
+- `GUNICORN_TIMEOUT` (optional, default `120`)
+- `PYTHON_VERSION=3.11` (optional if Railway respects `.python-version`)
+
 ## Required Environment Variables
 
 - `SUPABASE_URL`
 - `SUPABASE_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` (recommended for admin-auth assisted routes)
 - `OPENAI_API_KEY`
 - `GEMINI_API_KEY`
 - `API_URL`
-- `ZOOM_CLIENT_ID`
-- `ZOOM_CLIENT_SECRET`
 - `AGORA_APP_ID`
 - `AGORA_APP_CERTIFICATE`
+
+Legacy-only (optional unless still using Zoom routes):
+
+- `ZOOM_CLIENT_ID`
+- `ZOOM_CLIENT_SECRET`
+- `ZOOM_WEBHOOK_SECRET`
 
 ## Current Backend Responsibilities
 

@@ -85,6 +85,9 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8002
 ```
 
+Railway service root for backend: `supa_back/backend`.
+Production start command is configured via `Procfile`/`railway.toml` to use `gunicorn` + `uvicorn` workers.
+
 ### Frontend
 
 ```powershell
