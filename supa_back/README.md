@@ -28,18 +28,12 @@ uvicorn app.main:app --reload --port 8002
 
 ## Railway Deployment (Backend)
 
-Use `supa_back/backend` as the Railway service root directory.
+Use the inner `backend` folder as the Railway service root directory.
+In this repo that path is `supa_back/backend`, and all Railway config files now live inside that folder only.
 
 - Build uses `requirements.txt`
 - Start uses `gunicorn` via both `Procfile` and `railway.toml`
 - `railpack.json` is included for explicit Railpack provider detection
-
-Fallback root support:
-
-- If Railway service root is `supa_back` (not `supa_back/backend`), deployment still works via:
-  - `supa_back/railpack.json`
-  - `supa_back/railway.toml`
-  - `supa_back/Procfile`
 
 Default production start command:
 
