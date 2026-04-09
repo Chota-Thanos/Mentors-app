@@ -36,7 +36,7 @@ export function UserNav() {
           href="/signup"
           className="app-btn-primary inline-flex px-3 py-1.5 text-xs font-semibold"
         >
-          Get Started
+          Register
         </Link>
       </div>
     );

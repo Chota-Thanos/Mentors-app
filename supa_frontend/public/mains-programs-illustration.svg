@@ -1,0 +1,44 @@
+<svg width="720" height="620" viewBox="0 0 720 620" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="720" height="620" rx="36" fill="url(#bg)"/>
+  <rect x="92" y="86" width="536" height="448" rx="28" fill="url(#card)" stroke="#222831" stroke-width="2"/>
+  <circle cx="564" cy="144" r="48" fill="url(#glow)" opacity="0.34"/>
+  <circle cx="150" cy="470" r="76" fill="url(#glow2)" opacity="0.2"/>
+  <rect x="136" y="272" width="448" height="138" rx="18" fill="url(#sheet)" stroke="#E8DED0" stroke-width="2"/>
+  <path d="M174 314H546" stroke="#DCCFBE" stroke-width="3" stroke-linecap="round"/>
+  <path d="M174 346H546" stroke="#DCCFBE" stroke-width="3" stroke-linecap="round"/>
+  <path d="M174 378H500" stroke="#DCCFBE" stroke-width="3" stroke-linecap="round"/>
+  <rect x="214" y="362" width="256" height="16" rx="8" transform="rotate(12 214 362)" fill="url(#pen)"/>
+  <rect x="448" y="414" width="86" height="12" rx="6" transform="rotate(12 448 414)" fill="url(#tip)"/>
+  <rect x="188" y="356" width="34" height="20" rx="10" transform="rotate(12 188 356)" fill="#1D222B"/>
+  <defs>
+    <linearGradient id="bg" x1="72" y1="50" x2="624" y2="562" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1B2028"/>
+      <stop offset="0.62" stop-color="#36363D"/>
+      <stop offset="1" stop-color="#5A514C"/>
+    </linearGradient>
+    <linearGradient id="card" x1="112" y1="104" x2="608" y2="516" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#20252D"/>
+      <stop offset="1" stop-color="#4F4843"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(564 144) rotate(90) scale(48)">
+      <stop stop-color="white"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(150 470) rotate(90) scale(76)">
+      <stop stop-color="white"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sheet" x1="136" y1="272" x2="584" y2="410" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5EDDF"/>
+      <stop offset="1" stop-color="#EEE2D1"/>
+    </linearGradient>
+    <linearGradient id="pen" x1="214" y1="370" x2="470" y2="370" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1D2128"/>
+      <stop offset="1" stop-color="#2A313D"/>
+    </linearGradient>
+    <linearGradient id="tip" x1="448" y1="420" x2="534" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C59A57"/>
+      <stop offset="1" stop-color="#F0CA86"/>
+    </linearGradient>
+  </defs>
+</svg>

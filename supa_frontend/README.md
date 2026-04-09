@@ -64,6 +64,7 @@ npm run dev
 
 At minimum:
 
+- `NEXT_PUBLIC_SITE_URL`
 - `NEXT_PUBLIC_SUPA_BACKEND_URL`
 - Supabase web auth env vars used by the current client setup
 

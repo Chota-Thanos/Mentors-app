@@ -1,6 +1,7 @@
 'use client'
 
 import { createClient } from '@/lib/supabase/client'
+import { getPublicSiteUrl } from '@/lib/siteUrl'
 import {
     useState,
     type ButtonHTMLAttributes,
@@ -72,11 +73,13 @@ export default function AuthForm({ view }: { view: 'sign_in' | 'sign_up' }) {
                 router.refresh()
                 router.push('/')
             } else {
+                const siteUrl = getPublicSiteUrl()
+                const emailRedirectTo = siteUrl ? `${siteUrl}/auth/callback` : undefined
                 const { error } = await supabase.auth.signUp({
                     email,
                     password,
                     options: {
-                        emailRedirectTo: `${location.origin}/auth/callback`,
+                        emailRedirectTo,
                     },
                 })
                 if (error) throw error

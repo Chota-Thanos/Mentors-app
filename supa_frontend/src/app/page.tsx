@@ -15,12 +15,12 @@ import {
   MessageSquareMore,
   ShieldCheck,
   Sparkles,
-  UserRoundSearch,
   WandSparkles,
 } from "lucide-react";
 import axios from "axios";
 
 import AppLayout from "@/components/layouts/AppLayout";
+import PublicLandingPage from "@/components/home/PublicLandingPage";
 import { useAuth } from "@/context/AuthContext";
 import {
   isAdminLike,
@@ -258,101 +258,6 @@ const quickActionsByKind: Record<HomeKind, HomeAction[]> = {
       accent: "from-[#14532d] via-[#1d7a43] to-[#4ade80]",
       icon: BriefcaseBusiness,
       tag: "Queue",
-    },
-  ],
-};
-
-const featureLanesByKind: Record<HomeKind, Array<{ title: string; description: string; href: string; cta: string; icon: typeof BookOpen }>> = {
-  learner: [
-    {
-      title: "Structured Prep",
-      description: "Move into prelims and mains programs without losing context around progress and results.",
-      href: "/programs/prelims",
-      cta: "Open Programs",
-      icon: BookOpen,
-    },
-    {
-      title: "Performance Review",
-      description: "See what is improving, where marks are leaking, and which area should be worked on next.",
-      href: "/dashboard",
-      cta: "Open Evaluation",
-      icon: ClipboardCheck,
-    },
-    {
-      title: "Mentor Help",
-      description: "Shift from self-study into human support through requests, chat, and session workflows.",
-      href: "/mentors",
-      cta: "Browse Mentors",
-      icon: UserRoundSearch,
-    },
-  ],
-  quiz_master: [
-    {
-      title: "Creation Tools",
-      description: "Use AI and program flows to build the next set of learner-ready material quickly.",
-      href: "/quiz-master/ai-quiz/gk",
-      cta: "Open Creator Tools",
-      icon: WandSparkles,
-    },
-    {
-      title: "Built Material",
-      description: "Keep created tests and programs organized so delivery stays clean and manageable.",
-      href: "/programs",
-      cta: "Manage Material",
-      icon: FileCheck2,
-    },
-    {
-      title: "Quality Reporting",
-      description: "Resolve learner complaints and keep feedback loops inside the same creator workflow.",
-      href: "/quiz-master/complaints",
-      cta: "Open Complaints",
-      icon: ShieldCheck,
-    },
-  ],
-  mains_mentor: [
-    {
-      title: "Mains Delivery",
-      description: "Operate active programs and move into the right test or learner context fast.",
-      href: "/programs",
-      cta: "Manage Programs",
-      icon: FileCheck2,
-    },
-    {
-      title: "Evaluation Workflow",
-      description: "Generate questions, evaluate responses, and keep answer-writing flows consistent.",
-      href: "/mains/evaluate?mode=mains_mentor",
-      cta: "Open Evaluation",
-      icon: ClipboardCheck,
-    },
-    {
-      title: "Mentorship Operations",
-      description: "Handle requests, scheduling, and session progression from one operational path.",
-      href: "/mentorship/manage",
-      cta: "Open Desk",
-      icon: BriefcaseBusiness,
-    },
-  ],
-  operations: [
-    {
-      title: "Platform Oversight",
-      description: "Monitor the active operating queues without jumping through disconnected pages.",
-      href: "/dashboard",
-      cta: "Open Oversight",
-      icon: ShieldCheck,
-    },
-    {
-      title: "Role Approvals",
-      description: "Keep onboarding movement controlled and reduce pending approvals in one pass.",
-      href: "/onboarding/review",
-      cta: "Open Queue",
-      icon: ClipboardCheck,
-    },
-    {
-      title: "Operational Material",
-      description: "Review program and mentorship surfaces where creator-side issues show up.",
-      href: "/programs",
-      cta: "Open Programs",
-      icon: FileCheck2,
     },
   ],
 };
@@ -1031,13 +936,15 @@ function MinimalCreatorHome({
 
 export default function Home() {
   const { user, isAuthenticated } = useAuth();
-
   const kind = useMemo(() => resolveHomeKind(user), [user]);
   const copy = homeCopy[kind];
   const quickActions = quickActionsByKind[kind];
-  const featureLanes = featureLanesByKind[kind];
 
-  if (kind === "quiz_master" || kind === "mains_mentor") {
+  if (!isAuthenticated) {
+    return <PublicLandingPage />;
+  }
+
+  if (kind !== "learner") {
     return (
       <AppLayout>
         <MinimalCreatorHome kind={kind} copy={copy} actions={quickActions} />
@@ -1052,126 +959,4 @@ export default function Home() {
       </AppLayout>
     );
   }
-
-  return (
-    <AppLayout>
-      <div className="space-y-8 pb-6">
-        <section className="relative overflow-hidden rounded-[32px] border border-[#d7def4] bg-[linear-gradient(135deg,#ffffff_0%,#f4f7ff_45%,#eef8f6_100%)] px-6 py-8 shadow-[0_24px_60px_rgba(9,26,74,0.08)] sm:px-8 sm:py-10">
-          <div className="absolute right-[-8rem] top-[-7rem] h-64 w-64 rounded-full bg-[#d9e4ff]/60 blur-3xl" />
-          <div className="absolute bottom-[-9rem] left-[-5rem] h-60 w-60 rounded-full bg-[#d7f5ef]/70 blur-3xl" />
-          <div className="relative grid gap-8 lg:grid-cols-[minmax(0,1.3fr)_360px] lg:items-end">
-            <div className="space-y-5">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[#c9d6fb] bg-white/80 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-[#304a92]">
-                <Sparkles className="h-4 w-4" />
-                {copy.badge}
-              </div>
-              <div className="space-y-3">
-                <h1 className="max-w-4xl text-4xl font-black leading-tight tracking-tight text-[#091a4a] sm:text-5xl">
-                  {copy.title}
-                </h1>
-                <p className="max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-                  {copy.subtitle}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Link
-                  href={copy.primaryHref}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-[#091a4a] px-5 py-3 text-sm font-bold text-white shadow-[0_18px_35px_rgba(9,26,74,0.25)] transition hover:-translate-y-0.5"
-                >
-                  {copy.primaryLabel}
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-                <Link
-                  href={copy.secondaryHref}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-[#c9d6fb] bg-white px-5 py-3 text-sm font-bold text-[#091a4a] transition hover:border-[#9eb3f3] hover:bg-[#f8faff]"
-                >
-                  {copy.secondaryLabel}
-                </Link>
-              </div>
-            </div>
-
-            <div className="relative rounded-[28px] border border-white/70 bg-white/70 p-4 shadow-[0_20px_45px_rgba(15,23,42,0.08)] backdrop-blur">
-              <div className="grid grid-cols-2 gap-3">
-                {quickActions.slice(0, 4).map((action) => {
-                  const Icon = action.icon;
-                  return (
-                    <div key={`hero-${action.href}`} className="rounded-[22px] border border-slate-200 bg-white/90 p-4">
-                      <div className={`inline-flex rounded-2xl bg-gradient-to-r ${action.accent} p-2.5 text-white shadow-sm`}>
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{action.tag}</p>
-                      <p className="mt-1 text-sm font-bold text-[#091a4a]">{action.label}</p>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-3 rounded-[22px] bg-[linear-gradient(135deg,#eef3ff_0%,#ffffff_55%,#eefbf7_100%)] p-4">
-                <div className="flex items-end gap-2">
-                  <div className="h-12 w-1/4 rounded-full bg-[#c8d7ff]" />
-                  <div className="h-20 w-1/4 rounded-full bg-[#8faeff]" />
-                  <div className="h-16 w-1/4 rounded-full bg-[#6fd3c6]" />
-                  <div className="h-24 w-1/4 rounded-full bg-[#091a4a]" />
-                </div>
-                <div className="mt-3 flex items-center justify-between text-xs font-semibold text-slate-500">
-                  <span>Prep Flow</span>
-                  <span>{isAuthenticated ? "Ready" : "Sign in"}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="space-y-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Quick Actions</p>
-            <h2 className="mt-1 text-2xl font-black tracking-tight text-[#091a4a]">Jump back in</h2>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {quickActions.map((action) => (
-              <Link
-                key={action.href}
-                href={action.href}
-                className="group relative overflow-hidden rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] transition hover:-translate-y-1 hover:shadow-[0_24px_55px_rgba(15,23,42,0.12)]"
-              >
-                <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${action.accent}`} />
-                <div className="mt-1 inline-flex rounded-2xl bg-slate-50 p-2 text-slate-700">
-                  <action.icon className="h-4 w-4" />
-                </div>
-                <div className="mt-3">
-                  <h3 className="text-lg font-black tracking-tight text-[#091a4a]">{action.label}</h3>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">{action.description}</p>
-                </div>
-                <div className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-[#2b4dac]">
-                  Open
-                  <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-
-        <section className="grid gap-4 xl:grid-cols-3">
-          {featureLanes.map((lane) => {
-            const Icon = lane.icon;
-            return (
-              <article
-                key={lane.href}
-                className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_16px_36px_rgba(15,23,42,0.05)]"
-              >
-                <div className="inline-flex rounded-2xl bg-[#eef3ff] p-3 text-[#2b4dac]">
-                  <Icon className="h-5 w-5" />
-                </div>
-                <h3 className="mt-5 text-xl font-black tracking-tight text-[#091a4a]">{lane.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{lane.description}</p>
-                <Link href={lane.href} className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-[#2b4dac]">
-                  {lane.cta}
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </article>
-            );
-          })}
-        </section>
-      </div>
-    </AppLayout>
-  );
 }
