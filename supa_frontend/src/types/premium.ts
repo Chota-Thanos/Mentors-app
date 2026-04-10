@@ -502,6 +502,25 @@ export type PerformanceAuditDetailPayload =
   | PerformanceAuditQuizDetailPayload
   | PerformanceAuditMainsDetailPayload;
 
+export interface YearlyAttemptSummaryRow {
+  content_type: "gk" | "maths" | "passage" | "mains";
+  label: string;
+  total_questions: number;
+  total_questions_attempted: number;
+  total_marks: number;
+  marks_obtained: number;
+}
+
+export interface YearlyAttemptSummaryPayload {
+  year: number;
+  rows: {
+    gk: YearlyAttemptSummaryRow;
+    maths: YearlyAttemptSummaryRow;
+    passage: YearlyAttemptSummaryRow;
+    mains: YearlyAttemptSummaryRow;
+  };
+}
+
 export interface ChallengeLinkCreateRequest {
   title?: string;
   description?: string;

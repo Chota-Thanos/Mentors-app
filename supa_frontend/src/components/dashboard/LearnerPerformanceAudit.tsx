@@ -20,6 +20,7 @@ import type {
   PerformanceAuditQuizMetrics,
   PerformanceAuditQuizSection,
   PerformanceAuditSourceKind,
+  TestSeriesDiscoverySeries,
 } from "@/types/premium";
 
 const sourceLabels: Record<PerformanceAuditSourceKind, string> = {
@@ -54,6 +55,174 @@ function resolveDefaultSourceKind(
 ): PerformanceAuditSourceKind {
   if (programMetrics.total_questions > 0 && aiMetrics.total_questions === 0) return "program";
   return "ai";
+}
+
+type SuggestedProgramCard = {
+  id: number;
+  title: string;
+  description: string;
+  href: string;
+  meta: string;
+};
+
+type SuggestionBundle = {
+  focusAreas: string[];
+  programs: SuggestedProgramCard[];
+  fallbackHref: string;
+  fallbackLabel: string;
+};
+
+function normalizeProgramText(...parts: Array<string | null | undefined>): string {
+  return parts
+    .map((part) => String(part || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildProgramMeta(row: TestSeriesDiscoverySeries): string {
+  const accessLabel = row.series.access_type === "free" || Number(row.series.price || 0) <= 0
+    ? "Free"
+    : `${String(row.series.access_type || "").toLowerCase()}`;
+  const categoryLabel = row.category_labels.filter(Boolean).slice(0, 2).join(", ");
+  return categoryLabel ? `${accessLabel} | ${categoryLabel}` : accessLabel;
+}
+
+function selectProgramsForFocusAreas(
+  focusAreas: string[],
+  rows: TestSeriesDiscoverySeries[],
+  fallbackHref: string,
+): SuggestedProgramCard[] {
+  const scored = rows
+    .map((row) => {
+      const haystack = normalizeProgramText(row.series.title, row.series.description, ...row.category_labels);
+      let score = 0;
+      for (const focusArea of focusAreas) {
+        const normalizedFocus = String(focusArea || "").trim().toLowerCase();
+        if (!normalizedFocus) continue;
+        if (haystack.includes(normalizedFocus)) score += 4;
+        const tokens = normalizedFocus.split(/\s+/).filter((token) => token.length > 3);
+        score += tokens.filter((token) => haystack.includes(token)).length;
+      }
+      return { row, score };
+    })
+    .sort((left, right) => right.score - left.score || left.row.series.title.localeCompare(right.row.series.title));
+
+  const selected = (scored.some((entry) => entry.score > 0) ? scored.filter((entry) => entry.score > 0) : scored)
+    .slice(0, 3)
+    .map(({ row }) => ({
+      id: row.series.id,
+      title: row.series.title,
+      description: String(row.series.description || "Structured program aligned to the current focus areas.").trim(),
+      href: `/programs/${row.series.id}`,
+      meta: buildProgramMeta(row),
+    }));
+
+  if (selected.length > 0) return selected;
+
+  return [
+    {
+      id: 0,
+      title: "Browse available programs",
+      description: "No direct category match was found, so open the full catalog for the closest fit.",
+      href: fallbackHref,
+      meta: "Catalog",
+    },
+  ];
+}
+
+function buildQuizSuggestions(
+  categories: PerformanceAuditQuizCategory[],
+  programRows: TestSeriesDiscoverySeries[],
+): SuggestionBundle {
+  const weakestCategories = [...categories]
+    .filter((category) => category.total_questions > 0)
+    .sort((left, right) => left.percentage - right.percentage)
+    .slice(0, 3);
+  const focusAreas = weakestCategories.map((category) => `${category.name} ${formatPercentage(category.percentage)}`);
+  return {
+    focusAreas: focusAreas.length > 0 ? focusAreas : ["Coverage building", "Accuracy improvement"],
+    programs: selectProgramsForFocusAreas(
+      weakestCategories.map((category) => category.name),
+      programRows,
+      "/programs/prelims",
+    ),
+    fallbackHref: "/programs/prelims",
+    fallbackLabel: "Open prelims programs",
+  };
+}
+
+function buildMainsSuggestions(
+  categories: PerformanceAuditMainsCategory[],
+  programRows: TestSeriesDiscoverySeries[],
+): SuggestionBundle {
+  const weakestCategories = [...categories]
+    .filter((category) => category.total_questions > 0)
+    .sort((left, right) => left.percentage - right.percentage)
+    .slice(0, 3);
+  const focusAreas = weakestCategories.map((category) => `${category.name} ${formatPercentage(category.percentage)}`);
+  return {
+    focusAreas: focusAreas.length > 0 ? focusAreas : ["Answer structure", "Marks consistency"],
+    programs: selectProgramsForFocusAreas(
+      weakestCategories.map((category) => category.name),
+      programRows,
+      "/programs/mains",
+    ),
+    fallbackHref: "/programs/mains",
+    fallbackLabel: "Open mains programs",
+  };
+}
+
+function ProgramSuggestionPanel({
+  suggestionBundle,
+  sourceKind,
+}: {
+  suggestionBundle: SuggestionBundle;
+  sourceKind: PerformanceAuditSourceKind;
+}) {
+  return (
+    <div className="mt-6 rounded-[22px] border border-[#dce3fb] bg-[linear-gradient(180deg,#f7f9ff_0%,#ffffff_100%)] p-4 shadow-[0_12px_24px_rgba(80,103,170,0.06)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h4 className="text-[12px] font-semibold uppercase tracking-[0.28em] text-[#5f7aa9]">Program Suggestions</h4>
+          <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">
+            Suggestions based on the weaker first-level categories in {sourceLabels[sourceKind].toLowerCase()}.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Focus Areas</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {suggestionBundle.focusAreas.map((focusArea) => (
+            <span
+              key={focusArea}
+              className="rounded-full border border-[#cfe0ff] bg-[#eef4ff] px-3 py-1.5 text-[12px] font-semibold text-[#1739ac]"
+            >
+              {focusArea}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        {suggestionBundle.programs.map((program) => (
+          <Link
+            key={`${program.id}-${program.href}`}
+            href={program.href}
+            className="rounded-[18px] border border-[#dce3fb] bg-white px-4 py-4 transition hover:border-[#bdd1ff]"
+          >
+            <p className="text-[16px] font-semibold tracking-[-0.03em] text-[#182033]">{program.title}</p>
+            <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5f7aa9]">{program.meta}</p>
+            <p className="mt-2 text-[12px] leading-6 text-[#6c7590]">{program.description}</p>
+            <span className="mt-4 inline-flex items-center gap-1 text-[12px] font-semibold text-[#1739ac]">
+              {suggestionBundle.fallbackLabel}
+              <ArrowRight className="h-3.5 w-3.5" />
+            </span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function QuizMetricGrid({
@@ -237,13 +406,20 @@ function MainsCategoryList({
   );
 }
 
-function QuizSectionCard({ section }: { section: PerformanceAuditQuizSection }) {
+function QuizSectionCard({
+  section,
+  programRows,
+}: {
+  section: PerformanceAuditQuizSection;
+  programRows: TestSeriesDiscoverySeries[];
+}) {
   const meta = DASHBOARD_SECTION_META[section.content_type];
   const Icon = meta.icon;
   const [activeSource, setActiveSource] = useState<PerformanceAuditSourceKind>(() =>
     resolveDefaultSourceKind(section.sources.ai, section.sources.program),
   );
   const source = section.sources[activeSource];
+  const suggestionBundle = buildQuizSuggestions(source.first_level_categories, programRows);
 
   return (
     <section className="rounded-[34px] bg-[linear-gradient(180deg,#f1f4ff_0%,#edf1ff_100%)] px-6 py-6 sm:px-8 sm:py-8">
@@ -304,18 +480,27 @@ function QuizSectionCard({ section }: { section: PerformanceAuditQuizSection }) 
             <QuizCategoryList contentType={section.content_type} sourceKind={activeSource} categories={source.first_level_categories} />
           </div>
         </div>
+
+        <ProgramSuggestionPanel suggestionBundle={suggestionBundle} sourceKind={activeSource} />
       </article>
     </section>
   );
 }
 
-function MainsSectionCard({ section }: { section: PerformanceAuditMainsSection }) {
+function MainsSectionCard({
+  section,
+  programRows,
+}: {
+  section: PerformanceAuditMainsSection;
+  programRows: TestSeriesDiscoverySeries[];
+}) {
   const meta = DASHBOARD_SECTION_META.mains;
   const Icon = meta.icon;
   const [activeSource, setActiveSource] = useState<PerformanceAuditSourceKind>(() =>
     resolveDefaultSourceKind(section.sources.ai, section.sources.program),
   );
   const source = section.sources[activeSource];
+  const suggestionBundle = buildMainsSuggestions(source.first_level_categories, programRows);
 
   return (
     <section className="rounded-[34px] bg-[linear-gradient(180deg,#f1f4ff_0%,#edf1ff_100%)] px-6 py-6 sm:px-8 sm:py-8">
@@ -374,6 +559,8 @@ function MainsSectionCard({ section }: { section: PerformanceAuditMainsSection }
             <MainsCategoryList contentType="mains" sourceKind={activeSource} categories={source.first_level_categories} />
           </div>
         </div>
+
+        <ProgramSuggestionPanel suggestionBundle={suggestionBundle} sourceKind={activeSource} />
       </article>
     </section>
   );
@@ -382,21 +569,30 @@ function MainsSectionCard({ section }: { section: PerformanceAuditMainsSection }
 export default function LearnerPerformanceAudit() {
   const { loading: authLoading, isAuthenticated, showLoginModal } = useAuth();
   const [payload, setPayload] = useState<PerformanceAuditOverviewPayload | null>(null);
+  const [quizProgramRows, setQuizProgramRows] = useState<TestSeriesDiscoverySeries[]>([]);
+  const [mainsProgramRows, setMainsProgramRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (authLoading || !isAuthenticated) return;
     let active = true;
 
-    premiumApi
-      .get<PerformanceAuditOverviewPayload>("/user/performance-audit")
-      .then((response) => {
-        if (!active) return;
-        setPayload(response.data);
+    Promise.allSettled([
+      premiumApi.get<PerformanceAuditOverviewPayload>("/user/performance-audit"),
+      premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", {
+        params: { limit: 120, series_kind: "quiz" },
+      }),
+      premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", {
+        params: { limit: 120, series_kind: "mains" },
+      }),
+    ]).then(([auditResult, quizProgramsResult, mainsProgramsResult]) => {
+      if (!active) return;
+
+      if (auditResult.status === "fulfilled") {
+        setPayload(auditResult.value.data);
         setError("");
-      })
-      .catch((err: unknown) => {
-        if (!active) return;
+      } else {
+        const err = auditResult.reason;
         const detail =
           typeof err === "object" &&
           err !== null &&
@@ -406,7 +602,19 @@ export default function LearnerPerformanceAudit() {
             : "Failed to load performance audit.";
         setError(detail);
         setPayload(null);
-      });
+      }
+
+      setQuizProgramRows(
+        quizProgramsResult.status === "fulfilled" && Array.isArray(quizProgramsResult.value.data)
+          ? quizProgramsResult.value.data
+          : [],
+      );
+      setMainsProgramRows(
+        mainsProgramsResult.status === "fulfilled" && Array.isArray(mainsProgramsResult.value.data)
+          ? mainsProgramsResult.value.data
+          : [],
+      );
+    });
 
     return () => {
       active = false;
@@ -469,9 +677,9 @@ export default function LearnerPerformanceAudit() {
         <div className="space-y-6">
           {sections.map((section) =>
             section.is_quiz ? (
-              <QuizSectionCard key={section.content_type} section={section} />
+              <QuizSectionCard key={section.content_type} section={section} programRows={quizProgramRows} />
             ) : (
-              <MainsSectionCard key={section.content_type} section={section} />
+              <MainsSectionCard key={section.content_type} section={section} programRows={mainsProgramRows} />
             ),
           )}
         </div>

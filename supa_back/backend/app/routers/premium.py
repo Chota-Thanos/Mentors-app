@@ -12237,6 +12237,150 @@ async def get_user_dashboard_ai_analysis(
         **analysis_payload,
     }
 
+@router.get("/user/yearly-attempt-summary")
+def get_user_yearly_attempt_summary(
+    year: Optional[int] = Query(default=None, ge=2020, le=2100),
+    supabase: Client = Depends(get_supabase_client),
+    user_id: Optional[str] = Depends(get_user_id),
+):
+    if not user_id:
+         raise HTTPException(status_code=401, detail="Authentication required")
+
+    selected_year = int(year or datetime.now(timezone.utc).year)
+    start_at = datetime(selected_year, 1, 1, tzinfo=timezone.utc)
+    end_at = datetime(selected_year + 1, 1, 1, tzinfo=timezone.utc)
+
+    rows: Dict[str, Dict[str, Any]] = {
+        "gk": {
+            "content_type": "gk",
+            "label": "GK Quiz",
+            "total_questions": 0,
+            "total_questions_attempted": 0,
+            "total_marks": 0,
+            "marks_obtained": 0,
+        },
+        "maths": {
+            "content_type": "maths",
+            "label": "Maths Quiz",
+            "total_questions": 0,
+            "total_questions_attempted": 0,
+            "total_marks": 0,
+            "marks_obtained": 0,
+        },
+        "passage": {
+            "content_type": "passage",
+            "label": "Passage Quiz",
+            "total_questions": 0,
+            "total_questions_attempted": 0,
+            "total_marks": 0,
+            "marks_obtained": 0,
+        },
+        "mains": {
+            "content_type": "mains",
+            "label": "Mains",
+            "total_questions": 0,
+            "total_questions_attempted": 0,
+            "total_marks": 0,
+            "marks_obtained": 0,
+        },
+    }
+
+    attempts = _rows(
+        supabase.table("user_quiz_attempts")
+        .select("collection_id, details, created_at")
+        .eq("user_id", user_id)
+        .gte("created_at", start_at.isoformat())
+        .lt("created_at", end_at.isoformat())
+        .order("created_at", desc=True)
+        .limit(1000)
+        .execute()
+    )
+
+    collection_ids = sorted(
+        {
+            _safe_int(row.get("collection_id"))
+            for row in attempts
+            if _safe_int(row.get("collection_id")) > 0
+        }
+    )
+
+    expanded_cache: Dict[int, Dict[int, CollectionTestQuestion]] = {}
+    for collection_id in collection_ids:
+        try:
+            expanded_questions = _expand_questions(collection_id, supabase)
+        except Exception:
+            expanded_questions = []
+        expanded_cache[collection_id] = {
+            _safe_int(question.item_id): question
+            for question in expanded_questions
+            if _safe_int(question.item_id) > 0
+        }
+
+    for attempt in attempts:
+        collection_id = _safe_int(attempt.get("collection_id"))
+        if collection_id <= 0:
+            continue
+        details = attempt.get("details") if isinstance(attempt.get("details"), list) else []
+        question_map = expanded_cache.get(collection_id, {})
+
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            item_id = _safe_int(detail.get("item_id"), -1)
+            if item_id <= 0:
+                continue
+            question = question_map.get(item_id)
+            if not question:
+                continue
+            quiz_type = (
+                question.quiz_type.value
+                if hasattr(question.quiz_type, "value")
+                else str(question.quiz_type or "")
+            ).strip().lower()
+            if quiz_type not in {"gk", "maths", "passage"}:
+                continue
+            row = rows[quiz_type]
+            row["total_questions"] += 1
+
+            if quiz_type == "gk":
+                row["total_marks"] += 2
+            else:
+                row["total_marks"] += 1
+
+            selected_option = detail.get("selected_option")
+            is_answered = selected_option not in (None, "")
+            if is_answered:
+                row["total_questions_attempted"] += 1
+            if bool(detail.get("is_correct")):
+                row["marks_obtained"] += 2 if quiz_type == "gk" else 1
+            elif is_answered and quiz_type == "gk":
+                row["marks_obtained"] = round(_safe_float(row["marks_obtained"]) - (2.0 / 3.0), 2)
+
+    evaluations = _rows(
+        supabase.table("user_mains_evaluations")
+        .select("score, max_score, created_at")
+        .eq("user_id", user_id)
+        .gte("created_at", start_at.isoformat())
+        .lt("created_at", end_at.isoformat())
+        .order("created_at", desc=True)
+        .limit(1000)
+        .execute()
+    )
+
+    for evaluation in evaluations:
+        score = max(0.0, _safe_float(evaluation.get("score")))
+        max_score = max(0.0, _safe_float(evaluation.get("max_score")))
+        rows["mains"]["total_questions"] += 1
+        rows["mains"]["total_questions_attempted"] += 1
+        rows["mains"]["total_marks"] = round(_safe_float(rows["mains"]["total_marks"]) + max_score, 2)
+        rows["mains"]["marks_obtained"] = round(_safe_float(rows["mains"]["marks_obtained"]) + score, 2)
+
+    return {
+        "year": selected_year,
+        "rows": rows,
+    }
+
+
 @router.get("/user/progress")
 def get_user_progress(
     supabase: Client = Depends(get_supabase_client),

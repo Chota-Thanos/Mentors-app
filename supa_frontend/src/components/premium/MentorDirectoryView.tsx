@@ -85,6 +85,13 @@ function statusRank(status?: MentorAvailabilityStatus | null): number {
   return 3;
 }
 
+function statusToneClass(status?: MentorAvailabilityStatus | null): string {
+  if (status?.live_session_id) return "border-[#c9eee6] bg-[#eaf8f4] text-[#176a5c]";
+  if (status?.status === "available_now") return "border-[#c9eee6] bg-[#eaf8f4] text-[#176a5c]";
+  if (status?.status === "busy") return "border-[#f0ddb1] bg-[#fff3d8] text-[#80520d]";
+  return "border-[#dbe3f6] bg-[#f6f8ff] text-[#5e6885]";
+}
+
 function FilterButton({
   active,
   children,
@@ -98,8 +105,10 @@ function FilterButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-        active ? "bg-[#000666] text-white shadow-[0_12px_24px_rgba(0,6,102,0.14)]" : "bg-white text-[#454652]"
+      className={`rounded-full px-4 py-2 text-[13px] font-semibold transition-colors ${
+        active
+          ? "bg-[#173aa9] text-white shadow-[0_14px_28px_rgba(23,58,169,0.18)]"
+          : "border border-[#dbe3f6] bg-white text-[#5f6883]"
       }`}
     >
       {children}
@@ -206,30 +215,36 @@ export default function MentorDirectoryView() {
   };
 
   return (
-    <div className="space-y-8">
-      <section className="rounded-[2rem] bg-[#f8f9fb]">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+    <div className="space-y-8 bg-[#f6f8ff] text-[#192133]">
+      <section className="relative overflow-hidden rounded-[34px] border border-[#dde5f7] bg-[linear-gradient(135deg,#ffffff_0%,#f2f5ff_58%,#eef9f6_100%)] px-5 py-6 shadow-[0_22px_55px_rgba(9,26,74,0.08)] sm:px-7 sm:py-8 lg:px-10 lg:py-10">
+        <div className="absolute right-[-5rem] top-[-4rem] h-48 w-48 rounded-full bg-[#d9e4ff]/70 blur-3xl" />
+        <div className="absolute bottom-[-6rem] left-[-4rem] h-52 w-52 rounded-full bg-[#d7f5ef]/70 blur-3xl" />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#767683]">Mentor Discovery</p>
-            <h1 className="mt-2 font-sans text-4xl font-extrabold tracking-tight text-[#000666]">Find mentors</h1>
-            <p className="mt-2 text-base text-[#454652]">Curated mains expertise for a request-led workflow.</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Mentor Discovery</p>
+            <h1 className="mt-3 font-sans text-[38px] font-semibold leading-[0.94] tracking-[-0.07em] text-[#1235ae] sm:text-[48px] lg:text-[58px]">
+              Find mentors
+            </h1>
+            <p className="mt-4 max-w-2xl text-[15px] leading-7 text-[#6d7690]">
+              Curated mains expertise for a request-led workflow, with verified filters, live availability, and clear service paths.
+            </p>
           </div>
 
           <div className="flex w-full max-w-xl items-center gap-3">
-            <label className="flex min-w-0 flex-1 items-center gap-3 rounded-[1.25rem] bg-[#eef2f5] px-4 py-3 shadow-[0_12px_24px_rgba(25,28,30,0.04)]">
-              <Search className="h-4 w-4 text-[#767683]" />
+            <label className="flex min-w-0 flex-1 items-center gap-3 rounded-[22px] border border-[#dbe3f6] bg-white px-4 py-3 shadow-[0_14px_28px_rgba(21,31,76,0.06)]">
+              <Search className="h-4 w-4 text-[#7a85a5]" />
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search by name or subject..."
-                className="w-full bg-transparent text-sm font-medium text-[#191c1e] outline-none placeholder:text-[#767683]"
+                className="w-full bg-transparent text-sm font-medium text-[#1d2945] outline-none placeholder:text-[#7a85a5]"
               />
             </label>
             <button
               type="button"
               onClick={() => setVerifiedOnly((prev) => !prev)}
-              className={`inline-flex h-14 w-14 items-center justify-center rounded-[1.15rem] shadow-[0_12px_24px_rgba(0,6,102,0.12)] transition-colors ${
-                verifiedOnly ? "bg-[#000666] text-white" : "bg-white text-[#000666]"
+              className={`inline-flex h-14 w-14 items-center justify-center rounded-[20px] shadow-[0_12px_24px_rgba(23,58,169,0.12)] transition-colors ${
+                verifiedOnly ? "bg-[#173aa9] text-white" : "bg-white text-[#173aa9]"
               }`}
               aria-label="Toggle verified mentors"
             >
@@ -241,9 +256,9 @@ export default function MentorDirectoryView() {
 
       <div className="grid gap-8 lg:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="hidden lg:block">
-          <div className="sticky top-24 space-y-5 rounded-[1.75rem] bg-[#f2f4f6] p-6">
+          <div className="sticky top-24 space-y-5 rounded-[30px] border border-[#dbe3f6] bg-white/95 p-6 shadow-[0_20px_50px_rgba(16,31,74,0.08)]">
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#767683]">Service Type</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Service Type</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <FilterButton active={serviceFilter === "all"} onClick={() => setServiceFilter("all")}>All</FilterButton>
                 <FilterButton active={serviceFilter === "mentorship"} onClick={() => setServiceFilter("mentorship")}>Mentorship</FilterButton>
@@ -252,7 +267,7 @@ export default function MentorDirectoryView() {
             </div>
 
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#767683]">Availability</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Availability</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <FilterButton active={availabilityFilter === "all"} onClick={() => setAvailabilityFilter("all")}>All</FilterButton>
                 <FilterButton active={availabilityFilter === "available"} onClick={() => setAvailabilityFilter("available")}>Available Now</FilterButton>
@@ -260,12 +275,12 @@ export default function MentorDirectoryView() {
               </div>
             </div>
 
-            <label className="flex items-center justify-between rounded-[1.2rem] bg-white px-4 py-3">
-              <span className="text-sm font-semibold text-[#191c1e]">Verified only</span>
+            <label className="flex items-center justify-between rounded-[20px] bg-[linear-gradient(180deg,#f9fbff_0%,#f2f6ff_100%)] px-4 py-3">
+              <span className="text-sm font-semibold text-[#1d2945]">Verified only</span>
               <button
                 type="button"
                 onClick={() => setVerifiedOnly((prev) => !prev)}
-                className={`inline-flex h-7 w-12 items-center rounded-full p-1 transition-colors ${verifiedOnly ? "bg-[#000666]" : "bg-[#c6c5d4]"}`}
+                className={`inline-flex h-7 w-12 items-center rounded-full p-1 transition-colors ${verifiedOnly ? "bg-[#173aa9]" : "bg-[#c6cfe6]"}`}
               >
                 <span className={`h-5 w-5 rounded-full bg-white transition-transform ${verifiedOnly ? "translate-x-5" : ""}`} />
               </button>
@@ -274,7 +289,7 @@ export default function MentorDirectoryView() {
             <button
               type="button"
               onClick={resetFilters}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-bold text-[#000666]"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#173aa9] px-4 py-3 text-[13px] font-semibold text-white shadow-[0_14px_28px_rgba(23,58,169,0.18)]"
             >
               Reset filters
             </button>
@@ -291,24 +306,28 @@ export default function MentorDirectoryView() {
               </FilterButton>
             </div>
 
-            <div className="flex items-center gap-3 text-sm font-semibold text-[#454652]">
+            <div className="flex items-center gap-3 text-sm font-semibold text-[#5f6883]">
               <span>{filteredRows.length} mentors</span>
-              <button type="button" onClick={() => void loadMentors()} className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-[#000666]">
+              <button
+                type="button"
+                onClick={() => void loadMentors()}
+                className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-[13px] font-semibold text-[#17328f] shadow-[0_14px_28px_rgba(21,31,76,0.06)]"
+              >
                 <RefreshCcw className="h-4 w-4" />
                 Refresh
               </button>
             </div>
           </div>
 
-          {loading ? <div className="rounded-[1.75rem] bg-white p-6 text-sm text-[#454652]">Loading mentors...</div> : null}
+          {loading ? <div className="rounded-[28px] border border-[#dbe3f6] bg-white p-6 text-sm text-[#5f6883]">Loading mentors...</div> : null}
 
           {!loading && filteredRows.length === 0 ? (
-            <div className="rounded-[1.75rem] bg-white p-10 text-center shadow-[0_12px_32px_rgba(25,28,30,0.05)]">
-              <h2 className="font-sans text-2xl font-extrabold tracking-tight text-[#000666]">No mentors matched these filters.</h2>
+            <div className="rounded-[28px] border border-[#dbe3f6] bg-white p-10 text-center shadow-[0_14px_32px_rgba(15,23,42,0.05)]">
+              <h2 className="font-sans text-[32px] font-semibold leading-none tracking-[-0.05em] text-[#141b2d]">No mentors matched these filters.</h2>
               <button
                 type="button"
                 onClick={resetFilters}
-                className="mt-5 inline-flex rounded-xl bg-[#000666] px-5 py-3 text-sm font-bold text-white"
+                className="mt-5 inline-flex rounded-full bg-[#173aa9] px-5 py-3 text-[13px] font-semibold text-white"
               >
                 Reset Filters
               </button>
@@ -325,9 +344,9 @@ export default function MentorDirectoryView() {
                 const price = mentorPriceLabel(mentor);
 
                 return (
-                  <article key={mentor.user_id} className="rounded-[2rem] bg-white p-6 shadow-[0_14px_36px_rgba(25,28,30,0.06)]">
+                  <article key={mentor.user_id} className="rounded-[30px] border border-[#dbe3f6] bg-white p-6 shadow-[0_18px_40px_rgba(16,31,74,0.06)]">
                     <div className="flex flex-col gap-6 md:flex-row">
-                      <div className="relative h-28 w-28 flex-shrink-0 overflow-hidden rounded-[1.35rem] bg-[#edf1f4] shadow-[0_12px_24px_rgba(25,28,30,0.08)] md:h-32 md:w-32">
+                      <div className="relative h-28 w-28 flex-shrink-0 overflow-hidden rounded-[24px] bg-[#edf2ff] shadow-[0_12px_24px_rgba(21,31,76,0.08)] md:h-32 md:w-32">
                         {mentor.profile_image_url ? (
                           <Image
                             src={mentor.profile_image_url}
@@ -338,14 +357,14 @@ export default function MentorDirectoryView() {
                             className="object-cover"
                           />
                         ) : (
-                          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#e0e0ff] to-[#8df5e4] text-2xl font-black text-[#000666]">
+                          <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#edf2ff_0%,#f9fbff_56%,#eaf8f4_100%)] font-sans text-2xl font-semibold tracking-[-0.05em] text-[#1235ae]">
                             {initialsFromLabel(mentor.display_name)}
                           </div>
                         )}
 
                         {mentor.is_verified ? (
-                          <div className="absolute -bottom-2 -right-2 flex h-10 w-10 items-center justify-center rounded-full bg-[#8df5e4] shadow-[0_10px_18px_rgba(25,28,30,0.12)]">
-                            <Check className="h-5 w-5 text-[#00201c]" />
+                          <div className="absolute -bottom-2 -right-2 flex h-10 w-10 items-center justify-center rounded-full border border-white bg-[#173aa9] shadow-[0_10px_18px_rgba(23,58,169,0.18)]">
+                            <Check className="h-5 w-5 text-white" />
                           </div>
                         ) : null}
                       </div>
@@ -353,10 +372,10 @@ export default function MentorDirectoryView() {
                       <div className="min-w-0 flex-1 space-y-4">
                         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                           <div className="min-w-0">
-                            <h2 className="font-sans text-3xl font-extrabold tracking-tight text-[#000666]">{mentor.display_name}</h2>
-                            <p className="mt-1 text-base font-medium text-[#454652]">{mentor.headline || "Mains Mentor"}</p>
+                            <h2 className="font-sans text-[32px] font-semibold leading-none tracking-[-0.05em] text-[#141b2d]">{mentor.display_name}</h2>
+                            <p className="mt-2 text-[15px] font-medium text-[#17328f]">{mentor.headline || "Mains Mentor"}</p>
                             {mentor.city ? (
-                              <p className="mt-2 inline-flex items-center gap-2 text-sm font-medium text-[#767683]">
+                              <p className="mt-2 inline-flex items-center gap-2 text-sm font-medium text-[#6d7690]">
                                 <MapPin className="h-4 w-4" />
                                 {mentor.city}
                               </p>
@@ -364,40 +383,40 @@ export default function MentorDirectoryView() {
                           </div>
 
                           <div className="space-y-2 text-left md:text-right">
-                            <p className="font-sans text-3xl font-extrabold tracking-tight text-[#000666]">
+                            <p className="font-sans text-[32px] font-semibold leading-none tracking-[-0.05em] text-[#141b2d]">
                               {price || "Request"}
-                              {price ? <span className="ml-1 text-sm font-medium text-[#767683]">start</span> : null}
+                              {price ? <span className="ml-1 text-sm font-medium text-[#6d7690]">start</span> : null}
                             </p>
-                            <div className="flex items-center gap-1 text-[#c98c00] md:justify-end">
+                            <div className="flex items-center gap-1 text-[#9b650d] md:justify-end">
                               <Star className="h-4 w-4 fill-current" />
                               <span className="text-sm font-bold">{review.total > 0 ? review.average.toFixed(1) : "New"}</span>
-                              {review.total > 0 ? <span className="text-xs font-medium text-[#767683]">({review.total})</span> : null}
+                              {review.total > 0 ? <span className="text-xs font-medium text-[#6d7690]">({review.total})</span> : null}
                             </div>
                           </div>
                         </div>
 
                         <div className="flex flex-wrap gap-2">
                           {badgeGroup.map((tag) => (
-                            <span key={`${mentor.user_id}-${tag}`} className="rounded-full bg-[#8df5e4] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[#005048]">
+                            <span key={`${mentor.user_id}-${tag}`} className="rounded-full border border-[#c9eee6] bg-[#eaf8f4] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#176a5c]">
                               {tag}
                             </span>
                           ))}
                           {copyEvaluationEnabled(mentor) ? (
-                            <span className="rounded-full bg-[#eef2f5] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[#454652]">
+                            <span className="rounded-full border border-[#dbe3f6] bg-[#f6f8ff] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#5e6885]">
                               Copy Evaluation + Mentorship
                             </span>
                           ) : null}
                         </div>
 
-                        <p className="text-sm italic leading-7 text-[#454652]">&ldquo;{cleanSnippet(mentor.bio)}&rdquo;</p>
+                        <p className="text-[14px] leading-7 text-[#5f6883]">&ldquo;{cleanSnippet(mentor.bio)}&rdquo;</p>
 
                         <div className="flex flex-col gap-4 pt-1 sm:flex-row sm:items-center sm:justify-between">
                           <div className="flex flex-wrap items-center gap-3">
-                            <span className="rounded-full bg-[#eef2f5] px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-[#454652]">
+                            <span className={`rounded-full border px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] ${statusToneClass(status)}`}>
                               {mentorStatusLabel(status)}
                             </span>
                             {availabilityText ? (
-                              <span className="inline-flex items-center gap-2 text-sm font-semibold text-[#006b5f]">
+                              <span className="inline-flex items-center gap-2 text-sm font-semibold text-[#176a5c]">
                                 <CalendarDays className="h-4 w-4" />
                                 {availabilityText}
                               </span>
@@ -406,7 +425,7 @@ export default function MentorDirectoryView() {
 
                           <Link
                             href={`/profiles/${mentor.user_id}`}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-[#000666] to-[#1a237e] px-6 py-3 text-sm font-bold text-white shadow-[0_14px_28px_rgba(0,6,102,0.16)] transition-transform hover:scale-[1.02]"
+                            className="inline-flex items-center justify-center gap-2 rounded-full bg-[#173aa9] px-6 py-3 text-[13px] font-semibold text-white shadow-[0_14px_28px_rgba(23,58,169,0.18)] transition hover:bg-[#15328f]"
                           >
                             View Profile
                             <ArrowRight className="h-4 w-4" />

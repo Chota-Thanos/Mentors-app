@@ -13,6 +13,8 @@ import {
   Users,
 } from "lucide-react";
 
+import FeaturedContentRail from "@/components/home/FeaturedContentRail";
+
 const prelimsPoints = [
   "Comprehensive coverage of the General Studies syllabus.",
   "Curated study materials and resources.",
@@ -251,6 +253,14 @@ export default function PublicLandingPage() {
           </div>
         </section>
 
+        <FeaturedContentRail
+          mode="prelims"
+          title="Featured Prelims Programs"
+          subtitle="Explore curated objective-prep programs directly below the prelims section."
+          browseHref="/programs/prelims"
+          className="mt-8"
+        />
+
         <section
           className="mt-14 px-6 py-8 sm:px-8 sm:py-10 lg:mt-16 lg:px-10 lg:py-12"
         >
@@ -279,6 +289,14 @@ export default function PublicLandingPage() {
             </div>
           </div>
         </section>
+
+        <FeaturedContentRail
+          mode="mains"
+          title="Featured Mains Programs"
+          subtitle="Structured answer-writing and mains preparation tracks currently highlighted."
+          browseHref="/programs/mains"
+          className="mt-2"
+        />
 
         <section
           id="support"
@@ -333,6 +351,14 @@ export default function PublicLandingPage() {
             </div>
           </div>
         </section>
+
+        <FeaturedContentRail
+          mode="mentors"
+          title="Featured Mentors"
+          subtitle="Verified mentors available for mentorship and guided review."
+          browseHref="/mentors/discover"
+          className="mt-8"
+        />
 
         <section id="tools" className="mt-16 text-center lg:mt-20">
           <h2 className="font-sans text-[34px] font-semibold leading-[1.08] tracking-[-0.05em] text-[#1737af] sm:text-[40px]">

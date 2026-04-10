@@ -860,6 +860,10 @@ export default function AIUserStudio({
   const [analyzedExampleStyle, setAnalyzedExampleStyle] = useState("");
   const [analyzingExampleStyle, setAnalyzingExampleStyle] = useState(false);
   const [exampleQuestionsModalItem, setExampleQuestionsModalItem] = useState<PremiumAIExampleAnalysis | null>(null);
+  const [questionStyleTab, setQuestionStyleTab] = useState<"existing" | "own">("existing");
+  const [exampleInputMode, setExampleInputMode] = useState<"manual" | "ocr">("manual");
+  const [exampleOcrImages, setExampleOcrImages] = useState<OcrImageFile[]>([]);
+  const [extractingExampleImageText, setExtractingExampleImageText] = useState(false);
   const [mixEntries, setMixEntries] = useState<FormatMixEntry[]>([]);
   const [desiredQuestionCount, setDesiredQuestionCount] = useState("5");
   const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>("en");
@@ -867,7 +871,6 @@ export default function AIUserStudio({
   const useUnifiedMainsLikeLayout = true;
   const [showChatSettings, setShowChatSettings] = useState(false);
   const [showAdvancedFormatControls, setShowAdvancedFormatControls] = useState(false);
-  const [questionStyleTab, setQuestionStyleTab] = useState<"existing" | "own">("existing");
   const [useCategorySource, setUseCategorySource] = useState(false);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [categoryNameById, setCategoryNameById] = useState<Record<number, string>>({});
@@ -1588,12 +1591,56 @@ export default function AIUserStudio({
     setOcrImages((prev) => [...prev, ...nextFiles]);
   }, []);
 
+  const handleExampleImageFilesChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (files.length === 0) return;
+
+    const nextFiles: OcrImageFile[] = [];
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) {
+        toast.error(`"${file.name}" is not an image file.`);
+        continue;
+      }
+      const fileData = await new Promise<OcrImageFile>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = String(reader.result || "");
+          resolve({
+            id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            name: file.name,
+            preview: result,
+            base64: result,
+          });
+        };
+        reader.readAsDataURL(file);
+      });
+      nextFiles.push(fileData);
+    }
+    if (nextFiles.length === 0) return;
+    setExampleOcrImages((prev) => [...prev, ...nextFiles]);
+  }, []);
+
   const removeOcrImage = useCallback((id: string) => {
     setOcrImages((prev) => prev.filter((file) => file.id !== id));
   }, []);
 
+  const removeExampleOcrImage = useCallback((id: string) => {
+    setExampleOcrImages((prev) => prev.filter((file) => file.id !== id));
+  }, []);
+
   const moveOcrImage = useCallback((index: number, direction: "up" | "down") => {
     setOcrImages((prev) => {
+      const next = [...prev];
+      const target = direction === "up" ? index - 1 : index + 1;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }, []);
+
+  const moveExampleOcrImage = useCallback((index: number, direction: "up" | "down") => {
+    setExampleOcrImages((prev) => {
       const next = [...prev];
       const target = direction === "up" ? index - 1 : index + 1;
       if (target < 0 || target >= next.length) return prev;
@@ -1636,6 +1683,41 @@ export default function AIUserStudio({
       setExtractingImageText(false);
     }
   }, [hasGenerationAccess, isAuthenticated, ocrImages, ocrSubscriptionRequiredMessage]);
+
+  const extractTextFromExampleImages = useCallback(async () => {
+    if (!isAuthenticated) {
+      toast.error("Login required to extract example text from images.");
+      return;
+    }
+    if (!hasGenerationAccess) {
+      toast.error(ocrSubscriptionRequiredMessage);
+      return;
+    }
+    if (exampleOcrImages.length === 0) {
+      toast.error("Add example photo(s) first.");
+      return;
+    }
+
+    setExtractingExampleImageText(true);
+    try {
+      const response = await premiumApi.post<{ extracted_text: string }>("/ai-evaluation/ocr", {
+        images_base64: exampleOcrImages.map((file) => file.base64),
+        ai_provider: USER_PROVIDER,
+        ai_model_name: USER_MODEL,
+      });
+      const extracted = String(response.data?.extracted_text || "").trim();
+      if (!extracted) {
+        toast.error("No text was extracted from uploaded example photos.");
+        return;
+      }
+      setExampleQuestionsInput(extracted);
+      toast.success(`Example text extracted from ${exampleOcrImages.length} image(s).`);
+    } catch (error: unknown) {
+      toast.error("Example image OCR failed", { description: toError(error) });
+    } finally {
+      setExtractingExampleImageText(false);
+    }
+  }, [exampleOcrImages, hasGenerationAccess, isAuthenticated, ocrSubscriptionRequiredMessage]);
 
   const analyzeExampleStyle = useCallback(async () => {
     if (!isAuthenticated) {
@@ -4017,29 +4099,32 @@ export default function AIUserStudio({
                             <button
                               type="button"
                               onClick={() => setQuestionStyleTab("existing")}
-                              className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${questionStyleTab === "existing"
-                                ? "bg-violet-100 text-violet-800"
-                                : "text-slate-600 hover:bg-slate-100"
-                                }`}
+                              className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                                questionStyleTab === "existing" ? "bg-violet-100 text-violet-800" : "text-slate-600 hover:bg-slate-100"
+                              }`}
                             >
-                              Existing Examples
+                              Provided Examples
                             </button>
                             <button
                               type="button"
                               onClick={() => setQuestionStyleTab("own")}
-                              className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${questionStyleTab === "own"
-                                ? "bg-violet-100 text-violet-800"
-                                : "text-slate-600 hover:bg-slate-100"
-                                }`}
+                              className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                                questionStyleTab === "own" ? "bg-violet-100 text-violet-800" : "text-slate-600 hover:bg-slate-100"
+                              }`}
                             >
-                              Own Example
+                              Enter Example
                             </button>
                           </div>
                         </div>
 
                         {questionStyleTab === "existing" ? (
                           <div className="space-y-3 rounded-xl border border-violet-200 bg-white p-3 sm:p-4">
-                            <div className="flex flex-col gap-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Saved Example Formats</p>
+                              <span className="text-[11px] text-slate-500">Use provided examples as the default format source.</span>
+                            </div>
+                            <div className="space-y-3">
+                              <div className="flex flex-col gap-3">
                               <div className="flex flex-wrap md:flex-nowrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
                                 <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 min-w-[60px] shrink-0">STYLE 1</p>
                                 <div className="-mx-1 flex flex-wrap gap-2 px-1">
@@ -4111,111 +4196,227 @@ export default function AIUserStudio({
                                   </div>
                                 </div>
                               ) : null}
-                            </div>
+                              </div>
 
-                            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2">
-                              <div className="flex items-center gap-2">
-                                {shouldUseAsyncJobMode ? (
-                                  <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
-                                    Async Mode
-                                  </span>
-                                ) : null}
-                                {mixEntries.length > 0 ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => setMixEntries([])}
-                                    className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
-                                  >
-                                    Clear counts
-                                  </button>
-                                ) : null}
+                              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  {shouldUseAsyncJobMode ? (
+                                    <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                                      Async Mode
+                                    </span>
+                                  ) : null}
+                                  {mixEntries.length > 0 ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setMixEntries([])}
+                                      className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
+                                    >
+                                      Clear counts
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              {filteredAnalyses.length === 0 ? (
+                                <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                                  No examples found for current filters.
+                                </p>
+                              ) : (
+                                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                                  {filteredAnalyses.map((item) => {
+                                    const analysisId = String(item.id);
+                                    const active = selectedAnalysisId === analysisId;
+                                    const selectedCount = mixCountByAnalysisId.get(analysisId) || "0";
+                                    return (
+                                      <div
+                                        key={item.id}
+                                        className={`rounded-xl border p-3 shadow-sm transition ${
+                                          active ? "border-violet-300 bg-violet-50/70" : "border-slate-200 bg-white hover:border-violet-200"
+                                        }`}
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={() => setSelectedAnalysisId(analysisId)}
+                                          className="w-full text-left"
+                                        >
+                                          <p className={`text-sm font-semibold ${active ? "text-violet-900" : "text-slate-900"}`}>
+                                            {item.title}
+                                          </p>
+                                          {item.description ? (
+                                            <p className="mt-1.5 line-clamp-2 text-[11px] text-slate-500">{item.description}</p>
+                                          ) : null}
+                                          {item.example_questions && item.example_questions.length > 0 ? (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setExampleQuestionsModalItem(item);
+                                              }}
+                                              className="mt-2 text-[10px] font-semibold text-violet-600 hover:text-violet-800 flex items-center gap-1 group"
+                                            >
+                                              View Examples <ArrowDown className="h-3 w-3 -rotate-90 group-hover:translate-x-0.5 transition-transform" />
+                                            </button>
+                                          ) : null}
+                                        </button>
+
+                                        <div className="mt-3 border-t border-slate-200 pt-2">
+                                          <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                            Questions
+                                          </label>
+                                          <select
+                                            value={selectedCount}
+                                            onChange={(event) => setMixCountForAnalysis(analysisId, event.target.value)}
+                                            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                                          >
+                                            {["0", "1", "2", "3", "5", "8", "10", "15", "20"].map((value) => (
+                                              <option key={`style-count-${analysisId}-${value}`} value={value}>
+                                                {value}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              <p className="text-[11px] text-slate-500">
+                                Set `0` if you do not want that style in the generated mix.
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-3 rounded-xl border border-violet-200 bg-white p-3 sm:p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Enter Example</p>
+                                <p className="mt-1 text-[11px] text-slate-500">
+                                  Add your own example manually or extract it from images with OCR.
+                                </p>
                               </div>
                             </div>
 
-                            {filteredAnalyses.length === 0 ? (
-                              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                                No examples found for current filters.
-                              </p>
-                            ) : (
-                              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                                {filteredAnalyses.map((item) => {
-                                  const analysisId = String(item.id);
-                                  const active = selectedAnalysisId === analysisId;
-                                  const selectedCount = mixCountByAnalysisId.get(analysisId) || "0";
-                                  return (
-                                    <div
-                                      key={item.id}
-                                      className={`rounded-xl border p-3 shadow-sm transition ${active
-                                        ? "border-violet-300 bg-violet-50/70"
-                                        : "border-slate-200 bg-white hover:border-violet-200"
-                                        }`}
-                                    >
-                                      <button
-                                        type="button"
-                                        onClick={() => setSelectedAnalysisId(analysisId)}
-                                        className="w-full text-left"
-                                      >
-                                        <p className={`text-sm font-semibold ${active ? "text-violet-900" : "text-slate-900"}`}>
-                                          {item.title}
-                                        </p>
-                                        {item.description ? (
-                                          <p className="mt-1.5 line-clamp-2 text-[11px] text-slate-500">{item.description}</p>
-                                        ) : null}
-                                        {item.example_questions && item.example_questions.length > 0 ? (
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setExampleQuestionsModalItem(item);
-                                            }}
-                                            className="mt-2 text-[10px] font-semibold text-violet-600 hover:text-violet-800 flex items-center gap-1 group"
-                                          >
-                                            View Examples <ArrowDown className="h-3 w-3 -rotate-90 group-hover:translate-x-0.5 transition-transform" />
-                                          </button>
-                                        ) : null}
-                                      </button>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-1">
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setExampleInputMode("manual")}
+                                  className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                                    exampleInputMode === "manual" ? "bg-white text-violet-800 shadow-sm" : "text-slate-600 hover:bg-white/70"
+                                  }`}
+                                >
+                                  Manual Entry
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setExampleInputMode("ocr")}
+                                  className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                                    exampleInputMode === "ocr" ? "bg-white text-violet-800 shadow-sm" : "text-slate-600 hover:bg-white/70"
+                                  }`}
+                                >
+                                  OCR
+                                </button>
+                              </div>
+                            </div>
 
-                                      <div className="mt-3 border-t border-slate-200 pt-2">
-                                        <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                                          Questions
-                                        </label>
-                                        <select
-                                          value={selectedCount}
-                                          onChange={(event) => setMixCountForAnalysis(analysisId, event.target.value)}
-                                          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
-                                        >
-                                          {["0", "1", "2", "3", "5", "8", "10", "15", "20"].map((value) => (
-                                            <option key={`style-count-${analysisId}-${value}`} value={value}>
-                                              {value}
-                                            </option>
-                                          ))}
-                                        </select>
+                            {exampleInputMode === "manual" ? (
+                              <>
+                                <input
+                                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                                  value={exampleQuestion}
+                                  onChange={(event) => setExampleQuestion(event.target.value)}
+                                  placeholder="Optional: one example question to steer the generator."
+                                />
+                                <textarea
+                                  className="min-h-[110px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                                  value={exampleQuestionsInput}
+                                  onChange={(event) => setExampleQuestionsInput(event.target.value)}
+                                  placeholder="Optional: one example per line or one full question block."
+                                />
+                              </>
+                            ) : (
+                              <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100">
+                                    <UploadCloud className="h-4 w-4" />
+                                    Upload example images
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      multiple
+                                      className="hidden"
+                                      onChange={handleExampleImageFilesChange}
+                                    />
+                                  </label>
+                                  <button
+                                    type="button"
+                                    className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                    onClick={extractTextFromExampleImages}
+                                    disabled={extractingExampleImageText || exampleOcrImages.length === 0}
+                                  >
+                                    {extractingExampleImageText ? (
+                                      <>
+                                        <Loader2 className="mr-1 inline-block h-3.5 w-3.5 animate-spin" />
+                                        Extracting...
+                                      </>
+                                    ) : (
+                                      "Extract Text"
+                                    )}
+                                  </button>
+                                </div>
+
+                                {exampleOcrImages.length > 0 ? (
+                                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                    {exampleOcrImages.map((file, index) => (
+                                      <div key={file.id} className="overflow-hidden rounded-md border border-gray-200 bg-white">
+                                        <div className="relative aspect-[4/3] bg-slate-100">
+                                          <Image src={file.preview} alt={file.name} fill className="object-cover" unoptimized />
+                                        </div>
+                                        <div className="space-y-2 p-2">
+                                          <p className="truncate text-[11px] font-semibold text-gray-700">{file.name}</p>
+                                          <div className="flex items-center gap-1">
+                                            <button
+                                              type="button"
+                                              className="rounded-md border border-gray-300 bg-white px-1.5 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                                              onClick={() => moveExampleOcrImage(index, "up")}
+                                              disabled={index === 0}
+                                            >
+                                              <ArrowUp className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="rounded-md border border-gray-300 bg-white px-1.5 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                                              onClick={() => moveExampleOcrImage(index, "down")}
+                                              disabled={index >= exampleOcrImages.length - 1}
+                                            >
+                                              <ArrowDown className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="rounded-md border border-red-300 bg-white px-1.5 py-1 text-red-700 hover:bg-red-50"
+                                              onClick={() => removeExampleOcrImage(file.id)}
+                                            >
+                                              <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                          </div>
+                                        </div>
                                       </div>
-                                    </div>
-                                  );
-                                })}
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-gray-500">No example photos added yet.</p>
+                                )}
+
+                                <textarea
+                                  className="min-h-[120px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                                  value={exampleQuestionsInput}
+                                  onChange={(event) => setExampleQuestionsInput(event.target.value)}
+                                  placeholder="Extracted example text will appear here. You can edit it before analysis."
+                                />
                               </div>
                             )}
 
-                            <p className="text-[11px] text-slate-500">
-                              Set `0` if you do not want that style in the generated mix.
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="space-y-2 rounded-xl border border-violet-200 bg-white p-3 sm:p-4">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Own Example Input</p>
-                            <input
-                              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
-                              value={exampleQuestion}
-                              onChange={(event) => setExampleQuestion(event.target.value)}
-                              placeholder="Single example question (optional)"
-                            />
-                            <textarea
-                              className="min-h-[90px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
-                              value={exampleQuestionsInput}
-                              onChange={(event) => setExampleQuestionsInput(event.target.value)}
-                              placeholder="Example questions (one per line)"
-                            />
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"

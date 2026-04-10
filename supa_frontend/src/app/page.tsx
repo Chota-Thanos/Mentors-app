@@ -6,6 +6,8 @@ import {
   AlertCircle,
   ArrowRight,
   BookOpen,
+  Calculator,
+  CheckCircle2,
   BriefcaseBusiness,
   ClipboardCheck,
   FileCheck2,
@@ -13,6 +15,7 @@ import {
   Layers3,
   LucideIcon,
   MessageSquareMore,
+  ScrollText,
   ShieldCheck,
   Sparkles,
   WandSparkles,
@@ -20,6 +23,7 @@ import {
 import axios from "axios";
 
 import AppLayout from "@/components/layouts/AppLayout";
+import { FeaturedMixedRail } from "@/components/home/FeaturedContentRail";
 import PublicLandingPage from "@/components/home/PublicLandingPage";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -32,9 +36,11 @@ import { premiumApi } from "@/lib/premiumApi";
 import { loadLearnerMentorshipOrders, type LearnerMentorshipOrdersData } from "@/lib/learnerMentorshipOrders";
 import type {
   DashboardAnalyticsPayload,
+  DashboardRecommendationPlug,
   MentorshipRequest,
   PremiumCollection,
   TestSeries,
+  YearlyAttemptSummaryPayload,
 } from "@/types/premium";
 
 type HomeKind = "learner" | "quiz_master" | "mains_mentor" | "operations";
@@ -378,8 +384,20 @@ function requestMetaLabel(request: MentorshipRequest, mentorMap: Record<string, 
   return `${mentor} · ${status}`;
 }
 
+function dashboardRecommendationHref(plug: DashboardRecommendationPlug): string {
+  const payload = plug.payload && typeof plug.payload === "object" ? (plug.payload as Record<string, unknown>) : {};
+  const directHref = typeof payload.href === "string" ? payload.href.trim() : "";
+  if (directHref) return directHref;
+
+  const section = String(payload.content_type || plug.section || "").trim().toLowerCase();
+  if (section.includes("mains")) return "/programs/mains";
+  if (plug.plug_type === "mentorship_support") return "/dashboard/requests";
+  return "/programs/prelims";
+}
+
 function LearnerHome({ user }: { user: unknown }) {
   const [analytics, setAnalytics] = useState<DashboardAnalyticsPayload | null>(null);
+  const [yearlySummary, setYearlySummary] = useState<YearlyAttemptSummaryPayload | null>(null);
   const [orders, setOrders] = useState<LearnerMentorshipOrdersData | null>(null);
   const [prelimsResults, setPrelimsResults] = useState<AttemptWithContext[]>([]);
   const [mainsResults, setMainsResults] = useState<UserMainsEvaluationRow[]>([]);
@@ -398,13 +416,15 @@ function LearnerHome({ user }: { user: unknown }) {
       setLoading(true);
       setError("");
       try {
-        const [analyticsRes, ordersRes, progressRes] = await Promise.all([
+        const [analyticsRes, yearlySummaryRes, ordersRes, progressRes] = await Promise.all([
           premiumApi.get<DashboardAnalyticsPayload>("/user/dashboard-analytics"),
+          premiumApi.get<YearlyAttemptSummaryPayload>("/user/yearly-attempt-summary"),
           loadLearnerMentorshipOrders(),
           premiumApi.get<UserProgressPayload>("/user/progress"),
         ]);
         if (!active) return;
         setAnalytics(analyticsRes.data || null);
+        setYearlySummary(yearlySummaryRes.data || null);
         setOrders(ordersRes);
 
         const progressData = progressRes.data || { quiz_attempts: [], mains_evaluations: [] };
@@ -483,13 +503,13 @@ function LearnerHome({ user }: { user: unknown }) {
   }, [currentUserId]);
 
   const firstName = useMemo(() => userFirstName(user), [user]);
-  const activeSeries = analytics?.purchase_overview?.active_series || [];
+  const activeSeries = useMemo(() => analytics?.purchase_overview?.active_series || [], [analytics]);
   const featuredSeries = activeSeries[0] || null;
   const recentRequests = useMemo(
     () =>
       [...(orders?.requests || [])]
         .sort((left, right) => new Date(right.requested_at).getTime() - new Date(left.requested_at).getTime())
-        .slice(0, 2),
+        .slice(0, 3),
     [orders],
   );
   const requestSummary = useMemo(
@@ -499,19 +519,197 @@ function LearnerHome({ user }: { user: unknown }) {
     }),
     [orders],
   );
+  const overviewItems = useMemo(
+    () => [
+      ...recentRequests.map((request) => ({
+        key: `request-${request.id}`,
+        title: requestTypeLabel(request),
+        meta: requestMetaLabel(request, orders?.mentorNameByUserId || {}),
+        status: String(request.status || "").replaceAll("_", " "),
+        statusClass: requestStatusTone(request.status),
+        href: `/my-purchases/mentorship/${request.id}`,
+      })),
+      ...activeSeries.slice(0, 3).map((series) => ({
+        key: `series-${series.enrollment_id}`,
+        title: series.title,
+        meta: `${String(series.series_kind || "").toUpperCase()} · ${String(series.access_type || "").toLowerCase()}`,
+        status: "Continue",
+        statusClass: "border-[#cfe0ff] bg-[#eef4ff] text-[#1739ac]",
+        href: `/programs/${series.series_id}`,
+      })),
+    ].slice(0, 4),
+    [activeSeries, orders?.mentorNameByUserId, recentRequests],
+  );
 
-  const toolkitLinks = [
-    { href: "/ai-quiz-generator/gk", label: "Practice with AI", note: "Adaptive question engine", icon: Sparkles },
-    { href: "/programs/prelims", label: "Explore Programs", note: "New curation for 2026", icon: Layers3 },
-    { href: "/mentors", label: "Find Mentors", note: "Guided sessions and feedback", icon: GraduationCap },
-    { href: "/mains/evaluate", label: "Write Mains Answer", note: "Structured editorial practice", icon: ClipboardCheck },
+  const quickLinks = [
+    { href: "/dashboard/requests", label: "New Mentorship Request", note: "Book support or review workflows", icon: GraduationCap },
+    { href: "/programs/mains", label: "Mains Programs", note: "Structured answer-writing tracks", icon: ClipboardCheck },
+    { href: "/programs/prelims", label: "Prelims Programs", note: "Objective practice programs", icon: Layers3 },
+    { href: "/dashboard", label: "Performance Evaluation", note: "Track weak areas and category marks", icon: FileCheck2 },
+  ];
+
+  const aiSystems = [
+    { href: "/ai-quiz-generator/gk", label: "GK Quiz Generator", note: "Fresh current-affairs and static GK drills", icon: BookOpen, status: "Continue" },
+    { href: "/ai-quiz-generator/maths", label: "Maths Quiz Generator", note: "Quant-focused practice sessions", icon: Calculator, status: "Continue" },
+    { href: "/ai-quiz-generator/passage", label: "Passage Quiz Generator", note: "Comprehension and reasoning passages", icon: ScrollText, status: "Continue" },
+    { href: "/mains/evaluate", label: "Mains Answer Generator", note: "Create structured answer-writing prompts", icon: WandSparkles, status: "Generate" },
+    { href: "/mains/evaluate", label: "Mains Evaluation", note: "AI review for marks, structure, and feedback", icon: Sparkles, status: "Evaluate" },
+  ];
+
+  const yearlyRows = useMemo(
+    () =>
+      yearlySummary
+        ? [yearlySummary.rows.gk, yearlySummary.rows.maths, yearlySummary.rows.passage, yearlySummary.rows.mains]
+        : [],
+    [yearlySummary],
+  );
+
+  const suggestedPrograms = useMemo(
+    () =>
+      (analytics?.recommendation_plugs || [])
+        .filter((plug) => ["practice_weak_area", "course_enrollment", "mentorship_support"].includes(String(plug.plug_type || "")))
+        .slice(0, 4),
+    [analytics],
+  );
+
+  const latestAttempts = useMemo(() => {
+    const quizRows = prelimsResults.map((row) => {
+      const title = String(row.collection?.title || row.collection?.name || `Collection #${row.attempt.collection_id}`);
+      const total = Math.max(0, Number(row.attempt.total_questions || 0));
+      const score = Math.max(0, Number(row.attempt.score || 0));
+      const accuracy = total > 0 ? ((Math.max(0, Number(row.attempt.correct_answers || 0)) / total) * 100).toFixed(1) : "0.0";
+      return {
+        key: `quiz-${row.attempt.id}`,
+        title,
+        subtitle: `Prelims quiz | ${formatDateTime(row.attempt.created_at)}`,
+        scoreText: `${score}/${total} | ${accuracy}%`,
+        href: row.seriesId > 0 ? `/programs/${row.seriesId}` : "/dashboard",
+        createdAt: row.attempt.created_at,
+      };
+    });
+
+    const mainsRows = mainsResults.map((row) => {
+      const score = Number(row.score || 0);
+      const maxScore = Number(row.max_score || 10);
+      const pct = maxScore > 0 ? ((score / maxScore) * 100).toFixed(1) : "0.0";
+      return {
+        key: `mains-${row.id}`,
+        title: shortText(row.question_text || "Mains Evaluation", 72) || "Mains Evaluation",
+        subtitle: `Mains evaluation | ${formatDateTime(row.created_at)}`,
+        scoreText: `${score.toFixed(1)}/${maxScore.toFixed(1)} | ${pct}%`,
+        href: "/dashboard",
+        createdAt: row.created_at,
+      };
+    });
+
+    return [...quizRows, ...mainsRows]
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+      .slice(0, 5);
+  }, [mainsResults, prelimsResults]);
+
+  const fallbackSuggestions = [
+    {
+      title: "Strengthen weak prelims areas",
+      description: "Move into curated prelims programs to improve category-wise accuracy and completion.",
+      href: "/programs/prelims",
+      cta: "Explore prelims programs",
+    },
+    {
+      title: "Push mains marks higher",
+      description: "Use structured mains programs and answer-writing tracks for higher marks consistency.",
+      href: "/programs/mains",
+      cta: "Explore mains programs",
+    },
+    {
+      title: "Request mentorship support",
+      description: "Open a mentorship request when you want guided correction on your weaker areas.",
+      href: "/dashboard/requests",
+      cta: "Open mentorship request",
+    },
   ];
 
   return (
-    <div className="space-y-6 pb-6">
-      <section className="space-y-1">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Your Momentum</p>
-        <h1 className="text-4xl font-black tracking-tight text-[#111827]">Welcome back, {firstName}.</h1>
+    <div className="space-y-8 pb-8">
+      <section className="relative overflow-hidden rounded-[34px] border border-[#d7def4] bg-[linear-gradient(135deg,#ffffff_0%,#f6f8ff_54%,#edf8f5_100%)] px-6 py-7 shadow-[0_22px_55px_rgba(9,26,74,0.08)] sm:px-8 sm:py-8">
+        <div className="absolute right-[-7rem] top-[-6rem] h-56 w-56 rounded-full bg-[#dce7ff]/70 blur-3xl" />
+        <div className="absolute bottom-[-8rem] left-[-4rem] h-56 w-56 rounded-full bg-[#d8f3ec]/75 blur-3xl" />
+        <div className="relative grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-5">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#c9d6fb] bg-white/85 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-[#304a92]">
+              <Sparkles className="h-4 w-4" />
+              Learner Workspace
+            </div>
+            <div>
+              <h1 className="max-w-3xl text-[38px] font-black tracking-tight text-[#091a4a] sm:text-[46px]">
+                Welcome back, {firstName}.
+              </h1>
+              <p className="mt-3 max-w-2xl text-[15px] leading-7 text-slate-600">
+                Track your ongoing programs, continue active attempts, open AI practice systems, and move straight into the next study action without hunting across pages.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Link href={featuredSeries ? `/programs/${featuredSeries.series_id}` : "/dashboard"} className="inline-flex items-center gap-2 rounded-2xl bg-[#091a4a] px-5 py-3 text-sm font-bold text-white">
+                {featuredSeries ? "Continue active program" : "Open performance evaluation"}
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link href="/my-purchases" className="inline-flex items-center gap-2 rounded-2xl border border-[#c9d6fb] bg-white px-5 py-3 text-sm font-bold text-[#091a4a]">
+                View purchases
+              </Link>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-[22px] border border-white/70 bg-white/80 p-4 backdrop-blur">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Active Programs</p>
+                <p className="mt-2 text-3xl font-black tracking-tight text-[#091a4a]">{activeSeries.length}</p>
+              </div>
+              <div className="rounded-[22px] border border-white/70 bg-white/80 p-4 backdrop-blur">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Pending Requests</p>
+                <p className="mt-2 text-3xl font-black tracking-tight text-[#091a4a]">{requestSummary.pending}</p>
+              </div>
+              <div className="rounded-[22px] border border-white/70 bg-white/80 p-4 backdrop-blur">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Questions This Year</p>
+                <p className="mt-2 text-3xl font-black tracking-tight text-[#091a4a]">
+                  {yearlyRows.reduce((sum, row) => sum + row.total_questions, 0)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-[28px] border border-white/70 bg-white/80 p-5 backdrop-blur">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Current Overview</p>
+                <h2 className="mt-1 text-2xl font-black tracking-tight text-[#091a4a]">Ongoing mentorship and programs</h2>
+              </div>
+              <div className="rounded-full bg-[#edf4ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
+                Live
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {overviewItems.map((item) => (
+                <Link
+                  key={item.key}
+                  href={item.href}
+                  className="flex items-start justify-between gap-3 rounded-[22px] border border-[#dce3fb] bg-white px-4 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_32px_rgba(15,23,42,0.08)]"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.title}</p>
+                    <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">{item.meta}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${item.statusClass}`}>
+                    {item.status}
+                  </span>
+                </Link>
+              ))}
+
+              {!loading && overviewItems.length === 0 ? (
+                <div className="rounded-[22px] border border-dashed border-[#cdd8f4] bg-[#f8faff] px-4 py-10 text-center text-sm text-[#6d7690]">
+                  No active mentorship or program flow yet.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
       </section>
 
       {error ? (
@@ -521,56 +719,232 @@ function LearnerHome({ user }: { user: unknown }) {
         </section>
       ) : null}
 
-      <section className="rounded-[30px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-center">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-[#eaf8ec] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#25824d]">
-              Up Next
-              <span className="text-slate-500">{featuredSeries ? formatRelativeDate(featuredSeries.updated_at || featuredSeries.created_at) : "Today"}</span>
+      <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="rounded-[30px] border border-[#dce3fb] bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Quick Links</p>
+              <h2 className="mt-1 text-[28px] font-black tracking-tight text-[#091a4a]">Daily actions</h2>
             </div>
-            <h2 className="mt-4 max-w-2xl text-3xl font-black leading-tight tracking-tight text-[#1b44b8]">
-              {featuredSeries?.title || "Continue your next high-value prep session."}
-            </h2>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600">
-              {featuredSeries
-                ? `Resume your ${String(featuredSeries.series_kind || "program").toLowerCase()} track and continue from the latest active material.`
-                : "Open your performance evaluation, continue a program, or return to your latest mentor workflow."}
-            </p>
-            <div className="mt-5 flex flex-wrap gap-3">
-              <Link href={featuredSeries ? `/programs/${featuredSeries.series_id}` : "/dashboard"} className="inline-flex items-center rounded-xl bg-[#1b44b8] px-4 py-3 text-sm font-bold text-white shadow-[0_12px_30px_rgba(27,68,184,0.28)]">
-                Resume Session
-              </Link>
-              <Link href="/my-purchases" className="inline-flex items-center rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700">
-                View Schedule
-              </Link>
+            <div className="rounded-full bg-[#eef4ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
+              Jump fast
             </div>
           </div>
+          <div className="mt-5 space-y-3">
+            {quickLinks.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex items-start gap-3 rounded-[22px] border border-[#dce3fb] bg-[linear-gradient(180deg,#ffffff_0%,#f8faff_100%)] px-4 py-4 transition hover:border-[#bdd1ff]"
+              >
+                <div className="inline-flex rounded-[14px] bg-[#eef4ff] p-3 text-[#1739ac]">
+                  <item.icon className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.label}</p>
+                  <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">{item.note}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
 
-          <div className="relative mx-auto h-[190px] w-full max-w-[190px] overflow-hidden rounded-[24px] bg-[linear-gradient(180deg,#f0f0f0_0%,#d9d9d9_100%)]">
-            <div className="absolute inset-x-8 bottom-0 top-10 rounded-t-[90px] bg-[linear-gradient(180deg,rgba(255,255,255,0.95)_0%,rgba(220,220,220,0.9)_100%)]" />
-            <div className="absolute left-1/2 top-9 h-12 w-12 -translate-x-1/2 rounded-full bg-[#ececec]" />
-            <div className="absolute left-1/2 top-[4.4rem] h-20 w-[86px] -translate-x-1/2 rounded-[28px_28px_18px_18px] bg-[#ededed]" />
-            <div className="absolute left-[1.8rem] top-[6.1rem] h-16 w-5 rotate-[18deg] rounded-full bg-[#efefef]" />
-            <div className="absolute right-[1.8rem] top-[6.1rem] h-16 w-5 -rotate-[18deg] rounded-full bg-[#efefef]" />
-            <div className="absolute bottom-0 left-0 right-0 h-14 bg-[linear-gradient(180deg,rgba(18,18,18,0)_0%,rgba(18,18,18,0.22)_100%)]" />
+        <div className="overflow-hidden rounded-[30px] bg-[linear-gradient(140deg,#0a1a54_0%,#163fa4_62%,#1f56cf_100%)] p-5 text-white shadow-[0_22px_46px_rgba(9,26,74,0.18)]">
+          <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-white/6 px-5 py-5">
+            <div className="absolute right-[-2rem] top-[-2rem] h-28 w-28 rounded-full bg-white/10" />
+            <div className="absolute bottom-[-3rem] left-[-2rem] h-28 w-28 rounded-full bg-white/10" />
+            <div className="relative flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-xl">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">AI Workspace</p>
+                <h2 className="mt-2 text-[30px] font-black tracking-tight">Generation and evaluation systems</h2>
+                <p className="mt-2 text-[13px] leading-6 text-white/80">
+                  Move between GK, Maths, Passage, and Mains AI tools from one surface and continue wherever you left off.
+                </p>
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/80">
+                <Sparkles className="h-3.5 w-3.5" />
+                Active AI Systems
+              </div>
+            </div>
+            <div className="relative mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {aiSystems.map((system) => (
+                <Link
+                  key={system.href + system.label}
+                  href={system.href}
+                  className="rounded-[22px] border border-white/12 bg-white/8 px-4 py-4 transition hover:bg-white/12"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="inline-flex rounded-[14px] bg-white/12 p-3 text-white">
+                      <system.icon className="h-4 w-4" />
+                    </div>
+                    <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/85">
+                      {system.status}
+                    </span>
+                  </div>
+                  <p className="mt-4 text-[15px] font-semibold tracking-[-0.02em] text-white">{system.label}</p>
+                  <p className="mt-1 text-[12px] leading-6 text-white/72">{system.note}</p>
+                </Link>
+              ))}
+            </div>
           </div>
         </div>
       </section>
+
+      <FeaturedMixedRail
+        title="Featured Programs and Mentors"
+        subtitle="One row with current prelims tracks, mains tracks, and mentors chosen from the featured catalog."
+      />
 
       <section>
-        <p className="mb-3 text-sm font-semibold text-slate-700">Learning Toolkit</p>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {toolkitLinks.map((item) => (
-            <Link key={item.href} href={item.href} className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
-              <div className="inline-flex rounded-xl bg-[#eef3ff] p-2.5 text-[#1b44b8]">
-                <item.icon className="h-4 w-4" />
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Programs</p>
+            <h2 className="mt-1 text-[30px] font-black tracking-tight text-[#091a4a]">Resume Active Programs</h2>
+          </div>
+          <Link href="/my-purchases" className="text-sm font-bold text-[#2b4dac]">
+            Open purchases
+          </Link>
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {activeSeries.slice(0, 3).map((series) => (
+            <Link
+              key={series.enrollment_id}
+              href={`/programs/${series.series_id}`}
+              className="rounded-[26px] border border-[#dce3fb] bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_44px_rgba(15,23,42,0.08)]"
+            >
+              <div className={`h-1.5 w-24 rounded-full ${String(series.series_kind || "").toLowerCase() === "mains" ? "bg-[#1f9c57]" : "bg-[#f59e0b]"}`} />
+              <p className="mt-5 truncate text-[26px] font-black tracking-[-0.04em] text-[#091a4a]">{series.title}</p>
+              <p className="mt-2 text-[13px] leading-6 text-[#6c7590]">
+                {String(series.series_kind || "").toUpperCase()} | {String(series.access_type || "").toLowerCase()}
+              </p>
+              <div className="mt-6 inline-flex items-center gap-2 rounded-full bg-[#eef4ff] px-4 py-2 text-[12px] font-semibold text-[#1739ac]">
+                <ArrowRight className="h-3.5 w-3.5" />
+                Continue
               </div>
-              <p className="mt-4 text-sm font-bold text-slate-900">{item.label}</p>
-              <p className="mt-1 text-xs text-slate-500">{item.note}</p>
             </Link>
           ))}
+          {!loading && activeSeries.length === 0 ? (
+            <div className="rounded-[26px] border border-dashed border-[#cdd8f4] bg-[#f8faff] px-5 py-12 text-center text-sm text-[#6d7690]">
+              No active programs yet.
+            </div>
+          ) : null}
         </div>
       </section>
+
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="rounded-[30px] border border-[#dce3fb] bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Attempts</p>
+              <h2 className="mt-1 text-[30px] font-black tracking-tight text-[#091a4a]">Ongoing and recent attempts</h2>
+            </div>
+            <Link href="/dashboard" className="text-sm font-bold text-[#2b4dac]">
+              Open performance evaluation
+            </Link>
+          </div>
+          <div className="mt-5 space-y-3">
+            {latestAttempts.map((item) => (
+              <Link
+                key={item.key}
+                href={item.href}
+                className="flex items-center justify-between gap-3 rounded-[22px] border border-[#dce3fb] bg-[linear-gradient(180deg,#ffffff_0%,#f8faff_100%)] px-4 py-4 transition hover:border-[#bdd1ff]"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.title}</p>
+                  <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">{item.subtitle}</p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-[14px] font-semibold text-[#1739ac]">{item.scoreText}</p>
+                </div>
+              </Link>
+            ))}
+            {!loading && latestAttempts.length === 0 ? (
+              <div className="rounded-[22px] border border-dashed border-[#cdd8f4] bg-[#f8faff] px-4 py-12 text-center text-sm text-[#6d7690]">
+                No attempts recorded yet.
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="rounded-[30px] border border-[#dce3fb] bg-[linear-gradient(180deg,#f3f6ff_0%,#eef3ff_100%)] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Yearly Overview</p>
+              <h2 className="mt-1 text-[30px] font-black tracking-tight text-[#091a4a]">Questions and marks this year</h2>
+            </div>
+            <div className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
+              {yearlySummary?.year || new Date().getFullYear()}
+            </div>
+          </div>
+          <div className="mt-5 overflow-hidden rounded-[24px] border border-[#d8e1fb] bg-white">
+            <div className="grid grid-cols-[1.1fr_0.9fr_0.8fr_1fr] gap-3 border-b border-[#e5ebfb] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5f7aa9]">
+              <span>Content</span>
+              <span>Total Questions</span>
+              <span>Total Marks</span>
+              <span>Marks Obtained</span>
+            </div>
+            <div className="divide-y divide-[#e5ebfb]">
+              {yearlyRows.map((row) => (
+                <div key={row.content_type} className="grid grid-cols-[1.1fr_0.9fr_0.8fr_1fr] gap-3 px-4 py-4 text-[14px] text-[#182033]">
+                  <span className="font-semibold">{row.label}</span>
+                  <span>{row.total_questions}</span>
+                  <span>{row.total_marks}</span>
+                  <span className="font-semibold text-[#1739ac]">{row.marks_obtained}</span>
+                </div>
+              ))}
+              {!loading && yearlyRows.length === 0 ? (
+                <div className="px-4 py-12 text-center text-sm text-[#6d7690]">No yearly summary available yet.</div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-[30px] border border-[#dce3fb] bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Suggested Next Step</p>
+            <h2 className="mt-1 text-[30px] font-black tracking-tight text-[#091a4a]">Programs based on your current prep</h2>
+            <p className="mt-2 max-w-2xl text-[13px] leading-6 text-[#6c7590]">
+              These suggestions are positioned for your ongoing programs, recent attempts, and visible weak areas.
+            </p>
+          </div>
+          <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-full bg-[#eef4ff] px-4 py-2 text-[12px] font-semibold text-[#1739ac]">
+            View detailed evaluation
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {(suggestedPrograms.length > 0 ? suggestedPrograms : fallbackSuggestions).map((item, index) => {
+            const href = "href" in item ? item.href : dashboardRecommendationHref(item);
+            const title = item.title;
+            const description = item.description || "Targeted suggestion based on your current progress.";
+            const cta = "cta" in item ? item.cta : "Open suggestion";
+            return (
+              <Link
+                key={`${title}-${index}`}
+                href={href}
+                className="rounded-[24px] border border-[#dce3fb] bg-[linear-gradient(180deg,#ffffff_0%,#f7f9ff_100%)] p-5 transition hover:-translate-y-0.5 hover:border-[#bdd1ff] hover:shadow-[0_16px_30px_rgba(15,23,42,0.06)]"
+              >
+                <div className="inline-flex items-center gap-2 rounded-full bg-[#eef4ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Recommended
+                </div>
+                <p className="mt-4 text-[20px] font-black tracking-[-0.03em] text-[#091a4a]">{title}</p>
+                <p className="mt-2 text-[13px] leading-6 text-[#6c7590]">{description}</p>
+                <div className="mt-5 inline-flex items-center gap-2 text-[13px] font-semibold text-[#1739ac]">
+                  {cta}
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
+
+      {false ? (
+        <>
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
@@ -699,6 +1073,8 @@ function LearnerHome({ user }: { user: unknown }) {
           ) : null}
         </div>
       </section>
+        </>
+      ) : null}
     </div>
   );
 }

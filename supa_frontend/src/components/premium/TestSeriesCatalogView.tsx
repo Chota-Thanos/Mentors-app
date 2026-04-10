@@ -1,13 +1,12 @@
 "use client";
 
 import axios from "axios";
-import { ChevronDown, Info, Search, SlidersHorizontal, Star } from "lucide-react";
+import { ChevronDown, Search, SlidersHorizontal, Star } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/context/AuthContext";
 import { useExamContext } from "@/context/ExamContext";
 import { premiumApi } from "@/lib/premiumApi";
 import { richTextToPlainText } from "@/lib/richText";
@@ -128,11 +127,11 @@ function sortRows(rows: TestSeriesDiscoverySeries[], sortBy: SortOption): TestSe
 function RatingStrip({ value }: { value: number }) {
   const rounded = Math.max(0, Math.min(5, Math.round(value)));
   return (
-    <span className="flex items-center gap-0.5 text-amber-500" aria-hidden="true">
+    <span className="flex items-center gap-0.5 text-[#d68a1a]" aria-hidden="true">
       {Array.from({ length: 5 }).map((_, index) => (
         <Star
           key={`${value}-${index}`}
-          className={cn("h-3.5 w-3.5", index < rounded ? "fill-current" : "fill-transparent text-amber-300")}
+          className={cn("h-3.5 w-3.5", index < rounded ? "fill-current" : "fill-transparent text-[#e7c98f]")}
         />
       ))}
     </span>
@@ -144,18 +143,27 @@ function SeriesBadge({
   tone,
 }: {
   label: string;
-  tone: "violet" | "mint" | "gold" | "neutral";
+  tone: "blue" | "mint" | "gold" | "neutral";
 }) {
   const toneClass =
-    tone === "violet"
-      ? "border-violet-200 bg-violet-700 text-white"
+    tone === "blue"
+      ? "border-[#cfdafb] bg-[#173aa9] text-white"
       : tone === "mint"
-        ? "border-teal-200 bg-teal-100 text-teal-900"
+        ? "border-[#c9eee6] bg-[#eaf8f4] text-[#176a5c]"
         : tone === "gold"
-          ? "border-amber-200 bg-amber-100 text-amber-900"
-          : "border-slate-200 bg-slate-100 text-slate-700";
+          ? "border-[#f0ddb1] bg-[#fff3d8] text-[#80520d]"
+          : "border-[#d5dced] bg-white text-[#5e6885]";
 
-  return <span className={cn("inline-flex items-center rounded-md border px-2.5 py-1 text-[11px] font-bold", toneClass)}>{label}</span>;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
+        toneClass,
+      )}
+    >
+      {label}
+    </span>
+  );
 }
 
 function CatalogFilters({
@@ -192,43 +200,45 @@ function CatalogFilters({
   compact?: boolean;
 }) {
   const shellClass = compact
-    ? "rounded-3xl border border-slate-200 bg-white p-4 shadow-sm"
-    : "rounded-3xl border border-slate-200 bg-white p-5 shadow-sm";
+    ? "rounded-[28px] border border-[#dbe3f6] bg-white/95 p-4 shadow-[0_18px_45px_rgba(16,31,74,0.07)]"
+    : "rounded-[30px] border border-[#dbe3f6] bg-white/95 p-5 shadow-[0_20px_50px_rgba(16,31,74,0.08)]";
   const inputClass =
-    "w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-violet-500";
+    "w-full rounded-[18px] border border-[#d4dced] bg-white px-3 py-3 text-sm text-[#1f2a44] outline-none transition focus:border-[#173aa9]";
 
   return (
     <div className={shellClass}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">Filter</p>
-          <h2 className="mt-1 text-lg font-black tracking-tight text-slate-900">Refine results</h2>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#6d7690]">Refine Catalog</p>
+          <h2 className="mt-1 font-sans text-[26px] font-semibold leading-none tracking-[-0.05em] text-[#141b2d]">
+            Filter results
+          </h2>
         </div>
         <button
           type="button"
           onClick={onReset}
-          className="text-sm font-semibold text-violet-700 transition hover:text-violet-900"
+          className="text-[12px] font-semibold text-[#173aa9] transition hover:text-[#12308c]"
         >
           Reset
         </button>
       </div>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-5 space-y-4">
         <label className="block space-y-2">
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Search</span>
-          <span className="flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-3 py-3">
-            <Search className="h-4 w-4 text-slate-400" />
+          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Search</span>
+          <span className="flex items-center gap-2 rounded-[18px] border border-[#d4dced] bg-[#f8faff] px-3 py-3">
+            <Search className="h-4 w-4 text-[#7a85a5]" />
             <input
               value={search}
               onChange={(event) => onSearchChange(event.target.value)}
               placeholder="Search by series or mentor"
-              className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+              className="w-full bg-transparent text-sm text-[#1f2a44] outline-none placeholder:text-[#7a85a5]"
             />
           </span>
         </label>
 
         <label className="block space-y-2">
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Category</span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Category</span>
           <select value={categoryId} onChange={(event) => onCategoryChange(event.target.value)} className={inputClass}>
             <option value="">All categories</option>
             {categoryOptions.map((option) => (
@@ -240,7 +250,7 @@ function CatalogFilters({
         </label>
 
         <label className="block space-y-2">
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Access</span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Access</span>
           <select
             value={accessType}
             onChange={(event) => onAccessTypeChange(event.target.value as "all" | TestSeriesAccessType)}
@@ -256,7 +266,7 @@ function CatalogFilters({
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Min price</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Min price</span>
             <input
               value={minPrice}
               onChange={(event) => onMinPriceChange(event.target.value)}
@@ -267,7 +277,7 @@ function CatalogFilters({
             />
           </label>
           <label className="block space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Max price</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Max price</span>
             <input
               value={maxPrice}
               onChange={(event) => onMaxPriceChange(event.target.value)}
@@ -279,16 +289,16 @@ function CatalogFilters({
           </label>
         </div>
 
-        <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+        <label className="flex items-center justify-between rounded-[20px] border border-[#dbe3f6] bg-[linear-gradient(180deg,#f9fbff_0%,#f2f6ff_100%)] px-4 py-3">
           <span>
-            <span className="block text-sm font-semibold text-slate-900">Free only</span>
-            <span className="mt-1 block text-xs text-slate-500">Show only free series in the list.</span>
+            <span className="block text-sm font-semibold text-[#1d2945]">Free only</span>
+            <span className="mt-1 block text-xs leading-5 text-[#6d7690]">Show only free series in this catalog.</span>
           </span>
           <input
             type="checkbox"
             checked={onlyFree}
             onChange={(event) => onOnlyFreeChange(event.target.checked)}
-            className="h-4 w-4 accent-violet-700"
+            className="h-4 w-4 accent-[#173aa9]"
           />
         </label>
       </div>
@@ -314,105 +324,127 @@ function SeriesCard({
   const isPopular = review.total >= 12 && review.average >= 4.2;
 
   return (
-    <article className="border-b border-slate-200 p-4 last:border-b-0 sm:p-5">
-      <div className="grid gap-4 grid-cols-[112px_minmax(0,1fr)] sm:grid-cols-[140px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)_170px]">
-        <Link href={`/programs/${series.id}`} className="relative block h-[112px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100 sm:h-[140px] lg:h-[160px]">
+    <article className="overflow-hidden rounded-[30px] border border-[#dbe3f6] bg-white shadow-[0_18px_44px_rgba(16,31,74,0.06)]">
+      <div className="grid gap-5 p-5 lg:grid-cols-[220px_minmax(0,1fr)_190px] lg:p-6">
+        <Link
+          href={`/programs/${series.id}`}
+          className="relative block h-[180px] overflow-hidden rounded-[24px] border border-[#d9e2f4] bg-[#eef3ff]"
+        >
           {cover ? (
             <Image
               src={cover}
               alt={series.title}
               fill
               unoptimized
-              sizes="(max-width: 640px) 112px, (max-width: 1024px) 140px, 240px"
+              sizes="(max-width: 1024px) 100vw, 220px"
               className="object-cover"
             />
           ) : (
-            <div className={cn(
-              "flex h-full items-center justify-center bg-gradient-to-br px-4 text-center",
-              isMains ? "from-amber-100 via-white to-rose-50" : "from-violet-100 via-white to-sky-50",
-            )}>
+            <div
+              className={cn(
+                "flex h-full items-end bg-gradient-to-br px-5 py-5",
+                isMains ? "from-[#fff5e7] via-[#fffaf3] to-[#f5f1ff]" : "from-[#edf2ff] via-[#f9fbff] to-[#eef9f6]",
+              )}
+            >
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">{isMains ? "Mains" : "Prelims"}</p>
-                <p className="mt-2 text-sm font-bold text-slate-800">{series.test_count || 0} test{series.test_count === 1 ? "" : "s"}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#6d7690]">
+                  {isMains ? "Mains Track" : "Prelims Track"}
+                </p>
+                <p className="mt-2 font-sans text-[28px] font-semibold leading-none tracking-[-0.05em] text-[#141b2d]">
+                  {series.test_count || 0}
+                </p>
+                <p className="mt-1 text-sm text-[#5e6885]">tests inside this program</p>
               </div>
             </div>
           )}
         </Link>
 
         <div className="min-w-0">
+          <div className="flex flex-wrap gap-2">
+            {isPremium ? <SeriesBadge label="Premium" tone="blue" /> : <SeriesBadge label="Free Access" tone="mint" />}
+            {isPopular ? <SeriesBadge label="Popular" tone="gold" /> : null}
+            {profile?.is_verified ? <SeriesBadge label="Verified Mentor" tone="neutral" /> : null}
+            <SeriesBadge label={isMains ? "Answer Writing" : "MCQ Series"} tone="neutral" />
+          </div>
+
           <Link href={`/programs/${series.id}`} className="block">
-            <h3 className="text-lg font-black leading-6 text-slate-900 transition hover:text-violet-700 sm:text-xl">
+            <h3 className="mt-4 font-sans text-[28px] font-semibold leading-[1.02] tracking-[-0.05em] text-[#141b2d] transition hover:text-[#173aa9]">
               {series.title}
             </h3>
           </Link>
-          <p className="mt-1 text-sm text-slate-600">{providerName}</p>
+          <p className="mt-2 text-[14px] font-medium text-[#17328f]">{providerName}</p>
 
           {review.total > 0 ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-              <span className="font-bold text-amber-700">{review.average.toFixed(1)}</span>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-bold text-[#9b650d]">{review.average.toFixed(1)}</span>
               <RatingStrip value={review.average} />
-              <span className="text-slate-500">({formatCompactNumber(review.total)})</span>
+              <span className="text-[#6d7690]">({formatCompactNumber(review.total)} reviews)</span>
             </div>
           ) : (
-            <p className="mt-2 text-sm text-slate-500">{profile?.is_verified ? "Verified mentor" : "Newly added series"}</p>
+            <p className="mt-3 text-sm text-[#6d7690]">{profile?.is_verified ? "Verified mentor-led series" : "Freshly published series"}</p>
           )}
 
-          <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{textExcerpt(series.description)}</p>
+          <p className="mt-4 line-clamp-3 text-[14px] leading-7 text-[#5f6883]">{textExcerpt(series.description)}</p>
 
-          <p className="mt-2 text-sm text-slate-500">
-            {series.test_count || 0} tests
-            {providerLine ? ` \u00B7 ${providerLine}` : ""}
-            {categoryLine ? ` \u00B7 ${categoryLine}` : ""}
+          <div className="mt-4 rounded-[22px] bg-[linear-gradient(180deg,#f8faff_0%,#f2f6ff_100%)] px-4 py-3">
+            <p className="text-[13px] font-semibold text-[#1d2945]">
+              {series.test_count || 0} tests
+              {providerLine ? ` · ${providerLine}` : ""}
+            </p>
+            {categoryLine ? <p className="mt-1 text-[13px] leading-6 text-[#6d7690]">{categoryLine}</p> : null}
+            {providerBio ? <p className="mt-2 line-clamp-2 text-[13px] leading-6 text-[#6d7690]">{providerBio}</p> : null}
+          </div>
+
+          <p className="mt-4 text-[28px] font-semibold leading-none tracking-[-0.05em] text-[#141b2d] lg:hidden">
+            {formatListingPrice(series.price)}
           </p>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {isPremium ? <SeriesBadge label="Premium" tone="violet" /> : <SeriesBadge label="Free access" tone="mint" />}
-            {isPopular ? <SeriesBadge label="Popular" tone="mint" /> : null}
-            {profile?.is_verified ? <SeriesBadge label="Verified" tone="gold" /> : null}
-            <SeriesBadge label={isMains ? "Answer-writing" : "MCQ series"} tone="neutral" />
-          </div>
-
-          {providerBio ? (
-            <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{providerBio}</p>
-          ) : null}
-
-          <p className="mt-3 text-xl font-black text-slate-900 lg:hidden">{formatListingPrice(series.price)}</p>
-        </div>
-
-        <div className="hidden lg:flex lg:flex-col lg:items-end lg:justify-between">
-          <div className="text-right">
-            <p className="text-2xl font-black tracking-tight text-slate-900">{formatListingPrice(series.price)}</p>
-            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-              {series.access_type === "free" ? "Start instantly" : series.access_type}
-            </p>
-          </div>
-
-          <div className="flex w-full flex-col gap-2">
+          <div className="mt-4 flex flex-wrap gap-3 lg:hidden">
             <Link
               href={`/programs/${series.id}`}
-              className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-violet-700 px-4 text-sm font-bold text-violet-700 transition hover:bg-violet-50"
+              className="inline-flex items-center justify-center rounded-full bg-[#173aa9] px-5 py-3 text-[13px] font-semibold text-white shadow-[0_14px_28px_rgba(23,58,169,0.2)]"
             >
-              Open series
+              Open Program
             </Link>
             {profile ? (
               <Link
                 href={`/profiles/${profile.user_id}`}
-                className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                className="inline-flex items-center justify-center rounded-full bg-white px-5 py-3 text-[13px] font-semibold text-[#17328f] shadow-[0_14px_28px_rgba(21,31,76,0.08)]"
               >
-                Mentor profile
+                Mentor Profile
               </Link>
             ) : null}
           </div>
         </div>
-      </div>
 
-      <div className="mt-4 lg:hidden">
-        <Link
-          href={`/programs/${series.id}`}
-          className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-violet-700 px-4 text-sm font-bold text-violet-700 transition hover:bg-violet-50"
-        >
-          Open series
-        </Link>
+        <div className="hidden rounded-[24px] bg-[linear-gradient(180deg,#f8faff_0%,#f1f6ff_100%)] p-5 lg:flex lg:flex-col lg:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Starting Access</p>
+            <p className="mt-3 font-sans text-[34px] font-semibold leading-none tracking-[-0.06em] text-[#141b2d]">
+              {formatListingPrice(series.price)}
+            </p>
+            <p className="mt-2 text-[12px] leading-6 text-[#6d7690]">
+              {series.access_type === "free" ? "Start instantly from the detail page." : `Access type: ${series.access_type}`}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Link
+              href={`/programs/${series.id}`}
+              className="inline-flex h-11 w-full items-center justify-center rounded-full bg-[#173aa9] px-4 text-[13px] font-semibold text-white shadow-[0_14px_28px_rgba(23,58,169,0.2)]"
+            >
+              Open Program
+            </Link>
+            {profile ? (
+              <Link
+                href={`/profiles/${profile.user_id}`}
+                className="inline-flex h-11 w-full items-center justify-center rounded-full bg-white px-4 text-[13px] font-semibold text-[#17328f] shadow-[0_14px_28px_rgba(21,31,76,0.08)]"
+              >
+                Mentor Profile
+              </Link>
+            ) : null}
+          </div>
+        </div>
       </div>
     </article>
   );
@@ -423,8 +455,7 @@ export default function TestSeriesCatalogView({
   title,
   description,
 }: TestSeriesCatalogViewProps) {
-  const { isAuthenticated } = useAuth();
-  const { globalExamId, globalExamName, isLoading: examLoading } = useExamContext();
+  const { globalExamId } = useExamContext();
   const [seriesRows, setSeriesRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -522,57 +553,30 @@ export default function TestSeriesCatalogView({
   };
 
   return (
-    <div className="space-y-5">
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-4">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Catalog</p>
-            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 sm:text-[2.35rem]">
+    <div className="space-y-8 bg-[#f6f8ff] pb-2 text-[#192133]">
+      <section className="relative overflow-hidden rounded-[34px] border border-[#dde5f7] bg-[linear-gradient(135deg,#ffffff_0%,#f2f5ff_58%,#eef9f6_100%)] px-5 py-6 shadow-[0_22px_55px_rgba(9,26,74,0.08)] sm:px-7 sm:py-8 lg:px-10 lg:py-10">
+        <div className="absolute right-[-6rem] top-[-5rem] h-52 w-52 rounded-full bg-[#d9e4ff]/70 blur-3xl" />
+        <div className="absolute bottom-[-7rem] left-[-4rem] h-56 w-56 rounded-full bg-[#d7f5ef]/70 blur-3xl" />
+        <div className="relative max-w-4xl">
+            <p className="inline-flex items-center rounded-full border border-[#cbd8fb] bg-white/85 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#304a92]">
+              {isMains ? "Mains Catalog" : "Prelims Catalog"}
+            </p>
+            <h1 className="mt-4 max-w-3xl font-sans text-[38px] font-semibold leading-[0.94] tracking-[-0.07em] text-[#1235ae] sm:text-[48px] lg:text-[58px]">
               All {title}
             </h1>
-            <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-600 sm:text-base">{description}</p>
-            <div className="mt-4 rounded-3xl border border-violet-100 bg-violet-50/70 p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-violet-700">Exam Scope</p>
-              <p className="mt-1 text-lg font-black tracking-tight text-slate-900">
-                {examLoading ? "Loading exam preference..." : globalExamName || "All Exams"}
-              </p>
-              <p className="mt-1 text-sm leading-6 text-slate-600">
-                {globalExamName
-                  ? "Programs in this directory are filtered to the selected exam."
-                  : "Programs in this directory are showing across all exams."}
-              </p>
-            </div>
-          </div>
+            <p className="mt-5 max-w-3xl text-[14px] leading-7 text-[#6d7690] sm:text-[15px]">{description}</p>
 
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-violet-200 bg-white text-violet-700">
-                <Info className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-base font-bold text-slate-900">
-                  Browse by mentor, price, and category before opening the full series detail.
-                </p>
-                <p className="mt-1 text-sm leading-6 text-slate-600">
-                  {isAuthenticated
-                    ? "Your access continues on the detail page, where the full test roadmap and mentor actions are available."
-                    : "You can inspect the full series structure first and sign in later to activate access."}
-                </p>
-              </div>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <SeriesBadge label={`${sortedRows.length} results`} tone="neutral" />
+              <SeriesBadge label={`${summary.providerCount} mentors`} tone="neutral" />
+              <SeriesBadge label={`${summary.freeCount} free`} tone="mint" />
+              {summary.ratedCount > 0 ? <SeriesBadge label={`${summary.ratedCount} rated`} tone="gold" /> : null}
             </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <SeriesBadge label={`${sortedRows.length} results`} tone="neutral" />
-            <SeriesBadge label={`${summary.providerCount} mentors`} tone="neutral" />
-            <SeriesBadge label={`${summary.freeCount} free`} tone="mint" />
-            {summary.ratedCount > 0 ? <SeriesBadge label={`${summary.ratedCount} rated`} tone="gold" /> : null}
-          </div>
         </div>
       </section>
 
-      <div className="grid gap-5 lg:grid-cols-[290px_minmax(0,1fr)] lg:items-start">
-        <div className="hidden lg:block lg:sticky lg:top-24">
+      <div className="grid gap-6 lg:grid-cols-[290px_minmax(0,1fr)] lg:items-start">
+        <div className="hidden lg:sticky lg:top-24 lg:block">
           <CatalogFilters
             search={search}
             onSearchChange={setSearch}
@@ -596,19 +600,19 @@ export default function TestSeriesCatalogView({
             <button
               type="button"
               onClick={() => setMobileFiltersOpen((value) => !value)}
-              className="inline-flex h-[58px] items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-800 shadow-sm"
+              className="inline-flex h-[56px] items-center justify-center gap-2 rounded-full bg-white px-5 text-[13px] font-semibold text-[#17328f] shadow-[0_14px_28px_rgba(21,31,76,0.08)]"
             >
               <SlidersHorizontal className="h-4 w-4" />
               Filter
             </button>
 
-            <label className="block rounded-2xl border border-slate-300 bg-white px-4 py-2 shadow-sm">
-              <span className="block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Sort by</span>
+            <label className="block rounded-[20px] border border-[#dbe3f6] bg-white px-4 py-2 shadow-[0_14px_28px_rgba(21,31,76,0.06)]">
+              <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Sort by</span>
               <span className="mt-1 flex items-center justify-between gap-2">
                 <select
                   value={sortBy}
                   onChange={(event) => setSortBy(event.target.value as SortOption)}
-                  className="w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                  className="w-full appearance-none bg-transparent text-[13px] font-semibold text-[#1d2945] outline-none"
                 >
                   {SORT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -616,7 +620,7 @@ export default function TestSeriesCatalogView({
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="h-4 w-4 text-slate-400" />
+                <ChevronDown className="h-4 w-4 text-[#7a85a5]" />
               </span>
             </label>
           </div>
@@ -643,21 +647,21 @@ export default function TestSeriesCatalogView({
             </div>
           ) : null}
 
-          <div className="hidden lg:flex lg:items-center lg:justify-between lg:rounded-3xl lg:border lg:border-slate-200 lg:bg-white lg:p-4 lg:shadow-sm">
+          <div className="hidden lg:flex lg:items-center lg:justify-between lg:rounded-[28px] lg:border lg:border-[#dbe3f6] lg:bg-white lg:p-4 lg:shadow-[0_14px_32px_rgba(15,23,42,0.05)]">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">Results</p>
-              <p className="mt-1 text-base font-semibold text-slate-900">
-                {loading ? "Refreshing results..." : `${sortedRows.length} series available`}
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6d7690]">Results</p>
+              <p className="mt-1 text-[15px] font-semibold text-[#1d2945]">
+                {loading ? "Refreshing results..." : `${sortedRows.length} programs available`}
               </p>
             </div>
 
-            <label className="flex min-w-[240px] items-center justify-between gap-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3">
-              <span className="text-sm font-semibold text-slate-700">Sort by</span>
+            <label className="flex min-w-[250px] items-center justify-between gap-3 rounded-[18px] border border-[#d4dced] bg-[#f8faff] px-4 py-3">
+              <span className="text-[13px] font-semibold text-[#1d2945]">Sort by</span>
               <div className="relative flex-1">
                 <select
                   value={sortBy}
                   onChange={(event) => setSortBy(event.target.value as SortOption)}
-                  className="w-full appearance-none bg-transparent pr-7 text-right text-sm font-bold text-slate-900 outline-none"
+                  className="w-full appearance-none bg-transparent pr-7 text-right text-[13px] font-semibold text-[#1d2945] outline-none"
                 >
                   {SORT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -665,26 +669,28 @@ export default function TestSeriesCatalogView({
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7a85a5]" />
               </div>
             </label>
           </div>
 
           {loading ? (
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <p className="text-sm font-semibold text-slate-600">Loading series catalog...</p>
+            <div className="rounded-[28px] border border-[#dbe3f6] bg-white p-6 shadow-[0_14px_32px_rgba(15,23,42,0.05)]">
+              <p className="text-sm font-medium text-[#5f6883]">Loading series catalog...</p>
             </div>
           ) : null}
 
           {!loading && sortedRows.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
-              <h2 className="text-xl font-black text-slate-900">No matching series right now</h2>
-              <p className="mt-2 text-sm text-slate-500">Try clearing one or more filters to broaden the result set.</p>
+            <div className="rounded-[28px] border border-dashed border-[#cfd7ea] bg-white p-10 text-center shadow-[0_14px_32px_rgba(15,23,42,0.05)]">
+              <h2 className="font-sans text-[32px] font-semibold leading-none tracking-[-0.05em] text-[#141b2d]">
+                No matching programs right now
+              </h2>
+              <p className="mt-3 text-[14px] leading-7 text-[#6d7690]">Try clearing one or more filters to broaden the result set.</p>
             </div>
           ) : null}
 
           {!loading && sortedRows.length > 0 ? (
-            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="space-y-4">
               {sortedRows.map((row) => (
                 <SeriesCard key={row.series.id} row={row} isMains={isMains} />
               ))}
