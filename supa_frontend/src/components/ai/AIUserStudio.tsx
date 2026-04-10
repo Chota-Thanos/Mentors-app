@@ -3189,7 +3189,7 @@ export default function AIUserStudio({
   }, [clearGeneratedPreview, quizKind]);
 
   return (
-    <div className={quizMasterMode ? "space-y-6 lg:grid lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0" : "space-y-7"}>
+    <div className={`ai-user-studio ${quizMasterMode ? "space-y-6 lg:grid lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0" : "space-y-7"}`}>
       {quizMasterMode ? (
         <RoleWorkspaceSidebar
           title="Quiz Master"
@@ -3199,7 +3199,7 @@ export default function AIUserStudio({
       ) : null}
 
       <div className="min-w-0 space-y-7">
-      <section className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-amber-50 via-white to-sky-50 p-6 shadow-sm">
+      <section className="ai-studio-hero relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-amber-50 via-white to-sky-50 p-6 shadow-sm">
         <div className="pointer-events-none absolute -right-14 -top-14 h-48 w-48 rounded-full bg-amber-200/30 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-16 left-1/2 h-40 w-40 -translate-x-1/2 rounded-full bg-sky-200/30 blur-3xl" />
         <div className="relative space-y-5">
@@ -3250,7 +3250,7 @@ export default function AIUserStudio({
           </div>
 
           {!useUnifiedMainsLikeLayout && showChatSettings ? (
-            <div className="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-sm">
+            <div className="ai-studio-settings rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-sm">
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Output Language</p>
@@ -3389,7 +3389,7 @@ export default function AIUserStudio({
       </section>
 
       <div className="mx-auto grid w-full max-w-5xl grid-cols-1 items-start gap-6">
-        <section className="flex w-full flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
+        <section className="ai-studio-workspace flex w-full flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
           {loading ? (
             <p className="flex items-center gap-2 text-sm text-gray-500">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -3398,7 +3398,7 @@ export default function AIUserStudio({
           ) : null}
 
           {!useUnifiedMainsLikeLayout ? (
-            <div className="bg-white border-b border-indigo-50 p-4 shrink-0 flex items-center justify-between sticky top-0 z-10 shadow-sm rounded-xl mb-6">
+            <div className="ai-studio-toolbar bg-white border-b border-indigo-50 p-4 shrink-0 flex items-center justify-between sticky top-0 z-10 shadow-sm rounded-xl mb-6">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-md">
                   <Wand2 className="h-5 w-5 text-white" />
@@ -3670,16 +3670,33 @@ export default function AIUserStudio({
                       <div className="rounded-md border border-gray-200 bg-white p-3 space-y-2">
                         <div className="flex items-center justify-between">
                           <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Format Mix Planner (Optional)</p>
-                          <span className="text-[11px] text-gray-500">Total target: {totalMixedRequested}</span>
+                          <span className="text-[11px] text-gray-500">Styles selected: {activeMixPlan.length}</span>
                         </div>
                         {shouldUseAsyncJobMode ? (
                           <p className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] text-indigo-700">
                             Large mix detected. Async job mode with retry queue will be used automatically.
                           </p>
                         ) : null}
-                        <p className="text-xs text-gray-500">
-                          Plan one generation with multiple example types. Add rows and set question count per style.
-                        </p>
+                        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-slate-700">
+                          <p className="font-semibold text-slate-900">
+                            You can select how many questions of each question style to be generated.
+                          </p>
+                          <p className="mt-1 text-slate-600">Select the number given below each style.</p>
+                          {activeMixPlan.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {activeMixPlan.map((plan) => (
+                                <span
+                                  key={plan.id}
+                                  className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700"
+                                >
+                                  {plan.analysis.title}: {plan.count}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-slate-600">No question styles selected yet.</p>
+                          )}
+                        </div>
                         {mixEntries.length === 0 ? (
                           <p className="text-xs text-gray-500">No mix rows added. Single-format generation will be used.</p>
                         ) : (
@@ -4087,12 +4104,29 @@ export default function AIUserStudio({
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="text-sm font-semibold text-slate-900">2. Question Style</p>
                           <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-700">
-                            Total target: {totalMixedRequested}
+                            Styles selected: {activeMixPlan.length}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-600">
-                          Pick from existing examples or provide your own example pattern.
-                        </p>
+                        <div className="rounded-lg border border-sky-200 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold text-slate-900">
+                            You can select how many questions of each question style to be generated.
+                          </p>
+                          <p className="mt-1 text-xs text-slate-600">Select the number given below each style.</p>
+                          {activeMixPlan.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {activeMixPlan.map((plan) => (
+                                <span
+                                  key={plan.id}
+                                  className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700"
+                                >
+                                  {plan.analysis.title}: {plan.count}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-xs text-slate-600">No question styles selected yet.</p>
+                          )}
+                        </div>
 
                         <div className="rounded-xl border border-violet-200 bg-white p-1">
                           <div className="grid grid-cols-2 gap-1">

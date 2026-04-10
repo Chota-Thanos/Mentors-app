@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
+import { useExamContext } from "@/context/ExamContext";
 import { premiumApi } from "@/lib/premiumApi";
 import type {
   PremiumCollection,
@@ -69,6 +70,11 @@ function normalizeLower(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
 
+function matchesExamIds(examIds: number[] | undefined | null, examId: number | null): boolean {
+  if (!examId) return true;
+  return Array.isArray(examIds) && examIds.includes(examId);
+}
+
 function parseSeriesId(collection: PremiumCollection | null): number {
   if (!collection) return 0;
   const directSeriesId = toPositiveInt((collection as { series_id?: unknown }).series_id);
@@ -115,6 +121,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
 
 export default function MyResultsView() {
   const { isAuthenticated, loading, showLoginModal, user } = useAuth();
+  const { globalExamId } = useExamContext();
   const currentUserId = String(user?.id || "").trim();
   const [busy, setBusy] = useState(true);
   const [mainsReport, setMainsReport] = useState<UserMainsPerformanceReport | null>(null);
@@ -143,8 +150,12 @@ export default function MyResultsView() {
     const run = async () => {
       try {
         const [progressRes, mainsRes, enrollmentsRes] = await Promise.all([
-          premiumApi.get<UserProgressPayload>("/user/progress"),
-          premiumApi.get<UserMainsPerformanceReport>("/users/me/mains-performance-report"),
+          premiumApi.get<UserProgressPayload>("/user/progress", {
+            params: { exam_id: globalExamId || undefined },
+          }),
+          premiumApi.get<UserMainsPerformanceReport>("/users/me/mains-performance-report", {
+            params: { exam_id: globalExamId || undefined },
+          }),
           premiumApi.get<TestSeriesEnrollment[]>("/programs/my/enrollments"),
         ]);
         if (!active) return;
@@ -196,6 +207,7 @@ export default function MyResultsView() {
         const nextQuizMadeAttempts: AttemptWithContext[] = [];
         for (const attempt of normalizedAttempts) {
           const collection = collectionById[String(attempt.collection_id)] || null;
+          if (!matchesExamIds(collection?.exam_ids, globalExamId)) continue;
           const seriesId = parseSeriesId(collection);
           const row: AttemptWithContext = { attempt, collection, seriesId };
           if (seriesId > 0) {
@@ -260,7 +272,7 @@ export default function MyResultsView() {
     return () => {
       active = false;
     };
-  }, [currentUserId, isAuthenticated, loading]);
+  }, [currentUserId, globalExamId, isAuthenticated, loading]);
 
   if (loading || busy) {
     return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading your results...</div>;

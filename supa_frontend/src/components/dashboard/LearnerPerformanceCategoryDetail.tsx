@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
+import { useExamContext } from "@/context/ExamContext";
 import { DASHBOARD_SECTION_META, type DashboardContentType } from "@/lib/dashboardSections";
 import { premiumApi } from "@/lib/premiumApi";
 import type {
@@ -151,6 +152,7 @@ export default function LearnerPerformanceCategoryDetail({
   categoryId: number;
 }) {
   const { loading: authLoading, isAuthenticated, showLoginModal } = useAuth();
+  const { globalExamId } = useExamContext();
   const [payload, setPayload] = useState<PerformanceAuditDetailPayload | null>(null);
   const [error, setError] = useState("");
 
@@ -161,6 +163,7 @@ export default function LearnerPerformanceCategoryDetail({
     premiumApi
       .get<PerformanceAuditDetailPayload>(
         `/user/performance-audit/${contentType}/sources/${sourceKind}/categories/${categoryId}`,
+        { params: { exam_id: globalExamId || undefined } },
       )
       .then((response) => {
         if (!active) return;
@@ -183,7 +186,7 @@ export default function LearnerPerformanceCategoryDetail({
     return () => {
       active = false;
     };
-  }, [authLoading, categoryId, contentType, isAuthenticated, sourceKind]);
+  }, [authLoading, categoryId, contentType, globalExamId, isAuthenticated, sourceKind]);
 
   const loading = authLoading || (isAuthenticated && !payload && !error);
   const sectionMeta = DASHBOARD_SECTION_META[contentType];

@@ -41,6 +41,291 @@
   --premium-shadow: var(--app-shadow-soft);
 }
 
+.ai-user-studio {
+  --ai-studio-surface: #ffffff;
+  --ai-studio-surface-soft: #f8faff;
+  --ai-studio-surface-tint: #eef4ff;
+  --ai-studio-border: #dce3fb;
+  --ai-studio-border-strong: #c9d6fb;
+  --ai-studio-text: #182033;
+  --ai-studio-muted: #6c7590;
+  --ai-studio-accent: #1739ac;
+  --ai-studio-accent-strong: #091a4a;
+  --ai-studio-mint: #d8f3ec;
+  --ai-studio-mint-strong: #0f766e;
+  color: var(--ai-studio-text);
+}
+
+.ai-user-studio :where(h1, h2, h3, h4) {
+  font-family: var(--font-sans);
+  letter-spacing: -0.04em;
+  color: var(--ai-studio-accent-strong);
+}
+
+.ai-user-studio :where(p, span, label, button, input, select, textarea, pre) {
+  font-family: var(--font-sans);
+}
+
+.ai-user-studio .ai-studio-hero {
+  border-color: #d7def4;
+  background:
+    radial-gradient(circle at top right, rgba(220, 231, 255, 0.7), transparent 30%),
+    radial-gradient(circle at bottom left, rgba(216, 243, 236, 0.75), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #f6f8ff 54%, #edf8f5 100%);
+  box-shadow: 0 22px 55px rgba(9, 26, 74, 0.08);
+}
+
+.ai-user-studio .ai-studio-settings,
+.ai-user-studio .ai-studio-workspace {
+  border-color: var(--ai-studio-border);
+  background: var(--ai-studio-surface);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.05);
+}
+
+.ai-user-studio .ai-studio-toolbar {
+  border-bottom-color: var(--ai-studio-border);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.ai-user-studio :where(
+  .bg-white,
+  .bg-white\/85,
+  .bg-white\/90,
+  .bg-white\/95,
+  .bg-gray-50
+) {
+  background-color: var(--ai-studio-surface);
+}
+
+.ai-user-studio :where(
+  .bg-slate-50,
+  .bg-slate-100,
+  .bg-indigo-50,
+  .bg-indigo-50\/60,
+  .bg-amber-50,
+  .bg-amber-50\/50,
+  .bg-amber-50\/60,
+  .bg-amber-50\/70,
+  .bg-emerald-50,
+  .bg-emerald-50\/50,
+  .bg-emerald-50\/60,
+  .bg-emerald-50\/70,
+  .bg-sky-50,
+  .bg-sky-50\/70,
+  .bg-violet-50,
+  .bg-violet-50\/60
+) {
+  background-color: var(--ai-studio-surface-soft);
+}
+
+.ai-user-studio :where(
+  .border-slate-100,
+  .border-slate-200,
+  .border-slate-300,
+  .border-gray-200,
+  .border-gray-300,
+  .border-amber-100,
+  .border-amber-200,
+  .border-emerald-200,
+  .border-emerald-300,
+  .border-indigo-50,
+  .border-indigo-200,
+  .border-indigo-300,
+  .border-sky-200,
+  .border-sky-300,
+  .border-violet-200
+) {
+  border-color: var(--ai-studio-border);
+}
+
+.ai-user-studio :where(
+  .text-slate-900,
+  .text-slate-800,
+  .text-slate-700,
+  .text-gray-900,
+  .text-gray-800,
+  .text-gray-700
+) {
+  color: var(--ai-studio-accent-strong);
+}
+
+.ai-user-studio :where(
+  .text-slate-600,
+  .text-slate-500,
+  .text-gray-600,
+  .text-gray-500
+) {
+  color: var(--ai-studio-muted);
+}
+
+.ai-user-studio :where(
+  .text-indigo-700,
+  .text-indigo-800,
+  .text-sky-700,
+  .text-sky-800,
+  .text-violet-600,
+  .text-violet-800
+) {
+  color: var(--ai-studio-accent);
+}
+
+.ai-user-studio :where(.bg-indigo-100, .bg-indigo-50, .bg-sky-50, .bg-violet-50) {
+  background-color: var(--ai-studio-surface-tint);
+}
+
+.ai-user-studio :where(.bg-indigo-600, .bg-sky-600, .bg-slate-900) {
+  background-color: var(--ai-studio-accent-strong);
+}
+
+.ai-user-studio :where(input, select, textarea) {
+  background: var(--ai-studio-surface);
+  border-color: var(--ai-studio-border);
+  color: var(--ai-studio-text);
+}
+
+.ai-user-studio :where(input::placeholder, textarea::placeholder) {
+  color: var(--ai-studio-muted);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --app-canvas: #000000;
+    --app-canvas-deep: #080808;
+    --app-surface: #0b0b0b;
+    --app-surface-soft: #131313;
+    --app-surface-muted: #181818;
+    --app-border: #262626;
+    --app-border-strong: #383838;
+    --app-text: #ffffff;
+    --app-text-muted: #d4d4d8;
+    --app-text-soft: #a1a1aa;
+    --app-primary: #6f81ff;
+    --app-primary-strong: #8ea2ff;
+    --app-primary-soft: #1b2247;
+    --app-secondary: #bb9cff;
+    --app-secondary-soft: #22162f;
+    --app-mint: #8deee0;
+    --app-mint-strong: #5eead4;
+    --app-danger: #ff8d8d;
+    --app-danger-soft: #341515;
+    --app-focus: rgba(142, 162, 255, 0.24);
+    --app-shadow: 0 22px 60px -34px rgba(0, 0, 0, 0.86);
+    --app-shadow-soft: 0 18px 40px -28px rgba(0, 0, 0, 0.72);
+  }
+
+  html {
+    background: var(--app-canvas);
+    color-scheme: dark;
+  }
+
+  body {
+    background:
+      radial-gradient(circle at top right, rgba(72, 61, 139, 0.2), transparent 28%),
+      radial-gradient(circle at bottom left, rgba(23, 89, 82, 0.24), transparent 24%),
+      linear-gradient(180deg, var(--app-canvas) 0%, #050505 100%);
+    color: var(--app-text);
+  }
+
+  .app-shell {
+    background:
+      radial-gradient(circle at top right, rgba(72, 61, 139, 0.2), transparent 28%),
+      radial-gradient(circle at bottom left, rgba(23, 89, 82, 0.24), transparent 24%),
+      linear-gradient(180deg, var(--app-canvas) 0%, #050505 100%);
+  }
+
+  .ai-user-studio {
+    color: #ffffff;
+  }
+
+  .ai-user-studio :where(
+    .bg-white,
+    .bg-white\/85,
+    .bg-white\/90,
+    .bg-white\/95,
+    .bg-slate-50,
+    .bg-slate-100,
+    .bg-gray-50,
+    .bg-amber-50,
+    .bg-amber-50\/50,
+    .bg-amber-50\/60,
+    .bg-amber-50\/70,
+    .bg-emerald-50,
+    .bg-emerald-50\/50,
+    .bg-emerald-50\/60,
+    .bg-emerald-50\/70,
+    .bg-indigo-50,
+    .bg-indigo-50\/60,
+    .bg-sky-50,
+    .bg-sky-50\/70,
+    .bg-violet-50,
+    .bg-violet-50\/60
+  ) {
+    background-color: #101010;
+  }
+
+  .ai-user-studio :where(
+    .border-slate-100,
+    .border-slate-200,
+    .border-slate-300,
+    .border-gray-200,
+    .border-gray-300,
+    .border-amber-100,
+    .border-amber-200,
+    .border-emerald-200,
+    .border-emerald-300,
+    .border-indigo-50,
+    .border-indigo-200,
+    .border-indigo-300,
+    .border-sky-200,
+    .border-violet-200
+  ) {
+    border-color: #2a2a2a;
+  }
+
+  .ai-user-studio :where(
+    .text-slate-900,
+    .text-slate-800,
+    .text-slate-700,
+    .text-slate-600,
+    .text-slate-500,
+    .text-gray-900,
+    .text-gray-800,
+    .text-gray-700,
+    .text-gray-600,
+    .text-gray-500
+  ) {
+    color: #ffffff;
+  }
+
+  .ai-user-studio :where(
+    .text-indigo-700,
+    .text-indigo-800,
+    .text-violet-600,
+    .text-violet-800,
+    .text-amber-700,
+    .text-amber-800,
+    .text-emerald-700,
+    .text-emerald-800,
+    .text-sky-800
+  ) {
+    color: #c4b5fd;
+  }
+
+  .ai-user-studio :where(input, select, textarea) {
+    background: #0b0b0b;
+    border-color: #2a2a2a;
+    color: #ffffff;
+  }
+
+  .ai-user-studio :where(input::placeholder, textarea::placeholder) {
+    color: #a1a1aa;
+  }
+
+  .ai-user-studio :where(pre) {
+    color: #ffffff;
+  }
+}
+
 .app-shell {
   color: var(--app-text);
   background:

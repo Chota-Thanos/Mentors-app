@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, ArrowRight, Loader2 } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
+import { useExamContext } from "@/context/ExamContext";
 import {
   DASHBOARD_CONTENT_TYPES,
   DASHBOARD_SECTION_META,
@@ -27,6 +28,11 @@ const sourceLabels: Record<PerformanceAuditSourceKind, string> = {
   ai: "AI Based",
   program: "Program Based",
 };
+
+function matchesExamIds(examIds: number[] | undefined | null, examId: number | null): boolean {
+  if (!examId) return true;
+  return Array.isArray(examIds) && examIds.includes(examId);
+}
 
 function formatPercentage(value: number): string {
   return `${value.toFixed(1)}%`;
@@ -204,7 +210,7 @@ function ProgramSuggestionPanel({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-2">
+      <div className="mt-5 grid gap-3 lg:grid-cols-2">
         {suggestionBundle.programs.map((program) => (
           <Link
             key={`${program.id}-${program.href}`}
@@ -236,7 +242,7 @@ function QuizMetricGrid({
     ? "rounded-[18px] border border-[#dce3fb] bg-white p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]"
     : "rounded-[18px] border border-[#dce3fb] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]";
   return (
-    <div className={`grid gap-3 ${compact ? "grid-cols-2 xl:grid-cols-3" : "grid-cols-2 xl:grid-cols-5"}`}>
+    <div className={`grid gap-3 ${compact ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3" : "grid-cols-1 sm:grid-cols-2 xl:grid-cols-5"}`}>
       <article className={cardClass}>
         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Attempted</p>
         <p className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-[#182033]">{metrics.attempted_questions}</p>
@@ -272,7 +278,7 @@ function MainsMetricGrid({
     ? "rounded-[18px] border border-[#dce3fb] bg-white p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]"
     : "rounded-[18px] border border-[#dce3fb] bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]";
   return (
-    <div className={`grid gap-3 ${compact ? "grid-cols-2 xl:grid-cols-3" : "grid-cols-2 xl:grid-cols-4"}`}>
+    <div className={`grid gap-3 ${compact ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3" : "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4"}`}>
       <article className={cardClass}>
         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Questions</p>
         <p className="mt-2 text-[18px] font-semibold tracking-[-0.03em] text-[#182033]">{metrics.total_questions}</p>
@@ -422,20 +428,20 @@ function QuizSectionCard({
   const suggestionBundle = buildQuizSuggestions(source.first_level_categories, programRows);
 
   return (
-    <section className="rounded-[34px] bg-[linear-gradient(180deg,#f1f4ff_0%,#edf1ff_100%)] px-6 py-6 sm:px-8 sm:py-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+    <section className="rounded-[28px] bg-[linear-gradient(180deg,#f1f4ff_0%,#edf1ff_100%)] px-5 py-5 sm:px-8 sm:py-8 lg:rounded-[34px]">
+      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
           <div className="inline-flex h-11 w-11 items-center justify-center rounded-[14px] border border-[#cfe0ff] bg-white text-[#1739ac] shadow-[0_10px_20px_rgba(19,55,173,0.08)]">
             <Icon className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="font-sans text-[30px] font-semibold leading-[1.06] tracking-[-0.05em] text-[#141b2d] sm:text-[34px]">
+            <h2 className="font-sans text-[24px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] sm:text-[34px]">
               {section.label}
             </h2>
             <p className="text-[14px] leading-7 text-[#636b86]">Overall performance and first-level category marks.</p>
           </div>
         </div>
-        <div className="inline-flex rounded-full bg-white p-1 shadow-[0_14px_28px_rgba(21,31,76,0.08)]">
+        <div className="inline-flex w-full rounded-full bg-white p-1 shadow-[0_14px_28px_rgba(21,31,76,0.08)] sm:w-auto">
           {(["ai", "program"] as const).map((sourceKind) => {
             const isActive = sourceKind === activeSource;
             return (
@@ -443,7 +449,7 @@ function QuizSectionCard({
                 key={`${section.content_type}-${sourceKind}-tab`}
                 type="button"
                 onClick={() => setActiveSource(sourceKind)}
-                className={`rounded-full px-4 py-2 text-[12px] font-semibold transition ${
+                className={`flex-1 rounded-full px-4 py-2 text-[12px] font-semibold transition sm:flex-none ${
                   isActive ? "bg-[#173aa9] text-white shadow-[0_12px_24px_rgba(23,58,169,0.22)]" : "text-[#5f6984]"
                 }`}
               >
@@ -455,7 +461,7 @@ function QuizSectionCard({
       </div>
 
       <article className="mt-6 rounded-[26px] border border-[#d9e2fb] bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(255,255,255,1)_100%)] p-5 shadow-[0_18px_40px_rgba(80,103,170,0.08)]">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-[12px] font-semibold uppercase tracking-[0.28em] text-[#5f7aa9]">{sourceLabels[activeSource]}</p>
             <h3 className="mt-2 text-[16px] font-semibold tracking-[-0.03em] text-[#182033]">
@@ -503,20 +509,20 @@ function MainsSectionCard({
   const suggestionBundle = buildMainsSuggestions(source.first_level_categories, programRows);
 
   return (
-    <section className="rounded-[34px] bg-[linear-gradient(180deg,#f1f4ff_0%,#edf1ff_100%)] px-6 py-6 sm:px-8 sm:py-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+    <section className="rounded-[28px] bg-[linear-gradient(180deg,#f1f4ff_0%,#edf1ff_100%)] px-5 py-5 sm:px-8 sm:py-8 lg:rounded-[34px]">
+      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
           <div className="inline-flex h-11 w-11 items-center justify-center rounded-[14px] border border-[#cfe0ff] bg-white text-[#1739ac] shadow-[0_10px_20px_rgba(19,55,173,0.08)]">
             <Icon className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="font-sans text-[30px] font-semibold leading-[1.06] tracking-[-0.05em] text-[#141b2d] sm:text-[34px]">
+            <h2 className="font-sans text-[24px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] sm:text-[34px]">
               {section.label}
             </h2>
             <p className="text-[14px] leading-7 text-[#636b86]">Question count, marks, percentage, and first-level category breakdown.</p>
           </div>
         </div>
-        <div className="inline-flex rounded-full bg-white p-1 shadow-[0_14px_28px_rgba(21,31,76,0.08)]">
+        <div className="inline-flex w-full rounded-full bg-white p-1 shadow-[0_14px_28px_rgba(21,31,76,0.08)] sm:w-auto">
           {(["ai", "program"] as const).map((sourceKind) => {
             const isActive = sourceKind === activeSource;
             return (
@@ -524,7 +530,7 @@ function MainsSectionCard({
                 key={`mains-${sourceKind}-tab`}
                 type="button"
                 onClick={() => setActiveSource(sourceKind)}
-                className={`rounded-full px-4 py-2 text-[12px] font-semibold transition ${
+                className={`flex-1 rounded-full px-4 py-2 text-[12px] font-semibold transition sm:flex-none ${
                   isActive ? "bg-[#173aa9] text-white shadow-[0_12px_24px_rgba(23,58,169,0.22)]" : "text-[#5f6984]"
                 }`}
               >
@@ -536,7 +542,7 @@ function MainsSectionCard({
       </div>
 
       <article className="mt-6 rounded-[26px] border border-[#d9e2fb] bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(255,255,255,1)_100%)] p-5 shadow-[0_18px_40px_rgba(80,103,170,0.08)]">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-[12px] font-semibold uppercase tracking-[0.28em] text-[#5f7aa9]">{sourceLabels[activeSource]}</p>
             <h3 className="mt-2 text-[16px] font-semibold tracking-[-0.03em] text-[#182033]">Mains Overall Performance</h3>
@@ -568,6 +574,7 @@ function MainsSectionCard({
 
 export default function LearnerPerformanceAudit() {
   const { loading: authLoading, isAuthenticated, showLoginModal } = useAuth();
+  const { globalExamId, globalExamName } = useExamContext();
   const [payload, setPayload] = useState<PerformanceAuditOverviewPayload | null>(null);
   const [quizProgramRows, setQuizProgramRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [mainsProgramRows, setMainsProgramRows] = useState<TestSeriesDiscoverySeries[]>([]);
@@ -578,12 +585,14 @@ export default function LearnerPerformanceAudit() {
     let active = true;
 
     Promise.allSettled([
-      premiumApi.get<PerformanceAuditOverviewPayload>("/user/performance-audit"),
-      premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", {
-        params: { limit: 120, series_kind: "quiz" },
+      premiumApi.get<PerformanceAuditOverviewPayload>("/user/performance-audit", {
+        params: { exam_id: globalExamId || undefined },
       }),
       premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", {
-        params: { limit: 120, series_kind: "mains" },
+        params: { limit: 120, series_kind: "quiz", exam_id: globalExamId || undefined },
+      }),
+      premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", {
+        params: { limit: 120, series_kind: "mains", exam_id: globalExamId || undefined },
       }),
     ]).then(([auditResult, quizProgramsResult, mainsProgramsResult]) => {
       if (!active) return;
@@ -606,12 +615,12 @@ export default function LearnerPerformanceAudit() {
 
       setQuizProgramRows(
         quizProgramsResult.status === "fulfilled" && Array.isArray(quizProgramsResult.value.data)
-          ? quizProgramsResult.value.data
+          ? quizProgramsResult.value.data.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId))
           : [],
       );
       setMainsProgramRows(
         mainsProgramsResult.status === "fulfilled" && Array.isArray(mainsProgramsResult.value.data)
-          ? mainsProgramsResult.value.data
+          ? mainsProgramsResult.value.data.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId))
           : [],
       );
     });
@@ -619,7 +628,7 @@ export default function LearnerPerformanceAudit() {
     return () => {
       active = false;
     };
-  }, [authLoading, isAuthenticated]);
+  }, [authLoading, globalExamId, isAuthenticated]);
 
   const loading = authLoading || (isAuthenticated && !payload && !error);
   const sections = useMemo(() => {
@@ -629,16 +638,19 @@ export default function LearnerPerformanceAudit() {
 
   return (
     <div className="space-y-6 text-[#192133]">
-      <section className="rounded-[30px] border border-[#dbe3fb] bg-[radial-gradient(circle_at_top_left,_rgba(223,232,255,0.95),_rgba(255,255,255,1)_42%,_rgba(241,245,255,0.98)_100%)] p-6 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      <section className="rounded-[26px] border border-[#dbe3fb] bg-[radial-gradient(circle_at_top_left,_rgba(223,232,255,0.95),_rgba(255,255,255,1)_42%,_rgba(241,245,255,0.98)_100%)] p-5 shadow-sm sm:p-6 lg:rounded-[30px]">
+        <div className="flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
           <div className="max-w-3xl space-y-3">
             <p className="text-xs font-black uppercase tracking-[0.32em] text-[#1d3b8b]">Performance Audit</p>
-            <h2 className="font-sans text-[34px] font-semibold leading-[1.08] tracking-[-0.05em] text-[#1737af] sm:text-[40px]">
+            <h2 className="font-sans text-[28px] font-semibold leading-[1.1] tracking-[-0.04em] text-[#1737af] sm:text-[40px]">
               Marks-focused evaluation across all content types.
             </h2>
             <p className="text-[14px] leading-7 text-[#6d7690]">
               AI-based content and program-based content are split separately. Each section shows overall marks first, then first-level category performance. Open a category to view second-level breakdown and AI analysis.
             </p>
+            {globalExamName ? (
+              <p className="text-[12px] font-semibold uppercase tracking-[0.2em] text-[#5f7aa9]">Exam scope: {globalExamName}</p>
+            ) : null}
           </div>
           <div className="rounded-[18px] bg-white px-4 py-3 text-[12px] leading-6 text-[#6c7590] shadow-[0_14px_28px_rgba(21,31,76,0.08)]">
             Updated {formatTimestamp(payload?.generated_at)}

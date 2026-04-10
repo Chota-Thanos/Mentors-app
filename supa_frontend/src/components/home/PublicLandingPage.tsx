@@ -2,15 +2,18 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useState } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
   BriefcaseBusiness,
   Check,
   LayoutGrid,
+  Menu,
   MessageSquareText,
   Sparkles,
   Users,
+  X,
 } from "lucide-react";
 
 import FeaturedContentRail from "@/components/home/FeaturedContentRail";
@@ -163,10 +166,12 @@ function BulletList({ items }: { items: string[] }) {
 }
 
 export default function PublicLandingPage() {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-[#f6f8ff] text-[#192133]">
       <header className="sticky top-0 z-40 border-b border-[rgba(22,32,67,0.05)] bg-[rgba(246,248,255,0.92)] backdrop-blur-md">
-        <div className="mx-auto flex h-[74px] w-full max-w-[1240px] items-center justify-between px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex min-h-[68px] w-full max-w-[1240px] items-center justify-between gap-3 px-4 py-3 sm:h-[74px] sm:px-6 lg:px-8">
           <div className="flex items-center gap-8 lg:gap-12">
             <Link href="/" className="text-[13px] font-semibold tracking-[-0.03em] text-[#17328f]">
               EliteIAS AI
@@ -181,7 +186,7 @@ export default function PublicLandingPage() {
             </nav>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <Link href="/login" className="hidden text-[13px] font-medium text-[#5e6885] transition hover:text-[#17328f] sm:inline-flex">
               Sign in
             </Link>
@@ -191,30 +196,59 @@ export default function PublicLandingPage() {
             >
               Start Learning
             </Link>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((prev) => !prev)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#d7def4] bg-white text-[#17328f] shadow-[0_10px_20px_rgba(21,31,76,0.08)] lg:hidden"
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+            >
+              {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+            </button>
           </div>
         </div>
+        {mobileMenuOpen ? (
+          <div className="border-t border-[rgba(22,32,67,0.06)] bg-white/95 lg:hidden">
+            <nav className="mx-auto grid w-full max-w-[1240px] gap-2 px-4 py-4 sm:px-6">
+              <Link href="#programs" onClick={() => setMobileMenuOpen(false)} className="rounded-2xl border border-[#dce3fb] bg-[#f8faff] px-4 py-3 text-sm font-semibold text-[#17328f]">
+                Programs
+              </Link>
+              <Link href="#support" onClick={() => setMobileMenuOpen(false)} className="rounded-2xl border border-[#dce3fb] bg-[#f8faff] px-4 py-3 text-sm font-semibold text-[#17328f]">
+                Mentorship
+              </Link>
+              <Link href="#tools" onClick={() => setMobileMenuOpen(false)} className="rounded-2xl border border-[#dce3fb] bg-[#f8faff] px-4 py-3 text-sm font-semibold text-[#17328f]">
+                AI Tools
+              </Link>
+              <Link href="#resources" onClick={() => setMobileMenuOpen(false)} className="rounded-2xl border border-[#dce3fb] bg-[#f8faff] px-4 py-3 text-sm font-semibold text-[#17328f]">
+                Resources
+              </Link>
+              <Link href="/login" onClick={() => setMobileMenuOpen(false)} className="rounded-2xl border border-[#dce3fb] bg-white px-4 py-3 text-sm font-semibold text-[#5e6885]">
+                Sign in
+              </Link>
+            </nav>
+          </div>
+        ) : null}
       </header>
 
       <main className="mx-auto w-full max-w-[1240px] px-4 pb-10 pt-8 sm:px-6 sm:pt-12 lg:px-8 lg:pt-16">
-        <section className="grid items-center gap-12 lg:grid-cols-[minmax(0,1.02fr)_minmax(420px,0.98fr)]">
+        <section className="grid items-center gap-8 sm:gap-10 lg:grid-cols-[minmax(0,1.02fr)_minmax(420px,0.98fr)] lg:gap-12">
           <div className="max-w-[560px]">
-            <h1 className="max-w-[520px] font-sans text-[46px] font-extrabold leading-[0.95] tracking-[-0.07em] text-[#1235ae] sm:text-[58px] lg:text-[70px]">
+            <h1 className="max-w-[520px] font-sans text-[34px] font-extrabold leading-[0.98] tracking-[-0.06em] text-[#1235ae] sm:text-[48px] lg:text-[70px]">
               Master the UPSC Exam with Expert Guidance.
             </h1>
-            <p className="mt-6 max-w-[470px] text-[15px] leading-7 text-[#6d7690] sm:text-[16px]">
+            <p className="mt-5 max-w-[470px] text-[14px] leading-6 text-[#6d7690] sm:mt-6 sm:text-[16px] sm:leading-7">
               Access structured Prelims and Mains programs. Connect with experienced mentors. Supplement your strategy
               with AI-powered practice.
             </p>
-            <div className="mt-8 flex flex-wrap gap-4">
+            <div className="mt-7 flex flex-col gap-3 sm:mt-8 sm:flex-row sm:flex-wrap sm:gap-4">
               <Link
                 href="/programs/prelims"
-                className="inline-flex items-center rounded-full bg-[#173aa9] px-5 py-3 text-[13px] font-semibold text-white shadow-[0_15px_28px_rgba(23,58,169,0.24)] transition hover:bg-[#15328f]"
+                className="inline-flex items-center justify-center rounded-full bg-[#173aa9] px-5 py-3 text-[13px] font-semibold text-white shadow-[0_15px_28px_rgba(23,58,169,0.24)] transition hover:bg-[#15328f]"
               >
                 Browse Expert Programs
               </Link>
               <Link
                 href="/mentors/discover"
-                className="inline-flex items-center rounded-full bg-white px-5 py-3 text-[13px] font-semibold text-[#17328f] shadow-[0_14px_28px_rgba(21,31,76,0.08)] transition hover:bg-[#f2f5ff]"
+                className="inline-flex items-center justify-center rounded-full bg-white px-5 py-3 text-[13px] font-semibold text-[#17328f] shadow-[0_14px_28px_rgba(21,31,76,0.08)] transition hover:bg-[#f2f5ff]"
               >
                 Meet Our Mentors
               </Link>
@@ -225,11 +259,11 @@ export default function PublicLandingPage() {
 
         <section
           id="programs"
-          className="mt-16 rounded-[34px] bg-[linear-gradient(180deg,#f1f4ff_0%,#edf1ff_100%)] px-6 py-8 sm:px-8 sm:py-10 lg:mt-24 lg:px-10 lg:py-12"
+          className="mt-14 rounded-[28px] bg-[linear-gradient(180deg,#f1f4ff_0%,#edf1ff_100%)] px-5 py-7 sm:mt-16 sm:px-8 sm:py-10 lg:mt-24 lg:rounded-[34px] lg:px-10 lg:py-12"
         >
-          <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,1fr)_332px] lg:gap-16">
+          <div className="grid items-center gap-8 sm:gap-10 lg:grid-cols-[minmax(0,1fr)_332px] lg:gap-16">
             <div className="max-w-[474px] lg:order-1">
-              <h2 className="font-sans text-[34px] font-semibold leading-[1.06] tracking-[-0.05em] text-[#141b2d] sm:text-[40px]">
+              <h2 className="font-sans text-[28px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] sm:text-[40px]">
                 Build a Strong Foundation for Prelims.
               </h2>
               <p className="mt-4 text-[14px] leading-7 text-[#636b86]">
@@ -262,14 +296,14 @@ export default function PublicLandingPage() {
         />
 
         <section
-          className="mt-14 px-6 py-8 sm:px-8 sm:py-10 lg:mt-16 lg:px-10 lg:py-12"
+          className="mt-12 px-2 py-6 sm:mt-14 sm:px-6 sm:py-8 lg:mt-16 lg:px-10 lg:py-12"
         >
-          <div className="grid items-center gap-12 lg:grid-cols-[332px_minmax(0,1fr)] lg:gap-16">
+          <div className="grid items-center gap-8 sm:gap-10 lg:grid-cols-[332px_minmax(0,1fr)] lg:gap-16">
             <div className="justify-self-center lg:justify-self-start">
               <MainsArtwork />
             </div>
             <div className="max-w-[474px] lg:justify-self-end">
-              <h2 className="font-sans text-[34px] font-semibold leading-[1.06] tracking-[-0.05em] text-[#141b2d] sm:text-[40px]">
+              <h2 className="font-sans text-[28px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] sm:text-[40px]">
                 Master Mains Answer Writing.
               </h2>
               <p className="mt-4 text-[14px] leading-7 text-[#636b86]">
@@ -300,11 +334,11 @@ export default function PublicLandingPage() {
 
         <section
           id="support"
-          className="mt-14 overflow-hidden rounded-[32px] bg-[#171b23] px-5 py-7 text-white sm:px-7 sm:py-9 lg:mt-16 lg:px-8 lg:py-10"
+          className="mt-12 overflow-hidden rounded-[28px] bg-[#171b23] px-5 py-7 text-white sm:mt-14 sm:px-7 sm:py-9 lg:mt-16 lg:rounded-[32px] lg:px-8 lg:py-10"
         >
           <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_330px] lg:items-center">
             <div className="max-w-[560px]">
-              <h2 className="max-w-[450px] font-sans text-[34px] font-semibold leading-[1.04] tracking-[-0.05em] text-white sm:text-[40px]">
+              <h2 className="max-w-[450px] font-sans text-[28px] font-semibold leading-[1.08] tracking-[-0.04em] text-white sm:text-[40px]">
                 Real Human Support When You Need It.
               </h2>
               <p className="mt-5 max-w-[510px] text-[13px] leading-7 text-[#a0a7b8]">
@@ -360,8 +394,8 @@ export default function PublicLandingPage() {
           className="mt-8"
         />
 
-        <section id="tools" className="mt-16 text-center lg:mt-20">
-          <h2 className="font-sans text-[34px] font-semibold leading-[1.08] tracking-[-0.05em] text-[#1737af] sm:text-[40px]">
+        <section id="tools" className="mt-14 text-center lg:mt-20">
+          <h2 className="font-sans text-[28px] font-semibold leading-[1.1] tracking-[-0.04em] text-[#1737af] sm:text-[40px]">
             Smart Tools to Supplement Your Study.
           </h2>
           <p className="mx-auto mt-4 max-w-[620px] text-[14px] leading-7 text-[#6d7690]">
@@ -391,12 +425,12 @@ export default function PublicLandingPage() {
 
         <section
           id="resources"
-          className="relative mt-14 overflow-hidden rounded-[28px] bg-[linear-gradient(135deg,#173bad_0%,#274bb9_65%,#2f57cc_100%)] px-6 py-10 text-center text-white lg:mt-20"
+          className="relative mt-14 overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,#173bad_0%,#274bb9_65%,#2f57cc_100%)] px-5 py-8 text-center text-white sm:px-6 sm:py-10 lg:mt-20 lg:rounded-[28px]"
         >
           <div className="absolute -left-16 bottom-[-72px] h-44 w-44 rounded-full bg-[rgba(255,255,255,0.08)]" />
           <div className="absolute -right-8 top-[-34px] h-28 w-28 rounded-full bg-[rgba(255,255,255,0.08)]" />
           <div className="relative">
-            <h2 className="font-sans text-[38px] font-semibold leading-none tracking-[-0.05em] text-white sm:text-[44px]">
+            <h2 className="font-sans text-[30px] font-semibold leading-[0.96] tracking-[-0.04em] text-white sm:text-[44px]">
               Join Our Expert Panel.
             </h2>
             <p className="mx-auto mt-4 max-w-[540px] text-[14px] leading-7 text-[#dae4ff]">

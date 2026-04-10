@@ -15,6 +15,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { useExamContext } from "@/context/ExamContext";
 import { premiumApi } from "@/lib/premiumApi";
 import type { ProfessionalProfile } from "@/types/premium";
 
@@ -60,6 +61,11 @@ function reviewMeta(profile: ProfessionalProfile): { average: number; total: num
 
 function copyEvaluationEnabled(profile: ProfessionalProfile): boolean {
   return Boolean((profile.meta || {})?.copy_evaluation_enabled);
+}
+
+function matchesExamIds(examIds: number[] | undefined | null, examId: number | null): boolean {
+  if (!examId) return true;
+  return Array.isArray(examIds) && examIds.includes(examId);
 }
 
 function FeaturedMentorCard({ mentor }: { mentor: ProfessionalProfile }) {
@@ -133,6 +139,7 @@ function FeaturedMentorCard({ mentor }: { mentor: ProfessionalProfile }) {
 }
 
 export default function MentorshipLandingView() {
+  const { globalExamId, globalExamName } = useExamContext();
   const [mentors, setMentors] = useState<ProfessionalProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -140,10 +147,13 @@ export default function MentorshipLandingView() {
   useEffect(() => {
     let active = true;
     premiumApi
-      .get<ProfessionalProfile[]>("/mentors/public", { params: { only_verified: true, limit: 6 } })
+      .get<ProfessionalProfile[]>("/mentors/public", {
+        params: { only_verified: true, limit: 6, exam_id: globalExamId || undefined },
+      })
       .then((response) => {
         if (!active) return;
-        setMentors(Array.isArray(response.data) ? response.data : []);
+        const rows = Array.isArray(response.data) ? response.data : [];
+        setMentors(rows.filter((row) => matchesExamIds(row.exam_ids, globalExamId)));
         setError(null);
       })
       .catch((error: unknown) => {
@@ -158,7 +168,7 @@ export default function MentorshipLandingView() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [globalExamId]);
 
   const heroMentor = mentors[0] || null;
   const featuredMentors = useMemo(() => mentors.slice(0, 3), [mentors]);
@@ -180,6 +190,9 @@ export default function MentorshipLandingView() {
             <p className="mt-5 max-w-xl text-[15px] leading-8 text-[#6d7690] sm:text-[16px]">
               Discover verified mains mentors, send a request with your problem statement, chat first, then pay only after acceptance.
             </p>
+            {globalExamName ? (
+              <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5f7aa9]">Exam scope: {globalExamName}</p>
+            ) : null}
 
             <div className="mt-8 flex flex-wrap gap-3">
               <Link

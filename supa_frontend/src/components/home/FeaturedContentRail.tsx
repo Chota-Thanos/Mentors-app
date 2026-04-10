@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Star } from "lucide-react";
 
+import { useExamContext } from "@/context/ExamContext";
 import { premiumApi } from "@/lib/premiumApi";
 import type { ProfessionalProfile, TestSeriesDiscoverySeries } from "@/types/premium";
 
@@ -13,6 +14,11 @@ type MixedItem =
   | { kind: "prelims"; row: TestSeriesDiscoverySeries }
   | { kind: "mains"; row: TestSeriesDiscoverySeries }
   | { kind: "mentors"; row: ProfessionalProfile };
+
+function matchesExamIds(examIds: number[] | undefined | null, examId: number | null): boolean {
+  if (!examId) return true;
+  return Array.isArray(examIds) && examIds.includes(examId);
+}
 
 function toErrorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null && "message" in error) {
@@ -58,16 +64,16 @@ function mentorReviewMeta(profile: ProfessionalProfile): { average: number; tota
   };
 }
 
-async function fetchPrograms(mode: "prelims" | "mains", limit: number): Promise<TestSeriesDiscoverySeries[]> {
+async function fetchPrograms(mode: "prelims" | "mains", limit: number, examId?: number | null): Promise<TestSeriesDiscoverySeries[]> {
   const response = await premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", {
-    params: { limit, series_kind: mode === "mains" ? "mains" : "quiz" },
+    params: { limit, series_kind: mode === "mains" ? "mains" : "quiz", exam_id: examId || undefined },
   });
   return Array.isArray(response.data) ? response.data : [];
 }
 
-async function fetchMentors(limit: number): Promise<ProfessionalProfile[]> {
+async function fetchMentors(limit: number, examId?: number | null): Promise<ProfessionalProfile[]> {
   const response = await premiumApi.get<ProfessionalProfile[]>("/mentors/public", {
-    params: { only_verified: true, limit },
+    params: { only_verified: true, limit, exam_id: examId || undefined },
   });
   return Array.isArray(response.data) ? response.data : [];
 }
@@ -237,6 +243,7 @@ export default function FeaturedContentRail({
   className?: string;
   limit?: number;
 }) {
+  const { globalExamId } = useExamContext();
   const [programRows, setProgramRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [mentorRows, setMentorRows] = useState<ProfessionalProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -250,14 +257,14 @@ export default function FeaturedContentRail({
       setError("");
       try {
         if (mode === "mentors") {
-          const data = await fetchMentors(limit);
+          const data = await fetchMentors(limit, globalExamId);
           if (!active) return;
-          setMentorRows(data);
+          setMentorRows(data.filter((row) => matchesExamIds(row.exam_ids, globalExamId)));
           setProgramRows([]);
         } else {
-          const data = await fetchPrograms(mode, limit);
+          const data = await fetchPrograms(mode, limit, globalExamId);
           if (!active) return;
-          setProgramRows(data);
+          setProgramRows(data.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId)));
           setMentorRows([]);
         }
       } catch (loadError: unknown) {
@@ -274,7 +281,7 @@ export default function FeaturedContentRail({
     return () => {
       active = false;
     };
-  }, [limit, mode]);
+  }, [globalExamId, limit, mode]);
 
   const hasRows = useMemo(
     () => (mode === "mentors" ? mentorRows.length > 0 : programRows.length > 0),
@@ -329,6 +336,7 @@ export function FeaturedMixedRail({
   className?: string;
   limitPerMode?: number;
 }) {
+  const { globalExamId } = useExamContext();
   const [prelimsRows, setPrelimsRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [mainsRows, setMainsRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [mentorRows, setMentorRows] = useState<ProfessionalProfile[]>([]);
@@ -343,14 +351,14 @@ export function FeaturedMixedRail({
       setError("");
       try {
         const [prelims, mains, mentors] = await Promise.all([
-          fetchPrograms("prelims", limitPerMode),
-          fetchPrograms("mains", limitPerMode),
-          fetchMentors(limitPerMode),
+          fetchPrograms("prelims", limitPerMode, globalExamId),
+          fetchPrograms("mains", limitPerMode, globalExamId),
+          fetchMentors(limitPerMode, globalExamId),
         ]);
         if (!active) return;
-        setPrelimsRows(prelims);
-        setMainsRows(mains);
-        setMentorRows(mentors);
+        setPrelimsRows(prelims.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId)));
+        setMainsRows(mains.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId)));
+        setMentorRows(mentors.filter((row) => matchesExamIds(row.exam_ids, globalExamId)));
       } catch (loadError: unknown) {
         if (!active) return;
         setPrelimsRows([]);
@@ -366,7 +374,7 @@ export function FeaturedMixedRail({
     return () => {
       active = false;
     };
-  }, [limitPerMode]);
+  }, [globalExamId, limitPerMode]);
 
   const items = useMemo<MixedItem[]>(() => {
     const output: MixedItem[] = [];

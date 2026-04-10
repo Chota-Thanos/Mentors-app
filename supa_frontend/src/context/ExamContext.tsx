@@ -1,7 +1,6 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
-import axios from "axios";
 import { premiumApi } from "@/lib/premiumApi";
 import type { PremiumExam } from "@/types/premium";
 
@@ -17,10 +16,22 @@ export interface ExamContextState {
 
 const ExamContext = createContext<ExamContextState | undefined>(undefined);
 
+function readStoredExamId(): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const storedId = window.localStorage.getItem("globalExamId");
+    if (!storedId || storedId === "all") return null;
+    const parsed = Number(storedId);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function ExamProvider({ children }: { children: React.ReactNode }) {
   const [exams, setExams] = useState<PremiumExam[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [globalExamId, setGlobalExamId] = useState<number | null>(null);
+  const [globalExamId, setGlobalExamId] = useState<number | null>(() => readStoredExamId());
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {

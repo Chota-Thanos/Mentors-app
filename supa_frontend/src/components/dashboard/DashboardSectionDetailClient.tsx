@@ -15,6 +15,7 @@ import {
 
 import MiniTrendChart from "@/components/dashboard/MiniTrendChart";
 import { useAuth } from "@/context/AuthContext";
+import { useExamContext } from "@/context/ExamContext";
 import { DASHBOARD_CONTENT_TYPES, DASHBOARD_SECTION_META, type DashboardContentType } from "@/lib/dashboardSections";
 import { premiumApi } from "@/lib/premiumApi";
 import type {
@@ -57,6 +58,7 @@ const emptyGroups = {
 
 export default function DashboardSectionDetailClient({ contentType }: { contentType: DashboardContentType }) {
   const { loading: authLoading, isAuthenticated, showLoginModal } = useAuth();
+  const { globalExamId } = useExamContext();
   const [error, setError] = useState("");
   const [analytics, setAnalytics] = useState<DashboardAnalyticsPayload | null>(null);
 
@@ -64,7 +66,9 @@ export default function DashboardSectionDetailClient({ contentType }: { contentT
     if (authLoading || !isAuthenticated) return;
     let active = true;
     premiumApi
-      .get<DashboardAnalyticsPayload>("/user/dashboard-analytics")
+      .get<DashboardAnalyticsPayload>("/user/dashboard-analytics", {
+        params: { exam_id: globalExamId || undefined },
+      })
       .then((response) => {
         if (!active) return;
         setAnalytics(response.data);
@@ -86,7 +90,7 @@ export default function DashboardSectionDetailClient({ contentType }: { contentT
     return () => {
       active = false;
     };
-  }, [authLoading, isAuthenticated]);
+  }, [authLoading, globalExamId, isAuthenticated]);
 
   const loading = authLoading || (isAuthenticated && !analytics && !error);
   const section = analytics?.sections[contentType] ?? null;

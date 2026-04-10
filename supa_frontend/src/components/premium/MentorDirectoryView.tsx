@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
+import { useExamContext } from "@/context/ExamContext";
 import { premiumApi } from "@/lib/premiumApi";
 import type { MentorAvailabilityStatus, ProfessionalProfile } from "@/types/premium";
 
@@ -92,6 +93,11 @@ function statusToneClass(status?: MentorAvailabilityStatus | null): string {
   return "border-[#dbe3f6] bg-[#f6f8ff] text-[#5e6885]";
 }
 
+function matchesExamIds(examIds: number[] | undefined | null, examId: number | null): boolean {
+  if (!examId) return true;
+  return Array.isArray(examIds) && examIds.includes(examId);
+}
+
 function FilterButton({
   active,
   children,
@@ -117,6 +123,7 @@ function FilterButton({
 }
 
 export default function MentorDirectoryView() {
+  const { globalExamId, globalExamName } = useExamContext();
   const [rows, setRows] = useState<ProfessionalProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -129,9 +136,9 @@ export default function MentorDirectoryView() {
     setLoading(true);
     try {
       const response = await premiumApi.get<ProfessionalProfile[]>("/mentors/public", {
-        params: { only_verified: false, limit: 200 },
+        params: { only_verified: false, limit: 200, exam_id: globalExamId || undefined },
       });
-      const mentorRows = Array.isArray(response.data) ? response.data : [];
+      const mentorRows = (Array.isArray(response.data) ? response.data : []).filter((row) => matchesExamIds(row.exam_ids, globalExamId));
       setRows(mentorRows);
 
       const providerUserIds = mentorRows
@@ -167,7 +174,7 @@ export default function MentorDirectoryView() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [globalExamId]);
 
   useEffect(() => {
     void loadMentors();
@@ -228,6 +235,9 @@ export default function MentorDirectoryView() {
             <p className="mt-4 max-w-2xl text-[15px] leading-7 text-[#6d7690]">
               Curated mains expertise for a request-led workflow, with verified filters, live availability, and clear service paths.
             </p>
+            {globalExamName ? (
+              <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5f7aa9]">Exam scope: {globalExamName}</p>
+            ) : null}
           </div>
 
           <div className="flex w-full max-w-xl items-center gap-3">

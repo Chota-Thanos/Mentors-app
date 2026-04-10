@@ -43,6 +43,11 @@ function cn(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
+function matchesExamIds(examIds: number[] | undefined | null, examId: number | null): boolean {
+  if (!examId) return true;
+  return Array.isArray(examIds) && examIds.includes(examId);
+}
+
 function toError(error: unknown): string {
   if (!axios.isAxiosError(error)) return "Unknown error";
   const detail = error.response?.data?.detail;
@@ -492,7 +497,8 @@ export default function TestSeriesCatalogView({
 
         const response = await premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", { params });
         if (!active) return;
-        setSeriesRows(Array.isArray(response.data) ? response.data : []);
+        const rows = Array.isArray(response.data) ? response.data : [];
+        setSeriesRows(rows.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId)));
       } catch (error: unknown) {
         if (!active) return;
         setSeriesRows([]);
