@@ -153,9 +153,9 @@ export default function MyTestsPageClient({ initialTests, canCreateMains }: MyTe
 
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">My Tests</h1>
-        <p className="mt-2 max-w-2xl text-sm text-slate-600 sm:text-base">
+      <section className="rounded-3xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6 shadow-sm sm:p-8">
+        <h1 className="text-3xl font-bold tracking-tight text-[#141b2d] dark:text-white sm:text-4xl">My Tests</h1>
+        <p className="mt-2 max-w-2xl text-sm text-[#636b86] dark:text-gray-300 sm:text-base">
           Create a test, finalize it, and start it from here.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
@@ -175,7 +175,7 @@ export default function MyTestsPageClient({ initialTests, canCreateMains }: MyTe
           ) : null}
           <Link
             href="/challenges"
-            className="inline-flex items-center rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            className="inline-flex items-center rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-5 py-2.5 text-sm font-semibold text-[#334155] dark:text-gray-300 transition hover:bg-[#f8faff] dark:hover:bg-[#0f172a]"
           >
             Public Challenges
           </Link>
@@ -183,13 +183,13 @@ export default function MyTestsPageClient({ initialTests, canCreateMains }: MyTe
       </section>
 
       {tests.length === 0 ? (
-        <section className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">
+        <section className="rounded-3xl border border-dashed border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] px-6 py-16 text-center text-sm text-[#6c7590] dark:text-[#94a3b8]">
           No tests yet.
         </section>
       ) : (
         <section className="space-y-4">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900">Existing Tests</h2>
+            <h2 className="text-xl font-semibold text-[#141b2d] dark:text-white">Existing Tests</h2>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -202,14 +202,14 @@ export default function MyTestsPageClient({ initialTests, canCreateMains }: MyTe
               const challengeLabel = test.is_finalized && test.is_public ? "Challenge" : "Public Challenge";
 
               return (
-                <article key={test.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <article key={test.id} className="rounded-3xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-2">
-                      <Link href={detailHref} className="text-xl font-semibold text-slate-900 transition hover:text-indigo-700">
+                      <Link href={detailHref} className="text-xl font-semibold text-[#141b2d] dark:text-white transition hover:text-indigo-700 dark:hover:text-indigo-400">
                         {test.title}
                       </Link>
                       <div className="flex flex-wrap gap-2 text-xs font-semibold">
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+                        <span className="rounded-full bg-[#eef4ff] dark:bg-[#16213e] px-3 py-1 text-[#334155] dark:text-gray-300">
                           {test.test_kind === "mains" ? "Mains" : "Prelims"}
                         </span>
                         <span
@@ -219,28 +219,28 @@ export default function MyTestsPageClient({ initialTests, canCreateMains }: MyTe
                         >
                           {test.is_finalized ? "Finalized" : "Draft"}
                         </span>
-                        <span className={`rounded-full px-3 py-1 ${test.is_public ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-600"}`}>
+                        <span className={`rounded-full px-3 py-1 ${test.is_public ? "bg-sky-100 text-sky-700" : "bg-[#eef4ff] dark:bg-[#16213e] text-[#636b86] dark:text-gray-400"}`}>
                           {test.is_public ? "Public" : "Private"}
                         </span>
                       </div>
                     </div>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                    <span className="rounded-full bg-[#eef4ff] dark:bg-[#16213e] px-3 py-1 text-xs font-medium text-[#636b86] dark:text-[#94a3b8]">
                       Updated {formatDate(test.updated_at || test.created_at)}
                     </span>
                   </div>
 
                   <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Questions</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900">{statLabel(test.question_count)}</p>
+                    <div className="rounded-2xl bg-[#f8faff] dark:bg-[#0f172a] px-4 py-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Questions</p>
+                      <p className="mt-1 text-sm font-semibold text-[#141b2d] dark:text-white">{statLabel(test.question_count)}</p>
                     </div>
-                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Access</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900">{test.is_premium ? "Premium" : "Free"}</p>
+                    <div className="rounded-2xl bg-[#f8faff] dark:bg-[#0f172a] px-4 py-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Access</p>
+                      <p className="mt-1 text-sm font-semibold text-[#141b2d] dark:text-white">{test.is_premium ? "Premium" : "Free"}</p>
                     </div>
-                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Status</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900">{test.is_finalized ? "Ready to start" : "Needs finalizing"}</p>
+                    <div className="rounded-2xl bg-[#f8faff] dark:bg-[#0f172a] px-4 py-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Status</p>
+                      <p className="mt-1 text-sm font-semibold text-[#141b2d] dark:text-white">{test.is_finalized ? "Ready to start" : "Needs finalizing"}</p>
                     </div>
                   </div>
 
@@ -265,7 +265,7 @@ export default function MyTestsPageClient({ initialTests, canCreateMains }: MyTe
 
                     <Link
                       href={editHref}
-                      className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      className="inline-flex items-center rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-4 py-2.5 text-sm font-semibold text-[#334155] dark:text-gray-300 transition hover:bg-[#f8faff] dark:hover:bg-[#0f172a]"
                     >
                       Edit
                     </Link>

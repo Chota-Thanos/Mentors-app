@@ -665,7 +665,7 @@ export default function TestSeriesConsole() {
                       <div className="bg-gradient-to-b from-white to-[#f7f9ff] dark:from-[#0b1120] dark:to-[#0f172a] px-4 py-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="truncate text-base font-black tracking-tight text-[#091a4a]">{series.title}</p>
+                            <p className="truncate text-base font-black tracking-tight text-[#141b2d] dark:text-white">{series.title}</p>
                             <p className="mt-1 text-xs text-[#636b86] dark:text-gray-300">
                               {series.test_count} tests
                             </p>
@@ -776,7 +776,7 @@ export default function TestSeriesConsole() {
                   <div className="bg-gradient-to-b from-white to-[#f7f9ff] dark:from-[#0b1120] dark:to-[#0f172a] px-5 py-5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <h2 className="text-xl font-black tracking-tight text-[#091a4a]">{series.title}</h2>
+                        <h2 className="text-xl font-black tracking-tight text-[#141b2d] dark:text-white">{series.title}</h2>
                         <p className="mt-2 max-w-3xl text-sm leading-6 text-[#636b86] dark:text-gray-300">{richTextToPlainText(series.description || "") || "No description."}</p>
                       </div>
                       <div className="flex flex-wrap gap-2">

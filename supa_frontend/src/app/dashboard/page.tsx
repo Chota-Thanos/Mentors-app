@@ -170,10 +170,10 @@ function resolveDashboardKind(user: unknown): DashboardKind {
 
 function StatCard({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-5">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-2 text-3xl font-black text-slate-900">{value}</p>
-      {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
+    <article className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5">
+      <p className="text-xs font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">{label}</p>
+      <p className="mt-2 text-3xl font-black text-[#141b2d] dark:text-white">{value}</p>
+      {hint ? <p className="mt-1 text-xs text-[#6c7590] dark:text-[#94a3b8]">{hint}</p> : null}
     </article>
   );
 }
@@ -202,7 +202,7 @@ function plainTextExcerpt(value?: string | null, fallback = "No problem statemen
 function issueBadgeClass(issue: LifecycleTrackingIssue): string {
   if (issue.severity === "critical") return "border-rose-300 bg-rose-50 text-rose-800";
   if (issue.severity === "warning") return "border-amber-300 bg-amber-50 text-amber-800";
-  return "border-slate-300 bg-slate-50 text-slate-700";
+  return "border-slate-300 bg-[#f8faff] dark:bg-[#0f172a] text-[#334155] dark:text-gray-200";
 }
 
 function formatSeriesKindLabel(value?: string | null): string {
@@ -279,7 +279,7 @@ function requestStatusBadgeClass(status?: string | null): string {
   if (normalized === "rejected" || normalized === "cancelled" || normalized === "expired") {
     return "border-rose-300 bg-rose-50 text-rose-800";
   }
-  return "border-slate-300 bg-slate-50 text-slate-700";
+  return "border-slate-300 bg-[#f8faff] dark:bg-[#0f172a] text-[#334155] dark:text-gray-200";
 }
 
 function paymentStatusBadgeClass(status?: string | null): string {
@@ -287,7 +287,7 @@ function paymentStatusBadgeClass(status?: string | null): string {
   if (normalized === "paid") return "border-emerald-300 bg-emerald-50 text-emerald-800";
   if (normalized === "pending") return "border-amber-300 bg-amber-50 text-amber-800";
   if (normalized === "failed" || normalized === "refunded") return "border-rose-300 bg-rose-50 text-rose-800";
-  return "border-slate-300 bg-slate-50 text-slate-700";
+  return "border-slate-300 bg-[#f8faff] dark:bg-[#0f172a] text-[#334155] dark:text-gray-200";
 }
 
 function sessionDurationMinutes(session: MentorshipSession): number | null {
@@ -803,20 +803,20 @@ export default function DashboardPage() {
         {roleWorkspaceSidebar}
         <div className="min-w-0 space-y-8">
         <header className="space-y-2">
-          <h1 className="text-3xl font-black tracking-tight text-slate-900">{copy.title}</h1>
-          <p className="text-slate-600">{copy.subtitle}</p>
+          <h1 className="text-3xl font-black tracking-tight text-[#141b2d] dark:text-white">{copy.title}</h1>
+          <p className="text-[#636b86] dark:text-gray-300">{copy.subtitle}</p>
         </header>
 
         {loading ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-slate-600 flex items-center gap-3">
+          <div className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-8 text-[#636b86] dark:text-gray-300 flex items-center gap-3">
             <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
             Loading workspace...
           </div>
         ) : null}
 
         {!loading && !isAuthenticated ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 space-y-4">
-            <p className="text-slate-700">Login is required to view your performance evaluation and workspace.</p>
+          <div className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-8 space-y-4">
+            <p className="text-[#334155] dark:text-gray-200">Login is required to view your performance evaluation and workspace.</p>
             <button type="button" onClick={showLoginModal} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
               Login
             </button>
@@ -841,7 +841,7 @@ export default function DashboardPage() {
                 <div className="max-w-3xl space-y-3">
                   <p className="text-xs font-black uppercase tracking-[0.32em] text-[#1d3b8b]">Mains Mentor Workspace</p>
                   <h2 className="text-3xl font-black tracking-tight text-[#091a4a]">Mains Mentor Workspace</h2>
-                  <p className="text-sm text-slate-600">Track pending reviews, learner requests, and today’s consultations from one clean workspace.</p>
+                  <p className="text-sm text-[#636b86] dark:text-gray-300">Track pending reviews, learner requests, and today’s consultations from one clean workspace.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link href="/programs/create" className="inline-flex items-center rounded-full bg-[#091a4a] px-4 py-2 text-xs font-semibold text-white shadow-sm shadow-[#091a4a]/20">
@@ -850,10 +850,10 @@ export default function DashboardPage() {
                   <Link href="/mains-mentor/ai-mains" className="inline-flex items-center rounded-full border border-indigo-300 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-700">
                     AI Mains Parse + Create
                   </Link>
-                  <Link href="/mentorship/manage" className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700">
+                  <Link href="/mentorship/manage" className="inline-flex items-center rounded-full border border-slate-300 bg-white dark:bg-[#0b1120] px-4 py-2 text-xs font-semibold text-[#334155] dark:text-gray-200">
                     Open Mentorship Desk
                   </Link>
-                  <Link href="/profile/professional" className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700">
+                  <Link href="/profile/professional" className="inline-flex items-center rounded-full border border-slate-300 bg-white dark:bg-[#0b1120] px-4 py-2 text-xs font-semibold text-[#334155] dark:text-gray-200">
                     Professional Profile
                   </Link>
                 </div>
@@ -866,20 +866,20 @@ export default function DashboardPage() {
                       <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-300">Evaluations Pending</p>
                       <p className="mt-3 text-5xl font-black tracking-tight">{mentorEvaluationQueue}</p>
                     </div>
-                    <div className="rounded-[22px] bg-white/10 p-4 text-white">
+                    <div className="rounded-[22px] bg-white dark:bg-[#0b1120]/10 p-4 text-white">
                       <ClipboardCheck className="h-8 w-8" />
                     </div>
                   </div>
                   <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                    <div className="rounded-2xl border border-white/10 bg-white dark:bg-[#0b1120]/5 p-3">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">Upcoming Sessions</p>
                       <p className="mt-2 text-2xl font-black">{mentorUpcomingSessions}</p>
                     </div>
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                    <div className="rounded-2xl border border-white/10 bg-white dark:bg-[#0b1120]/5 p-3">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">Completed Sessions</p>
                       <p className="mt-2 text-2xl font-black">{mentorCompletedSessions}</p>
                     </div>
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                    <div className="rounded-2xl border border-white/10 bg-white dark:bg-[#0b1120]/5 p-3">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">Delayed Items</p>
                       <p className="mt-2 text-2xl font-black">{mentorDelayed}</p>
                     </div>
@@ -889,7 +889,7 @@ export default function DashboardPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <article className="rounded-[24px] border border-sky-200 bg-sky-100/70 p-5">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="rounded-2xl bg-white/70 p-3 text-sky-700">
+                      <div className="rounded-2xl bg-white dark:bg-[#0b1120]/70 p-3 text-sky-700">
                         <MessagesSquare className="h-6 w-6" />
                       </div>
                       <p className="text-4xl font-black tracking-tight text-[#091a4a]">{mentorPendingLearnerCount}</p>
@@ -897,44 +897,44 @@ export default function DashboardPage() {
                     <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-sky-900">Learners Awaiting Review</p>
                   </article>
 
-                  <article className="rounded-[24px] border border-slate-200 bg-white p-5">
+                  <article className="rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="rounded-2xl bg-slate-100 p-3 text-[#091a4a]">
+                      <div className="rounded-2xl bg-[#eef4ff] dark:bg-[#16213e] p-3 text-[#091a4a]">
                         <CalendarDays className="h-6 w-6" />
                       </div>
                       <p className="text-4xl font-black tracking-tight text-[#091a4a]">{mentorConsultationsToday}</p>
                     </div>
-                    <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Consultations Today</p>
+                    <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-[#6c7590] dark:text-[#94a3b8]">Consultations Today</p>
                   </article>
 
-                  <article className="rounded-[24px] border border-slate-200 bg-white p-5">
+                  <article className="rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="rounded-2xl bg-slate-100 p-3 text-[#091a4a]">
+                      <div className="rounded-2xl bg-[#eef4ff] dark:bg-[#16213e] p-3 text-[#091a4a]">
                         <Users className="h-6 w-6" />
                       </div>
                       <p className="text-4xl font-black tracking-tight text-[#091a4a]">{mentorAwaitingPayment}</p>
                     </div>
-                    <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Awaiting Payment</p>
+                    <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-[#6c7590] dark:text-[#94a3b8]">Awaiting Payment</p>
                   </article>
 
-                  <article className="rounded-[24px] border border-slate-200 bg-white p-5">
+                  <article className="rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="rounded-2xl bg-slate-100 p-3 text-[#091a4a]">
+                      <div className="rounded-2xl bg-[#eef4ff] dark:bg-[#16213e] p-3 text-[#091a4a]">
                         <BookOpenText className="h-6 w-6" />
                       </div>
                       <p className="text-4xl font-black tracking-tight text-[#091a4a]">{mentorActiveSeriesCount}</p>
                     </div>
-                    <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Active Mains Programs</p>
+                    <p className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-[#6c7590] dark:text-[#94a3b8]">Active Mains Programs</p>
                   </article>
                 </div>
               </div>
             </section>
 
-            <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+            <section className="rounded-[28px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-2xl font-black tracking-tight text-slate-900">Mentorship Requests Snapshot</h2>
-                  <p className="mt-1 text-sm text-slate-500">Open the latest learner cards here, then jump into the full desk for chat, payment, and scheduling.</p>
+                  <h2 className="text-2xl font-black tracking-tight text-[#141b2d] dark:text-white">Mentorship Requests Snapshot</h2>
+                  <p className="mt-1 text-sm text-[#6c7590] dark:text-[#94a3b8]">Open the latest learner cards here, then jump into the full desk for chat, payment, and scheduling.</p>
                 </div>
                 <Link href="/mentorship/manage" className="inline-flex items-center rounded-full bg-[#091a4a] px-4 py-2 text-xs font-semibold text-white">
                   Open Mentor Desk
@@ -943,7 +943,7 @@ export default function DashboardPage() {
               </div>
               <div className="mt-5 space-y-4">
                 {mentorPendingLearnerCards.slice(0, 4).map((card) => (
-                  <article key={`mentor-pending-${card.userId}`} className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
+                  <article key={`mentor-pending-${card.userId}`} className="rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a]/80 p-4">
                     <div className="flex items-start gap-4">
                       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-100 text-sm font-black text-[#091a4a]">
                         {card.initials}
@@ -951,8 +951,8 @@ export default function DashboardPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="truncate text-lg font-black tracking-tight text-slate-900">{card.name}</p>
-                            <p className="truncate text-sm text-slate-500">{card.email || "Mentorship request in queue"}</p>
+                            <p className="truncate text-lg font-black tracking-tight text-[#141b2d] dark:text-white">{card.name}</p>
+                            <p className="truncate text-sm text-[#6c7590] dark:text-[#94a3b8]">{card.email || "Mentorship request in queue"}</p>
                           </div>
                           <div className="flex flex-wrap gap-2">
                             {card.unreadCount > 0 ? (
@@ -970,26 +970,26 @@ export default function DashboardPage() {
                         </div>
 
                         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                          <div className="rounded-2xl border border-slate-200 bg-white p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Program Context</p>
-                            <p className="mt-1 font-semibold text-slate-800">{card.seriesTitle}</p>
-                            {card.testTitle ? <p className="mt-1 text-xs text-slate-500">{card.testTitle}</p> : null}
+                          <div className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Program Context</p>
+                            <p className="mt-1 font-semibold text-[#141b2d] dark:text-gray-100">{card.seriesTitle}</p>
+                            {card.testTitle ? <p className="mt-1 text-xs text-[#6c7590] dark:text-[#94a3b8]">{card.testTitle}</p> : null}
                           </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Request Focus</p>
-                            <p className="mt-1 font-semibold text-slate-800">{card.serviceLabel}</p>
-                            <p className="mt-1 text-xs text-slate-500">
+                          <div className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Request Focus</p>
+                            <p className="mt-1 font-semibold text-[#141b2d] dark:text-gray-100">{card.serviceLabel}</p>
+                            <p className="mt-1 text-xs text-[#6c7590] dark:text-[#94a3b8]">
                               Preferred mode: {titleCaseLabel(card.latestRequest.preferred_mode)}
                               {card.requestCount > 1 ? ` | ${card.requestCount} open requests` : ""}
                             </p>
                           </div>
                         </div>
 
-                        <p className="mt-4 text-sm leading-6 text-slate-600">{card.note}</p>
+                        <p className="mt-4 text-sm leading-6 text-[#636b86] dark:text-gray-300">{card.note}</p>
 
                         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                          <p className="text-xs text-slate-500">Submitted {formatDateTime(card.latestRequest.requested_at)}</p>
-                          <Link href="/mentorship/manage" className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700">
+                          <p className="text-xs text-[#6c7590] dark:text-[#94a3b8]">Submitted {formatDateTime(card.latestRequest.requested_at)}</p>
+                          <Link href="/mentorship/manage" className="inline-flex items-center rounded-full border border-slate-300 bg-white dark:bg-[#0b1120] px-3.5 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">
                             Review in Desk
                           </Link>
                         </div>
@@ -998,34 +998,34 @@ export default function DashboardPage() {
                   </article>
                 ))}
                 {mentorPendingLearnerCards.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                  <p className="rounded-2xl border border-dashed border-slate-300 bg-[#f8faff] dark:bg-[#0f172a] px-4 py-6 text-sm text-[#6c7590] dark:text-[#94a3b8]">
                     No new learners are waiting for mentorship review right now.
                   </p>
                 ) : null}
               </div>
             </section>
 
-            <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+            <section className="rounded-[28px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-2xl font-black tracking-tight text-slate-900">{mentorSessionSectionTitle}</h2>
-                  <p className="mt-1 text-sm text-slate-500">Keep the next live or scheduled consultations visible without opening the full calendar.</p>
+                  <h2 className="text-2xl font-black tracking-tight text-[#141b2d] dark:text-white">{mentorSessionSectionTitle}</h2>
+                  <p className="mt-1 text-sm text-[#6c7590] dark:text-[#94a3b8]">Keep the next live or scheduled consultations visible without opening the full calendar.</p>
                 </div>
-                <Link href="/mentorship/manage" className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700">
+                <Link href="/mentorship/manage" className="inline-flex items-center rounded-full border border-slate-300 bg-white dark:bg-[#0b1120] px-4 py-2 text-xs font-semibold text-[#334155] dark:text-gray-200">
                   Open Schedule
                 </Link>
               </div>
               <div className="mt-5 space-y-4">
                 {mentorSessionCards.map((card) => (
-                  <article key={`mentor-session-${card.session.id}`} className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
+                  <article key={`mentor-session-${card.session.id}`} className="rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a]/80 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#dff7ff] text-sm font-black text-[#086f8c]">
                           {card.initials}
                         </div>
                         <div className="min-w-0">
-                          <p className="truncate text-lg font-black tracking-tight text-slate-900">{card.name}</p>
-                          <p className="truncate text-sm text-slate-500">{card.seriesTitle}</p>
+                          <p className="truncate text-lg font-black tracking-tight text-[#141b2d] dark:text-white">{card.name}</p>
+                          <p className="truncate text-sm text-[#6c7590] dark:text-[#94a3b8]">{card.seriesTitle}</p>
                         </div>
                       </div>
                       <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${requestStatusBadgeClass(card.session.status)}`}>
@@ -1033,49 +1033,49 @@ export default function DashboardPage() {
                       </span>
                     </div>
 
-                    <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-600">
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5">
-                        <CalendarDays className="h-4 w-4 text-slate-500" />
+                    <div className="mt-4 flex flex-wrap gap-3 text-sm text-[#636b86] dark:text-gray-300">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] px-3 py-1.5">
+                        <CalendarDays className="h-4 w-4 text-[#6c7590] dark:text-[#94a3b8]" />
                         {formatDateTime(card.session.starts_at)}
                       </span>
                       {card.durationMinutes ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5">
-                          <Clock3 className="h-4 w-4 text-slate-500" />
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] px-3 py-1.5">
+                          <Clock3 className="h-4 w-4 text-[#6c7590] dark:text-[#94a3b8]" />
                           {card.durationMinutes} mins
                         </span>
                       ) : null}
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5">
-                        <MessagesSquare className="h-4 w-4 text-slate-500" />
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] px-3 py-1.5">
+                        <MessagesSquare className="h-4 w-4 text-[#6c7590] dark:text-[#94a3b8]" />
                         {card.serviceLabel}
                       </span>
                     </div>
 
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-xs text-slate-500">{card.email || "Mentorship session ready"}</p>
-                      <Link href={`/mentorship/session/${card.session.id}?autojoin=1`} className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700">
+                      <p className="text-xs text-[#6c7590] dark:text-[#94a3b8]">{card.email || "Mentorship session ready"}</p>
+                      <Link href={`/mentorship/session/${card.session.id}?autojoin=1`} className="inline-flex items-center rounded-full border border-slate-300 bg-white dark:bg-[#0b1120] px-3.5 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">
                         {card.session.status === "live" ? "Join Call" : "Open Call"}
                       </Link>
                     </div>
                   </article>
                 ))}
                 {mentorSessionCards.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                  <p className="rounded-2xl border border-dashed border-slate-300 bg-[#f8faff] dark:bg-[#0f172a] px-4 py-6 text-sm text-[#6c7590] dark:text-[#94a3b8]">
                     No consultations have been scheduled yet.
                   </p>
                 ) : null}
               </div>
             </section>
 
-            <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+            <section className="rounded-[28px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="text-2xl font-black tracking-tight text-slate-900">{mentorEvaluationSectionTitle}</h2></div>
-                <Link href="/mentorship/manage" className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700">
+                <div><h2 className="text-2xl font-black tracking-tight text-[#141b2d] dark:text-white">{mentorEvaluationSectionTitle}</h2></div>
+                <Link href="/mentorship/manage" className="inline-flex items-center rounded-full border border-slate-300 bg-white dark:bg-[#0b1120] px-4 py-2 text-xs font-semibold text-[#334155] dark:text-gray-200">
                   Open Evaluation Desk
                 </Link>
               </div>
               <div className="mt-5 space-y-4">
                 {mentorEvaluationCards.map((card) => (
-                  <article key={`mentor-eval-${card.userId}-${card.latestRequest.id}`} className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
+                  <article key={`mentor-eval-${card.userId}-${card.latestRequest.id}`} className="rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a]/80 p-4">
                     <div className="flex items-start gap-4">
                       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#091a4a]">
                         <FileText className="h-5 w-5" />
@@ -1083,27 +1083,27 @@ export default function DashboardPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="truncate text-lg font-black tracking-tight text-slate-900">{card.name}</p>
-                            <p className="truncate text-sm text-slate-500">{card.email || card.seriesTitle}</p>
+                            <p className="truncate text-lg font-black tracking-tight text-[#141b2d] dark:text-white">{card.name}</p>
+                            <p className="truncate text-sm text-[#6c7590] dark:text-[#94a3b8]">{card.email || card.seriesTitle}</p>
                           </div>
                           <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${card.latestRequest.feedback_ready_at ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
                             {card.latestRequest.feedback_ready_at ? "Feedback Ready" : "Needs Review"}
                           </span>
                         </div>
 
-                        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Evaluation Context</p>
-                          <p className="mt-1 font-semibold text-slate-800">{card.seriesTitle}</p>
-                          <p className="mt-1 text-xs text-slate-500">{card.testTitle || card.serviceLabel}</p>
+                        <div className="mt-4 rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Evaluation Context</p>
+                          <p className="mt-1 font-semibold text-[#141b2d] dark:text-gray-100">{card.seriesTitle}</p>
+                          <p className="mt-1 text-xs text-[#6c7590] dark:text-[#94a3b8]">{card.testTitle || card.serviceLabel}</p>
                         </div>
 
-                        <p className="mt-4 text-sm leading-6 text-slate-600">{card.note}</p>
+                        <p className="mt-4 text-sm leading-6 text-[#636b86] dark:text-gray-300">{card.note}</p>
 
                         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                          <p className="text-xs text-slate-500">
+                          <p className="text-xs text-[#6c7590] dark:text-[#94a3b8]">
                             {card.latestRequest.feedback_ready_at ? "Updated" : "Submitted"} {formatDateTime(card.latestRequest.feedback_ready_at || card.latestRequest.updated_at || card.latestRequest.requested_at)}
                           </p>
-                          <Link href="/mentorship/manage" className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700">
+                          <Link href="/mentorship/manage" className="inline-flex items-center rounded-full border border-slate-300 bg-white dark:bg-[#0b1120] px-3.5 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">
                             Review Work
                           </Link>
                         </div>
@@ -1112,16 +1112,16 @@ export default function DashboardPage() {
                   </article>
                 ))}
                 {mentorEvaluationCards.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                  <p className="rounded-2xl border border-dashed border-slate-300 bg-[#f8faff] dark:bg-[#0f172a] px-4 py-6 text-sm text-[#6c7590] dark:text-[#94a3b8]">
                     No evaluation work is pending right now.
                   </p>
                 ) : null}
               </div>
             </section>
 
-            <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+            <section className="rounded-[28px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="text-2xl font-black tracking-tight text-slate-900">Mains Program Workspace</h2></div>
+                <div><h2 className="text-2xl font-black tracking-tight text-[#141b2d] dark:text-white">Mains Program Workspace</h2></div>
                 <Link href="/programs" className="inline-flex items-center rounded-full bg-[#091a4a] px-4 py-2 text-xs font-semibold text-white">
                   Manage Programs
                   <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
@@ -1129,14 +1129,14 @@ export default function DashboardPage() {
               </div>
               <div className="mt-5 grid gap-4 md:grid-cols-2">
                 {mentorFeaturedSeries.map((series) => (
-                  <article key={series.id} className="overflow-hidden rounded-[24px] border border-slate-200 bg-white">
+                  <article key={series.id} className="overflow-hidden rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120]">
                     <div
                       className={`relative h-44 ${series.cover_image_url ? "bg-cover bg-center" : "bg-[linear-gradient(135deg,#091a4a_0%,#18378d_55%,#8be1f0_100%)]"}`}
                       style={series.cover_image_url ? { backgroundImage: `linear-gradient(180deg, rgba(9,26,74,0.05), rgba(9,26,74,0.82)), url(${series.cover_image_url})` } : undefined}
                     >
                       {!series.cover_image_url ? (
                         <div className="absolute inset-0 flex items-end justify-between p-4 text-white">
-                          <div className="rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em]">
+                          <div className="rounded-2xl bg-white dark:bg-[#0b1120]/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em]">
                             {formatSeriesKindLabel(series.series_kind)}
                           </div>
                           <FileText className="h-7 w-7 text-white/80" />
@@ -1144,22 +1144,22 @@ export default function DashboardPage() {
                       ) : null}
                       <div className="absolute inset-x-0 bottom-0 p-4 text-white">
                         <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em]">
-                          <span className="rounded-full bg-white/15 px-2.5 py-1">{titleCaseLabel(series.access_type)}</span>
-                          <span className="rounded-full bg-white/15 px-2.5 py-1">{series.is_public ? "Public" : "Private"}</span>
-                          <span className="rounded-full bg-white/15 px-2.5 py-1">{series.is_active ? "Active" : "Archived"}</span>
+                          <span className="rounded-full bg-white dark:bg-[#0b1120]/15 px-2.5 py-1">{titleCaseLabel(series.access_type)}</span>
+                          <span className="rounded-full bg-white dark:bg-[#0b1120]/15 px-2.5 py-1">{series.is_public ? "Public" : "Private"}</span>
+                          <span className="rounded-full bg-white dark:bg-[#0b1120]/15 px-2.5 py-1">{series.is_active ? "Active" : "Archived"}</span>
                         </div>
                         <h3 className="mt-3 text-2xl font-black tracking-tight">{series.title}</h3>
                       </div>
                     </div>
                     <div className="p-5">
-                      <p className="text-sm leading-6 text-slate-600">
+                      <p className="text-sm leading-6 text-[#636b86] dark:text-gray-300">
                         {plainTextExcerpt(series.description, "No description added.")}
                       </p>
                       <div className="mt-4 flex flex-wrap gap-2">
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                        <span className="rounded-full border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-3 py-1 text-xs font-semibold text-[#636b86] dark:text-gray-300">
                           {series.test_count} tests
                         </span>
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                        <span className="rounded-full border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-3 py-1 text-xs font-semibold text-[#636b86] dark:text-gray-300">
                           Updated {formatDateTime(series.updated_at || series.created_at)}
                         </span>
                       </div>
@@ -1167,7 +1167,7 @@ export default function DashboardPage() {
                         <Link href={`/programs/${series.id}/manage`} className="inline-flex items-center rounded-full bg-[#091a4a] px-4 py-2 text-xs font-semibold text-white">
                           Manage
                         </Link>
-                        <Link href={`/programs/${series.id}`} className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700">
+                        <Link href={`/programs/${series.id}`} className="inline-flex items-center rounded-full border border-slate-300 bg-white dark:bg-[#0b1120] px-4 py-2 text-xs font-semibold text-[#334155] dark:text-gray-200">
                           Open Series
                         </Link>
                       </div>
@@ -1175,7 +1175,7 @@ export default function DashboardPage() {
                   </article>
                 ))}
                 {mentorFeaturedSeries.length === 0 ? (
-                  <p className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                  <p className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-[#f8faff] dark:bg-[#0f172a] px-4 py-6 text-sm text-[#6c7590] dark:text-[#94a3b8]">
                     No mains series created yet. Create your first program to populate this workspace preview.
                   </p>
                 ) : null}
@@ -1197,9 +1197,9 @@ export default function DashboardPage() {
               />
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-6">
+            <section className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-bold text-slate-900">Quiz Master Actions</h2>
+                <h2 className="text-lg font-bold text-[#141b2d] dark:text-white">Quiz Master Actions</h2>
                 <div className="flex flex-wrap gap-2">
                   <Link href="/programs/create" className="inline-flex items-center rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">
                     Create Prelims Series
@@ -1210,14 +1210,14 @@ export default function DashboardPage() {
                   <Link href="/quiz-master/complaints" className="inline-flex items-center rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
                     Question Complaints
                   </Link>
-                  <Link href="/programs/prelims" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+                  <Link href="/programs/prelims" className="inline-flex items-center rounded-md border border-slate-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">
                     Browse Prelims
                   </Link>
-                  <Link href="/profile/professional" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+                  <Link href="/profile/professional" className="inline-flex items-center rounded-md border border-slate-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">
                     Professional Profile
                   </Link>
                   {currentUserId ? (
-                    <Link href={`/profiles/${currentUserId}`} className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+                    <Link href={`/profiles/${currentUserId}`} className="inline-flex items-center rounded-md border border-slate-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">
                       Public Profile + Reviews
                     </Link>
                   ) : null}
@@ -1225,48 +1225,48 @@ export default function DashboardPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-6">
+            <section className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-bold text-slate-900">Created Prelims Series + Enrollments</h2>
-                <Link href="/programs" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Manage Programs</Link>
+                <h2 className="text-lg font-bold text-[#141b2d] dark:text-white">Created Prelims Series + Enrollments</h2>
+                <Link href="/programs" className="inline-flex items-center rounded-md border border-slate-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">Manage Programs</Link>
               </div>
               <div className="mt-3 space-y-2">
                 {quizMasterData.seriesInsights.slice(0, 12).map((insight) => (
-                  <article key={insight.series.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                  <article key={insight.series.id} className="rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-3 py-2 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="font-semibold text-slate-800">{insight.series.title}</p>
-                      <span className="text-xs text-slate-500">{insight.series.test_count} tests</span>
+                      <p className="font-semibold text-[#141b2d] dark:text-gray-100">{insight.series.title}</p>
+                      <span className="text-xs text-[#6c7590] dark:text-[#94a3b8]">{insight.series.test_count} tests</span>
                     </div>
-                    <p className="text-xs text-slate-600">
+                    <p className="text-xs text-[#636b86] dark:text-gray-300">
                       {insight.series.series_kind} | {insight.series.access_type} | {insight.series.is_public ? "public" : "private"} | {insight.series.is_active ? "active" : "archived"}
                     </p>
-                    <p className="mt-1 text-xs text-slate-600">
+                    <p className="mt-1 text-xs text-[#636b86] dark:text-gray-300">
                       Enrollments: {insight.totalEnrollments} total | {insight.activeEnrollments} active
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <Link href={`/programs/${insight.series.id}/manage`} className="inline-flex items-center rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">Manage</Link>
-                      <Link href={`/programs/${insight.series.id}`} className="inline-flex items-center rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">Open</Link>
+                      <Link href={`/programs/${insight.series.id}/manage`} className="inline-flex items-center rounded border border-slate-300 bg-white dark:bg-[#0b1120] px-2.5 py-1 text-xs font-semibold text-[#334155] dark:text-gray-200">Manage</Link>
+                      <Link href={`/programs/${insight.series.id}`} className="inline-flex items-center rounded border border-slate-300 bg-white dark:bg-[#0b1120] px-2.5 py-1 text-xs font-semibold text-[#334155] dark:text-gray-200">Open</Link>
                     </div>
                   </article>
                 ))}
-                {quizMasterData.seriesInsights.length === 0 ? <p className="text-sm text-slate-500">No prelims series created yet.</p> : null}
+                {quizMasterData.seriesInsights.length === 0 ? <p className="text-sm text-[#6c7590] dark:text-[#94a3b8]">No prelims series created yet.</p> : null}
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-6">
+            <section className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-bold text-slate-900">Issues Raised By Enrolled Students</h2>
-                <Link href="/programs" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+                <h2 className="text-lg font-bold text-[#141b2d] dark:text-white">Issues Raised By Enrolled Students</h2>
+                <Link href="/programs" className="inline-flex items-center rounded-md border border-slate-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">
                   Open Series Workspace
                 </Link>
               </div>
               <div className="mt-3 space-y-2">
                 {quizMasterIssueRows.slice(0, 14).map((row) => (
-                  <article key={row.user_id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                    <p className="font-semibold text-slate-800">
+                  <article key={row.user_id} className="rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-3 py-2 text-sm">
+                    <p className="font-semibold text-[#141b2d] dark:text-gray-100">
                       User {row.user_id} | Enrollments {row.enrolled_series_count} | Attempts {row.attempted_tests}
                     </p>
-                    <p className="text-xs text-slate-600">
+                    <p className="text-xs text-[#636b86] dark:text-gray-300">
                       Technical issues: {row.technical_issue_count} | Delays: {row.delay_count} | Pending checks: {row.pending_copy_checks} | Last activity: {formatDateTime(row.last_activity_at)}
                     </p>
                     {row.issues.length > 0 ? (
@@ -1280,7 +1280,7 @@ export default function DashboardPage() {
                     ) : null}
                   </article>
                 ))}
-                {quizMasterIssueRows.length === 0 ? <p className="text-sm text-slate-500">No student issues raised yet.</p> : null}
+                {quizMasterIssueRows.length === 0 ? <p className="text-sm text-[#6c7590] dark:text-[#94a3b8]">No student issues raised yet.</p> : null}
               </div>
             </section>
           </>
@@ -1297,18 +1297,18 @@ export default function DashboardPage() {
               <StatCard label="Technical Issues" value={moderatorData.tracking.summary.technical_issues} hint={`Cycles ${moderatorData.tracking.summary.mentorship_cycles}`} />
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-6">
+            <section className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-bold text-slate-900">User Lifecycle Tracking</h2>
-                <Link href="/programs" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Open Programs Console</Link>
+                <h2 className="text-lg font-bold text-[#141b2d] dark:text-white">User Lifecycle Tracking</h2>
+                <Link href="/programs" className="inline-flex items-center rounded-md border border-slate-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">Open Programs Console</Link>
               </div>
               <div className="mt-3 space-y-2">
                 {moderatorData.tracking.user_rows.slice(0, 14).map((row) => (
-                  <article key={row.user_id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                    <p className="font-semibold text-slate-800">
+                  <article key={row.user_id} className="rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-3 py-2 text-sm">
+                    <p className="font-semibold text-[#141b2d] dark:text-gray-100">
                       {row.user_id} | Enrollment {row.enrolled_series_count} | Attempts {row.attempted_tests} | Copy {row.copy_checked}/{row.copy_submissions} | Mentorship {row.mentorship_completed}/{row.mentorship_requests}
                     </p>
-                    <p className="text-xs text-slate-600">
+                    <p className="text-xs text-[#636b86] dark:text-gray-300">
                       Pending mentorship: {row.pending_mentorship} | Pending copy checks: {row.pending_copy_checks} | Delays: {row.delay_count} | Technical: {row.technical_issue_count} | Last activity: {formatDateTime(row.last_activity_at)}
                     </p>
                     {row.issues.length > 0 ? (
@@ -1322,25 +1322,25 @@ export default function DashboardPage() {
                     ) : null}
                   </article>
                 ))}
-                {moderatorData.tracking.user_rows.length === 0 ? <p className="text-sm text-slate-500">No lifecycle rows yet.</p> : null}
+                {moderatorData.tracking.user_rows.length === 0 ? <p className="text-sm text-[#6c7590] dark:text-[#94a3b8]">No lifecycle rows yet.</p> : null}
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-6">
+            <section className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-bold text-slate-900">Mentorship Full-Cycle Tracking</h2>
+                <h2 className="text-lg font-bold text-[#141b2d] dark:text-white">Mentorship Full-Cycle Tracking</h2>
                 <Link href="/mentorship/manage" className="inline-flex items-center rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">Open Mentorship Queue</Link>
               </div>
               <div className="mt-3 space-y-2">
                 {moderatorData.tracking.mentorship_cycles.slice(0, 14).map((cycle) => (
-                  <article key={cycle.request_id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                    <p className="font-semibold text-slate-800">
+                  <article key={cycle.request_id} className="rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-3 py-2 text-sm">
+                    <p className="font-semibold text-[#141b2d] dark:text-gray-100">
                       Request #{cycle.request_id} | {cycle.user_id} -&gt; {cycle.provider_user_id} | {cycle.request_status}
                     </p>
-                    <p className="text-xs text-slate-600">
+                    <p className="text-xs text-[#636b86] dark:text-gray-300">
                       Series: {cycle.series_title || cycle.series_id || "n/a"} | Test: {cycle.test_title || cycle.test_collection_id || "n/a"}
                     </p>
-                    <p className="text-xs text-slate-600">
+                    <p className="text-xs text-[#636b86] dark:text-gray-300">
                       Requested: {formatDateTime(cycle.requested_at)} | Accepted: {formatDateTime(cycle.accepted_at)} | Scheduled: {formatDateTime(cycle.scheduled_for)} | Completed: {formatDateTime(cycle.completed_at)}
                     </p>
                     {cycle.issues.length > 0 ? (
@@ -1354,29 +1354,29 @@ export default function DashboardPage() {
                     ) : null}
                   </article>
                 ))}
-                {moderatorData.tracking.mentorship_cycles.length === 0 ? <p className="text-sm text-slate-500">No mentorship cycles yet.</p> : null}
+                {moderatorData.tracking.mentorship_cycles.length === 0 ? <p className="text-sm text-[#6c7590] dark:text-[#94a3b8]">No mentorship cycles yet.</p> : null}
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-6">
+            <section className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-bold text-slate-900 inline-flex items-center gap-2">
+                <h2 className="text-lg font-bold text-[#141b2d] dark:text-white inline-flex items-center gap-2">
                   <ShieldCheck className="h-5 w-5" />
                   Pending Onboarding Queue
                 </h2>
                 <div className="flex gap-2">
                   <Link href="/onboarding/review" className="inline-flex items-center rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">Open Queue</Link>
-                  <Link href="/admin/user-roles" className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">User Roles</Link>
+                  <Link href="/admin/user-roles" className="inline-flex items-center rounded-md border border-slate-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">User Roles</Link>
                 </div>
               </div>
               <div className="mt-3 space-y-2">
                 {moderatorData.pendingOnboarding.slice(0, 10).map((row) => (
-                  <article key={row.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                    <p className="font-semibold text-slate-800">Request #{row.id} | {row.desired_role} | {row.full_name}</p>
-                    <p className="text-xs text-slate-600">{row.city || "City n/a"} | Experience: {row.years_experience ?? "n/a"}</p>
+                  <article key={row.id} className="rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-3 py-2 text-sm">
+                    <p className="font-semibold text-[#141b2d] dark:text-gray-100">Request #{row.id} | {row.desired_role} | {row.full_name}</p>
+                    <p className="text-xs text-[#636b86] dark:text-gray-300">{row.city || "City n/a"} | Experience: {row.years_experience ?? "n/a"}</p>
                   </article>
                 ))}
-                {moderatorData.pendingOnboarding.length === 0 ? <p className="text-sm text-slate-500">No pending onboarding requests.</p> : null}
+                {moderatorData.pendingOnboarding.length === 0 ? <p className="text-sm text-[#6c7590] dark:text-[#94a3b8]">No pending onboarding requests.</p> : null}
               </div>
             </section>
           </>
