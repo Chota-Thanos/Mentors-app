@@ -99,7 +99,7 @@ const QUIZ_KIND_META: Record<QuizKind, { description: string; tag: string; cta: 
     description: "Comprehension-first sets with passage context and linked multi-question flows.",
     tag: "Reading Focus",
     cta: "Open",
-    tone: "bg-sky-50 text-sky-700",
+    tone: "bg-sky-50 dark:bg-sky-950 text-sky-700",
   },
 };
 const QUICK_COUNT_PRESETS: Array<{ label: string; value: string; detail: string }> = [
@@ -2813,15 +2813,15 @@ export default function AIUserStudio({
     if (attemptableQuestions.length === 0) return <p className="text-sm text-gray-500">No generated output yet.</p>;
     return (
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
-          <span className="font-semibold text-slate-700">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3 text-xs">
+          <span className="font-semibold text-[#334155]">
             Quiz list: {attemptableQuestions.length} item(s)
           </span>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-slate-600">Selected: {selectedAttemptableQuestions.length}</span>
+            <span className="text-[#636b86] dark:text-[#94a3b8]">Selected: {selectedAttemptableQuestions.length}</span>
             <button
               type="button"
-              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 font-semibold text-slate-700 hover:bg-slate-100"
+              className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-1 font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
               onClick={() => setSelectedAttemptKeys(attemptableQuestions.map((entry) => entry.key))}
               disabled={allAttemptablesSelected}
             >
@@ -2829,7 +2829,7 @@ export default function AIUserStudio({
             </button>
             <button
               type="button"
-              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 font-semibold text-slate-700 hover:bg-slate-100"
+              className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-1 font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
               onClick={() => setSelectedAttemptKeys([])}
               disabled={selectedAttemptableQuestions.length === 0}
             >
@@ -2864,9 +2864,9 @@ export default function AIUserStudio({
           const isEditingQuestion = editingQuestionKey === currentKey && Boolean(editingQuestionDraft);
 
           return (
-            <div id={`generated-question-${currentKey}`} key={currentKey} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div id={`generated-question-${currentKey}`} key={currentKey} className="space-y-3 rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#636b86] dark:text-[#94a3b8]">
                   Quiz {index + 1}
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
@@ -2874,7 +2874,7 @@ export default function AIUserStudio({
                     type="button"
                     className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${isMarkedSelected
                       ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      : "border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                       }`}
                     onClick={() => {
                       setSelectedAttemptKeys((prev) => (
@@ -2888,7 +2888,7 @@ export default function AIUserStudio({
                   </button>
                   <button
                     type="button"
-                    className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    className="inline-flex items-center rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                     onClick={() => void shareSingleQuestion(currentAttempt, "native")}
                   >
                     <Share2 className="mr-1.5 h-3.5 w-3.5" />
@@ -2896,21 +2896,21 @@ export default function AIUserStudio({
                   </button>
                   <button
                     type="button"
-                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                     onClick={() => void shareSingleQuestion(currentAttempt, "copy_rich")}
                   >
                     Copy Rich
                   </button>
                   <button
                     type="button"
-                    className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-1.5 text-xs font-semibold text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                     onClick={() => void shareSingleQuestion(currentAttempt, "whatsapp")}
                   >
                     WhatsApp
                   </button>
                   <button
                     type="button"
-                    className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-1.5 text-xs font-semibold text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                     onClick={() => void shareSingleQuestion(currentAttempt, "x")}
                   >
                     X
@@ -2924,7 +2924,7 @@ export default function AIUserStudio({
                       {isEditingQuestion ? "Cancel Edit" : "Edit"}
                     </button>
                   ) : (
-                    <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+                    <span className="rounded-md border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-2.5 py-1 text-[11px] font-semibold text-[#6c7590] dark:text-[#94a3b8]">
                       Edit: subscriber only
                     </span>
                   )}
@@ -2945,13 +2945,13 @@ export default function AIUserStudio({
                   {quizKind === "passage" ? (
                     <>
                       <input
-                        className="w-full rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm"
+                        className="dark:text-white w-full rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                         value={editingQuestionDraft.passage_title}
                         onChange={(event) => setEditingQuestionDraft((prev) => (prev ? { ...prev, passage_title: event.target.value } : prev))}
                         placeholder="Passage title"
                       />
                       <textarea
-                        className="min-h-[90px] w-full rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm"
+                        className="dark:text-white min-h-[90px] w-full rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                         value={editingQuestionDraft.passage_text}
                         onChange={(event) => setEditingQuestionDraft((prev) => (prev ? { ...prev, passage_text: event.target.value } : prev))}
                         placeholder="Passage text"
@@ -2959,19 +2959,19 @@ export default function AIUserStudio({
                     </>
                   ) : null}
                   <textarea
-                    className="min-h-[80px] w-full rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm"
+                    className="dark:text-white min-h-[80px] w-full rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                     value={editingQuestionDraft.question_statement}
                     onChange={(event) => setEditingQuestionDraft((prev) => (prev ? { ...prev, question_statement: event.target.value } : prev))}
                     placeholder="Question statement"
                   />
                   <input
-                    className="w-full rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm"
+                    className="dark:text-white w-full rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                     value={editingQuestionDraft.supp_question_statement}
                     onChange={(event) => setEditingQuestionDraft((prev) => (prev ? { ...prev, supp_question_statement: event.target.value } : prev))}
                     placeholder="Supplementary statement (optional)"
                   />
                   <input
-                    className="w-full rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm"
+                    className="dark:text-white w-full rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                     value={editingQuestionDraft.question_prompt}
                     onChange={(event) => setEditingQuestionDraft((prev) => (prev ? { ...prev, question_prompt: event.target.value } : prev))}
                     placeholder="Prompt (optional)"
@@ -2979,7 +2979,7 @@ export default function AIUserStudio({
                   <div className="space-y-1">
                     <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Statements / Facts</p>
                     <textarea
-                      className="min-h-[100px] w-full rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm"
+                      className="dark:text-white min-h-[100px] w-full rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                       value={editingQuestionDraft.statements_facts_input}
                       onChange={(event) => setEditingQuestionDraft((prev) => (prev ? { ...prev, statements_facts_input: event.target.value } : prev))}
                       placeholder="One statement or fact per line"
@@ -2988,11 +2988,11 @@ export default function AIUserStudio({
                   <div className="space-y-2">
                     {editingQuestionDraft.options.map((option, optionIndex) => (
                       <div key={`${currentKey}-edit-option-${option.label}`} className="grid gap-2 md:grid-cols-[48px_1fr]">
-                        <div className="inline-flex items-center justify-center rounded-md border border-emerald-200 bg-white text-xs font-semibold text-emerald-700">
+                        <div className="inline-flex items-center justify-center rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] text-xs font-semibold text-emerald-700">
                           {option.label}
                         </div>
                         <input
-                          className="w-full rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm"
+                          className="dark:text-white w-full rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                           value={option.text}
                           onChange={(event) => {
                             const value = event.target.value;
@@ -3009,7 +3009,7 @@ export default function AIUserStudio({
                     ))}
                   </div>
                   <select
-                    className="w-full rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm"
+                    className="w-full rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                     value={editingQuestionDraft.correct_answer}
                     onChange={(event) => setEditingQuestionDraft((prev) => (prev ? { ...prev, correct_answer: event.target.value } : prev))}
                   >
@@ -3035,7 +3035,7 @@ export default function AIUserStudio({
                     </button>
                     <button
                       type="button"
-                      className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      className="inline-flex items-center rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                       onClick={cancelEditingAttempt}
                     >
                       <X className="mr-1.5 h-3.5 w-3.5" />
@@ -3055,22 +3055,22 @@ export default function AIUserStudio({
               ) : null}
 
               {!isEditingQuestion ? (
-                <div className="rounded-md border border-gray-200 bg-white p-4">
-                  <p className="text-sm font-semibold text-gray-900">{questionText}</p>
-                  {supplementary ? <p className="mt-1 text-sm text-gray-600">{supplementary}</p> : null}
+                <div className="rounded-md border border-gray-200 bg-white dark:bg-[#0b1120] p-4">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{questionText}</p>
+                  {supplementary ? <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{supplementary}</p> : null}
                   {normalizedStatements.length > 0 ? (
-                    <ul className="mt-2 list-disc pl-5 text-sm text-gray-700">
+                    <ul className="mt-2 list-disc pl-5 text-sm text-gray-700 dark:text-gray-300">
                       {normalizedStatements.map((fact, factIndex) => <li key={factIndex}>{fact}</li>)}
                     </ul>
                   ) : null}
-                  {promptText ? <p className="mt-2 text-sm italic text-gray-700">{promptText}</p> : null}
+                  {promptText ? <p className="mt-2 text-sm italic text-gray-700 dark:text-gray-300">{promptText}</p> : null}
                   {questionCategoryIds.length > 0 ? (
                     <div className="mt-2 flex flex-wrap items-center gap-1">
                       <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Categories:</span>
                       {questionCategoryIds.map((categoryId) => (
                         <span
                           key={`${currentKey}-cat-${categoryId}`}
-                          className="rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700"
+                          className="rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-[#f8faff] dark:bg-[#0f172a] px-2 py-0.5 text-[11px] text-[#334155]"
                         >
                           {categoryNameById[categoryId] ? `${categoryNameById[categoryId]} (#${categoryId})` : `#${categoryId}`}
                         </span>
@@ -3087,10 +3087,10 @@ export default function AIUserStudio({
                           ? "border-green-400 bg-green-50 text-green-900"
                           : isSelected
                             ? "border-red-400 bg-red-50 text-red-900"
-                            : "border-gray-200 bg-white text-gray-700"
+                            : "border-gray-200 bg-white dark:bg-[#0b1120] text-gray-700 dark:text-gray-300"
                         : isSelected
                           ? "border-indigo-400 bg-indigo-50 text-indigo-900"
-                          : "border-gray-200 bg-white text-gray-700";
+                          : "border-gray-200 bg-white dark:bg-[#0b1120] text-gray-700 dark:text-gray-300";
                       return (
                         <button
                           key={option.label}
@@ -3130,7 +3130,7 @@ export default function AIUserStudio({
                     {isSubmitted && canEditGeneratedQuestions ? (
                       <button
                         type="button"
-                        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                         onClick={() => setEditingExplanationKey((prev) => (prev === currentKey ? null : currentKey))}
                       >
                         {editingExplanationKey === currentKey ? "Hide Editor" : "Edit Explanation"}
@@ -3139,22 +3139,22 @@ export default function AIUserStudio({
                   </div>
 
                   {isSubmitted ? (
-                    <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    <div className="mt-3 rounded-md border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3 text-sm text-[#334155]">
                       <p>
                         <span className="font-semibold">Correct Answer:</span> {correctAnswer}
                       </p>
                       {explanationHtml ? (
                         <div className="mt-2">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Explanation</p>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-[#636b86] dark:text-[#94a3b8]">Explanation</p>
                           <div
-                            className="prose prose-sm mt-2 max-w-none rounded-md border border-slate-200 bg-white p-3 text-slate-800 [&_a]:text-blue-700 [&_a]:underline [&_b]:font-semibold [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:py-0.5 [&_em]:italic [&_li]:my-0.5 [&_ol]:pl-5 [&_p]:my-2 [&_strong]:font-semibold [&_u]:underline [&_ul]:pl-5"
+                            className="prose prose-sm mt-2 max-w-none rounded-md border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-3 text-[#1c263c] [&_a]:text-[#173aa9] dark:text-[#8ea9ff] [&_a]:underline [&_b]:font-semibold [&_code]:rounded [&_code]:bg-[#eef4ff] dark:bg-[#16213e] [&_code]:px-1 [&_code]:py-0.5 [&_em]:italic [&_li]:my-0.5 [&_ol]:pl-5 [&_p]:my-2 [&_strong]:font-semibold [&_u]:underline [&_ul]:pl-5"
                             dangerouslySetInnerHTML={{ __html: explanationHtml }}
                           />
                         </div>
                       ) : null}
                       {editingExplanationKey === currentKey ? (
                         <div className="mt-3">
-                          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">Explanation Editor</p>
+                          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#636b86] dark:text-[#94a3b8]">Explanation Editor</p>
                           <MiniRichTextInput
                             value={String(currentQuestion.explanation || currentQuestion.explanation_text || "")}
                             onChange={(value) => updateAttemptExplanation(currentKey, value)}
@@ -3199,7 +3199,7 @@ export default function AIUserStudio({
       ) : null}
 
       <div className="min-w-0 space-y-7">
-      <section className="ai-studio-hero relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-amber-50 via-white to-sky-50 p-6 shadow-sm">
+      <section className="ai-studio-hero relative overflow-hidden rounded-3xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-gradient-to-br from-amber-50 via-white to-sky-50 p-6 shadow-sm">
         <div className="pointer-events-none absolute -right-14 -top-14 h-48 w-48 rounded-full bg-amber-200/30 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-16 left-1/2 h-40 w-40 -translate-x-1/2 rounded-full bg-sky-200/30 blur-3xl" />
         <div className="relative space-y-5">
@@ -3207,40 +3207,40 @@ export default function AIUserStudio({
             <div>
               <div className={useUnifiedMainsLikeLayout ? "flex justify-center items-center gap-2" : "flex items-center gap-2"}>
                 {!useUnifiedMainsLikeLayout ? <Sparkles className="h-5 w-5 text-amber-500" /> : null}
-                <h1 className="text-2xl sm:text-5xl font-bold text-slate-900">
+                <h1 className="text-2xl sm:text-5xl font-bold text-[#141b2d] dark:text-white">
                   {useUnifiedMainsLikeLayout ? "Free AI Quiz Generator" : "AI Quiz Generator"}
                 </h1>
               </div>
-              <p className="mt-3 text-sm sm:text-xl text-slate-600">
+              <p className="mt-3 text-sm sm:text-xl text-[#636b86] dark:text-[#94a3b8]">
                 {useUnifiedMainsLikeLayout
                   ? "Create custom quizzes effortlessly with AI. Transform any text into multiple-choice questions."
                   : "Build GK, Maths, and Passage quizzes from text, URL, photo OCR, or uploaded PDFs with cleaner step-by-step flow."}
               </p>
               {!useUnifiedMainsLikeLayout ? (
-                <p className="mt-2 text-xs text-slate-600">
-                  Current generator: <span className="font-semibold text-slate-800">{QUIZ_KIND_LABEL[quizKind]}</span>. Shared settings are applied across all generators.
+                <p className="mt-2 text-xs text-[#636b86] dark:text-[#94a3b8]">
+                  Current generator: <span className="font-semibold text-[#1c263c]">{QUIZ_KIND_LABEL[quizKind]}</span>. Shared settings are applied across all generators.
                 </p>
               ) : shouldShowKindSwitcher ? (
-                <p className="mt-2 text-sm text-slate-600">
-                  Start with <span className="font-semibold text-slate-800">{QUIZ_KIND_LABEL[quizKind]}</span> and switch between GK, Maths, and Passage generators from the same workspace.
+                <p className="mt-2 text-sm text-[#636b86] dark:text-[#94a3b8]">
+                  Start with <span className="font-semibold text-[#1c263c]">{QUIZ_KIND_LABEL[quizKind]}</span> and switch between GK, Maths, and Passage generators from the same workspace.
                 </p>
               ) : null}
               {!useUnifiedMainsLikeLayout && quizMasterMode ? (
-                <p className="mt-2 text-xs text-slate-600">
+                <p className="mt-2 text-xs text-[#636b86] dark:text-[#94a3b8]">
                   Quiz Master workspace: use AI parse/generate and push selected questions into your prelims tests.
                 </p>
               ) : null}
             </div>
             {!useUnifiedMainsLikeLayout ? (
               <div className="flex items-center gap-2">
-                <div className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Default model</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-800">{USER_PROVIDER} / {USER_MODEL}</p>
+                <div className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120]/90 px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Default model</p>
+                  <p className="mt-1 text-sm font-semibold text-[#1c263c]">{USER_PROVIDER} / {USER_MODEL}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowChatSettings((prev) => !prev)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                 >
                   <Settings2 className="h-3.5 w-3.5" />
                   {showChatSettings ? "Hide Settings" : "AI Settings"}
@@ -3250,10 +3250,10 @@ export default function AIUserStudio({
           </div>
 
           {!useUnifiedMainsLikeLayout && showChatSettings ? (
-            <div className="ai-studio-settings rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-sm">
+            <div className="ai-studio-settings rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120]/95 p-4 shadow-sm">
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Output Language</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#636b86] dark:text-[#94a3b8]">Output Language</p>
                   <div className="flex flex-wrap gap-2">
                     {OUTPUT_LANGUAGE_OPTIONS.map((option) => {
                       const active = outputLanguage === option.value;
@@ -3267,7 +3267,7 @@ export default function AIUserStudio({
                           }}
                           className={`rounded-full border px-3 py-1 text-xs font-semibold ${active
                             ? "border-indigo-400 bg-indigo-100 text-indigo-800"
-                            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                            : "border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                             }`}
                         >
                           {option.label}
@@ -3277,7 +3277,7 @@ export default function AIUserStudio({
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Default Count</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#636b86] dark:text-[#94a3b8]">Default Count</p>
                   <div className="flex flex-wrap gap-2">
                     {QUICK_COUNT_PRESETS.map((preset) => {
                       const active = desiredQuestionCount === preset.value;
@@ -3288,7 +3288,7 @@ export default function AIUserStudio({
                           onClick={() => setDesiredQuestionCount(preset.value)}
                           className={`rounded-full border px-3 py-1 text-xs font-semibold ${active
                             ? "border-indigo-400 bg-indigo-100 text-indigo-800"
-                            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                            : "border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                             }`}
                         >
                           {preset.label}
@@ -3298,11 +3298,11 @@ export default function AIUserStudio({
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Session Control</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#636b86] dark:text-[#94a3b8]">Session Control</p>
                   <button
                     type="button"
                     onClick={resetComposerSession}
-                    className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    className="inline-flex items-center rounded-lg border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                   >
                     <RefreshCcw className="mr-1.5 h-3.5 w-3.5" />
                     Reset Chat Session
@@ -3323,19 +3323,19 @@ export default function AIUserStudio({
                     href={kindRouteMap[kind]}
                     className={`group rounded-2xl border px-4 py-3 transition ${isActive
                       ? "border-indigo-300 bg-indigo-50/90 text-indigo-950 shadow-sm"
-                      : "border-slate-200 bg-white/90 hover:border-slate-300 hover:bg-slate-50"
+                      : "border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120]/90 hover:border-[#c9d6fb] dark:border-[#2a3c6b] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                       }`}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className={`text-sm font-semibold ${isActive ? "text-indigo-950" : "text-slate-900"}`}>
+                        <p className={`text-sm font-semibold ${isActive ? "text-indigo-950" : "text-[#141b2d] dark:text-white"}`}>
                           {QUIZ_KIND_LABEL[kind]}
                         </p>
-                        <p className={`mt-0.5 text-[11px] ${isActive ? "text-indigo-700" : "text-slate-500"}`}>
+                        <p className={`mt-0.5 text-[11px] ${isActive ? "text-indigo-700" : "text-[#6c7590] dark:text-[#94a3b8]"}`}>
                           {meta.tag}
                         </p>
                       </div>
-                      <span className={`shrink-0 text-[11px] font-semibold ${isActive ? "text-indigo-700" : "text-slate-600 group-hover:text-slate-900"}`}>
+                      <span className={`shrink-0 text-[11px] font-semibold ${isActive ? "text-indigo-700" : "text-[#636b86] dark:text-[#94a3b8] group-hover:text-[#141b2d] dark:text-white"}`}>
                         {isActive ? "Selected" : meta.cta}
                       </span>
                     </div>
@@ -3355,7 +3355,7 @@ export default function AIUserStudio({
               </Link>
               <Link
                 href={kindRouteMap.passage}
-                className="inline-flex items-center rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100"
+                className="inline-flex items-center rounded-lg border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950 px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100 dark:bg-sky-900"
               >
                 Open Passage Generator
               </Link>
@@ -3363,8 +3363,8 @@ export default function AIUserStudio({
           ) : null}
 
           {!useUnifiedMainsLikeLayout ? (
-            <div className="rounded-xl border border-amber-200/70 bg-white/85 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Progress</p>
+            <div className="rounded-xl border border-amber-200/70 bg-white dark:bg-[#0b1120]/85 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#636b86] dark:text-[#94a3b8]">Progress</p>
               <div className="mt-2 grid gap-2 md:grid-cols-3">
                 {[
                   { label: "Example Ready", done: formatPlanReady },
@@ -3377,9 +3377,9 @@ export default function AIUserStudio({
                     ) : generating ? (
                       <CircleDashed className="h-4 w-4 animate-spin text-amber-700" />
                     ) : (
-                      <CircleDashed className="h-4 w-4 text-slate-500" />
+                      <CircleDashed className="h-4 w-4 text-[#6c7590] dark:text-[#94a3b8]" />
                     )}
-                    <span className={step.done ? "font-semibold text-emerald-800" : "text-slate-700"}>{step.label}</span>
+                    <span className={step.done ? "font-semibold text-emerald-800" : "text-[#334155]"}>{step.label}</span>
                   </div>
                 ))}
               </div>
@@ -3389,7 +3389,7 @@ export default function AIUserStudio({
       </section>
 
       <div className="mx-auto grid w-full max-w-5xl grid-cols-1 items-start gap-6">
-        <section className="ai-studio-workspace flex w-full flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
+        <section className="ai-studio-workspace flex w-full flex-col gap-6 rounded-3xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4 sm:p-6 shadow-sm">
           {loading ? (
             <p className="flex items-center gap-2 text-sm text-gray-500">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -3398,17 +3398,17 @@ export default function AIUserStudio({
           ) : null}
 
           {!useUnifiedMainsLikeLayout ? (
-            <div className="ai-studio-toolbar bg-white border-b border-indigo-50 p-4 shrink-0 flex items-center justify-between sticky top-0 z-10 shadow-sm rounded-xl mb-6">
+            <div className="ai-studio-toolbar bg-white dark:bg-[#0b1120] border-b border-indigo-50 p-4 shrink-0 flex items-center justify-between sticky top-0 z-10 shadow-sm rounded-xl mb-6">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-md">
                   <Wand2 className="h-5 w-5 text-white" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                  <h3 className="font-bold text-[#1c263c] flex items-center gap-2">
                     AI Generator
                     <span className="flex h-2 w-2 rounded-full bg-emerald-500"></span>
                   </h3>
-                  <p className="text-[10px] sm:text-xs text-slate-500 font-medium">Ready to create questions</p>
+                  <p className="text-[10px] sm:text-xs text-[#6c7590] dark:text-[#94a3b8] font-medium">Ready to create questions</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -3425,8 +3425,8 @@ export default function AIUserStudio({
                 <div className="h-8 w-8 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 flex items-center justify-center shrink-0 shadow-sm mt-1 hidden sm:flex">
                   <Wand2 className="h-4 w-4 text-white" />
                 </div>
-                <div className="rounded-2xl rounded-tl-sm bg-white border border-slate-200 shadow-sm p-4 md:p-5 text-sm md:text-[15px] text-slate-700 space-y-3 leading-relaxed">
-                  <p className="font-semibold text-slate-900">Hello! I&apos;m your AI Quiz Assistant.</p>
+                <div className="rounded-2xl rounded-tl-sm bg-white dark:bg-[#0b1120] border border-[#dce3fb] dark:border-[#1e2a4a] shadow-sm p-4 md:p-5 text-sm md:text-[15px] text-[#334155] space-y-3 leading-relaxed">
+                  <p className="font-semibold text-[#141b2d] dark:text-white">Hello! I&apos;m your AI Quiz Assistant.</p>
                   <p>Let&apos;s set up the <strong className="text-indigo-700">quiz format and language</strong>. What type of questions should I generate?</p>
                 </div>
               </div>
@@ -3442,7 +3442,7 @@ export default function AIUserStudio({
                     Choose output language first. Generation and parsing instructions use this as the primary parameter.
                   </p>
                   <select
-                    className="w-full rounded-md border border-indigo-300 bg-white px-3 py-2 text-sm"
+                    className="w-full rounded-md border border-indigo-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                     value={outputLanguage}
                     onChange={(event) => {
                       const next = persistOutputLanguage(event.target.value);
@@ -3458,12 +3458,12 @@ export default function AIUserStudio({
                 </div>
 
                 <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-                  <p className="text-sm font-semibold text-slate-900">Quick Defaults</p>
-                  <p className="text-xs text-slate-600">
+                  <p className="text-sm font-semibold text-[#141b2d] dark:text-white">Quick Defaults</p>
+                  <p className="text-xs text-[#636b86] dark:text-[#94a3b8]">
                     Pick defaults first, then continue step-by-step like a chat workflow.
                   </p>
                   <div className="space-y-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Question count</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Question count</p>
                     <div className="flex flex-wrap gap-2">
                       {QUICK_COUNT_PRESETS.map((preset) => {
                         const active = desiredQuestionCount === preset.value;
@@ -3474,7 +3474,7 @@ export default function AIUserStudio({
                             onClick={() => setDesiredQuestionCount(preset.value)}
                             className={`rounded-full border px-3 py-1 text-xs font-semibold ${active
                               ? "border-indigo-400 bg-indigo-100 text-indigo-800"
-                              : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                              : "border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a]"
                               }`}
                           >
                             {preset.label} <span className="text-[10px] opacity-80">({preset.detail})</span>
@@ -3485,13 +3485,13 @@ export default function AIUserStudio({
                   </div>
                 </div>
 
-                <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/70 p-4">
+                <div className="space-y-3 rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-900/60 p-4">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-gray-900">2. Quiz Format</p>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">2. Quiz Format</p>
                     <button
                       type="button"
                       onClick={() => setShowAdvancedFormatControls((prev) => !prev)}
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                      className="inline-flex items-center gap-1 rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-1 text-[11px] font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                     >
                       {showAdvancedFormatControls ? (
                         <>
@@ -3504,7 +3504,7 @@ export default function AIUserStudio({
                       )}
                     </button>
                   </div>
-                  <p className="text-xs text-gray-600">
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
                     Start with defaults. Open advanced controls only when you need custom format behavior.
                   </p>
                   {!showAdvancedFormatControls ? (
@@ -3518,14 +3518,14 @@ export default function AIUserStudio({
                     <>
 
                       <div className="flex flex-col gap-3">
-                        <div className="flex flex-wrap md:flex-nowrap items-center gap-3 rounded-md border border-gray-200 bg-white p-3">
+                        <div className="flex flex-wrap md:flex-nowrap items-center gap-3 rounded-md border border-gray-200 bg-white dark:bg-[#0b1120] p-3">
                           <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 min-w-[60px] shrink-0">STYLE 1</p>
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
                               className={`rounded-full border px-3 py-1 text-xs font-semibold ${!analysisTagL1Filter
                                 ? "border-indigo-400 bg-indigo-100 text-indigo-800"
-                                : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                                : "border-gray-300 bg-white dark:bg-[#0b1120] text-gray-700 dark:text-gray-300 hover:bg-gray-100"
                                 }`}
                               onClick={() => {
                                 setAnalysisTagL1Filter("");
@@ -3542,7 +3542,7 @@ export default function AIUserStudio({
                                   type="button"
                                   className={`rounded-full border px-3 py-1 text-xs font-semibold ${active
                                     ? "border-indigo-400 bg-indigo-100 text-indigo-800"
-                                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                                    : "border-gray-300 bg-white dark:bg-[#0b1120] text-gray-700 dark:text-gray-300 hover:bg-gray-100"
                                     }`}
                                   onClick={() => {
                                     setAnalysisTagL1Filter(tag);
@@ -3557,14 +3557,14 @@ export default function AIUserStudio({
                         </div>
 
                         {analysisTagL1Filter ? (
-                          <div className="flex flex-wrap md:flex-nowrap items-center gap-3 rounded-md border border-gray-200 bg-white p-3">
+                          <div className="flex flex-wrap md:flex-nowrap items-center gap-3 rounded-md border border-gray-200 bg-white dark:bg-[#0b1120] p-3">
                             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 min-w-[60px] shrink-0">STYLE 2</p>
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
                                 className={`rounded-full border px-3 py-1 text-xs font-semibold ${!analysisTagL2Filter
                                   ? "border-indigo-400 bg-indigo-100 text-indigo-800"
-                                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                                  : "border-gray-300 bg-white dark:bg-[#0b1120] text-gray-700 dark:text-gray-300 hover:bg-gray-100"
                                   }`}
                                 onClick={() => setAnalysisTagL2Filter("")}
                               >
@@ -3578,7 +3578,7 @@ export default function AIUserStudio({
                                     type="button"
                                     className={`rounded-full border px-3 py-1 text-xs font-semibold ${active
                                       ? "border-indigo-400 bg-indigo-100 text-indigo-800"
-                                      : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                                      : "border-gray-300 bg-white dark:bg-[#0b1120] text-gray-700 dark:text-gray-300 hover:bg-gray-100"
                                       }`}
                                     onClick={() => setAnalysisTagL2Filter(tag)}
                                   >
@@ -3591,12 +3591,12 @@ export default function AIUserStudio({
                         ) : null}
                       </div>
 
-                      <div className="space-y-2 rounded-md border border-gray-200 bg-white p-3">
+                      <div className="space-y-2 rounded-md border border-gray-200 bg-white dark:bg-[#0b1120] p-3">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Example Names</p>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Example Names</p>
                           <button
                             type="button"
-                            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                            className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 disabled:opacity-60"
                             onClick={applySelectedAnalysisToForm}
                             disabled={!selectedAnalysisId}
                           >
@@ -3615,7 +3615,7 @@ export default function AIUserStudio({
                                   type="button"
                                   className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${active
                                     ? "border-indigo-400 bg-indigo-100 text-indigo-800"
-                                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                                    : "border-gray-300 bg-white dark:bg-[#0b1120] text-gray-700 dark:text-gray-300 hover:bg-gray-100"
                                     }`}
                                   onClick={() => setSelectedAnalysisId(String(item.id))}
                                 >
@@ -3627,16 +3627,16 @@ export default function AIUserStudio({
                         )}
                       </div>
 
-                      <div className="space-y-2 rounded-md border border-gray-200 bg-white p-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Or Provide Your Own Example</p>
+                      <div className="space-y-2 rounded-md border border-gray-200 bg-white dark:bg-[#0b1120] p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Or Provide Your Own Example</p>
                         <input
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                          className="dark:text-white w-full rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                           value={exampleQuestion}
                           onChange={(event) => setExampleQuestion(event.target.value)}
                           placeholder="Single example question (optional)"
                         />
                         <textarea
-                          className="min-h-[90px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                          className="dark:text-white min-h-[90px] w-full rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                           value={exampleQuestionsInput}
                           onChange={(event) => setExampleQuestionsInput(event.target.value)}
                           placeholder="Example questions (one per line)"
@@ -3644,7 +3644,7 @@ export default function AIUserStudio({
                         <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                            className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 disabled:opacity-60"
                             onClick={analyzeExampleStyle}
                             disabled={analyzingExampleStyle || !exampleQuestionsInput.trim()}
                           >
@@ -3653,7 +3653,7 @@ export default function AIUserStudio({
                           {analyzedExampleStyle ? (
                             <button
                               type="button"
-                              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                              className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100"
                               onClick={() => setAnalyzedExampleStyle("")}
                             >
                               Clear Analysis
@@ -3667,9 +3667,9 @@ export default function AIUserStudio({
                         ) : null}
                       </div>
 
-                      <div className="rounded-md border border-gray-200 bg-white p-3 space-y-2">
+                      <div className="rounded-md border border-gray-200 bg-white dark:bg-[#0b1120] p-3 space-y-2">
                         <div className="flex items-center justify-between">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Format Mix Planner (Optional)</p>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Format Mix Planner (Optional)</p>
                           <span className="text-[11px] text-gray-500">Styles selected: {activeMixPlan.length}</span>
                         </div>
                         {shouldUseAsyncJobMode ? (
@@ -3677,24 +3677,24 @@ export default function AIUserStudio({
                             Large mix detected. Async job mode with retry queue will be used automatically.
                           </p>
                         ) : null}
-                        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-slate-700">
-                          <p className="font-semibold text-slate-900">
+                        <div className="rounded-md border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950 px-3 py-2 text-xs text-[#334155]">
+                          <p className="font-semibold text-[#141b2d] dark:text-white">
                             You can select how many questions of each question style to be generated.
                           </p>
-                          <p className="mt-1 text-slate-600">Select the number given below each style.</p>
+                          <p className="mt-1 text-[#636b86] dark:text-[#94a3b8]">Select the number given below each style.</p>
                           {activeMixPlan.length > 0 ? (
                             <div className="mt-2 flex flex-wrap gap-2">
                               {activeMixPlan.map((plan) => (
                                 <span
                                   key={plan.id}
-                                  className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700"
+                                  className="rounded-full border border-sky-200 dark:border-sky-800 bg-white dark:bg-[#0b1120] px-2.5 py-1 text-[11px] font-semibold text-[#334155]"
                                 >
                                   {plan.analysis.title}: {plan.count}
                                 </span>
                               ))}
                             </div>
                           ) : (
-                            <p className="mt-2 text-slate-600">No question styles selected yet.</p>
+                            <p className="mt-2 text-[#636b86] dark:text-[#94a3b8]">No question styles selected yet.</p>
                           )}
                         </div>
                         {mixEntries.length === 0 ? (
@@ -3704,7 +3704,7 @@ export default function AIUserStudio({
                             {mixEntries.map((entry) => (
                               <div key={entry.id} className="grid gap-2 md:grid-cols-[1fr_120px_auto]">
                                 <select
-                                  className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                                  className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                                   value={entry.analysisId}
                                   onChange={(event) => updateMixRow(entry.id, { analysisId: event.target.value })}
                                 >
@@ -3713,14 +3713,14 @@ export default function AIUserStudio({
                                   ))}
                                 </select>
                                 <input
-                                  className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                                  className="dark:text-white rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                                   value={entry.count}
                                   onChange={(event) => updateMixRow(entry.id, { count: event.target.value.replace(/[^\d]/g, "") || "1" })}
                                   placeholder="Count"
                                 />
                                 <button
                                   type="button"
-                                  className="rounded-md border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+                                  className="rounded-md border border-red-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
                                   onClick={() => removeMixRow(entry.id)}
                                 >
                                   Remove
@@ -3732,7 +3732,7 @@ export default function AIUserStudio({
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                            className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 disabled:opacity-60"
                             onClick={addSelectedAnalysisToMix}
                             disabled={!selectedAnalysisId}
                           >
@@ -3740,7 +3740,7 @@ export default function AIUserStudio({
                           </button>
                           <button
                             type="button"
-                            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                            className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 disabled:opacity-60"
                             onClick={addEmptyMixRow}
                             disabled={filteredAnalyses.length === 0}
                           >
@@ -3749,7 +3749,7 @@ export default function AIUserStudio({
                           {mixEntries.length > 0 ? (
                             <button
                               type="button"
-                              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                              className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100"
                               onClick={() => setMixEntries([])}
                             >
                               Clear Mix
@@ -3782,7 +3782,7 @@ export default function AIUserStudio({
                 <div className="h-8 w-8 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 flex items-center justify-center shrink-0 shadow-sm mt-1 hidden sm:flex">
                   <Wand2 className="h-4 w-4 text-white" />
                 </div>
-                <div className="rounded-2xl rounded-tl-sm border border-sky-200 bg-sky-50/70 shadow-sm p-4 md:p-5 text-sm md:text-[15px] text-slate-700 space-y-3 leading-relaxed">
+                <div className="rounded-2xl rounded-tl-sm border border-sky-200 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-900/60 shadow-sm p-4 md:p-5 text-sm md:text-[15px] text-[#334155] space-y-3 leading-relaxed">
                   <p>Great! Now, please provide the <strong className="text-indigo-700">source content</strong> for the quiz.</p>
                 </div>
               </div>
@@ -3791,10 +3791,10 @@ export default function AIUserStudio({
 
           {currentStep >= 2 && (
             <div className="order-1 w-full animate-in fade-in slide-in-from-bottom-2 mb-4">
-              <div className="w-full space-y-4 rounded-2xl border border-sky-200 bg-sky-50/50 p-3 sm:p-4 text-left">
-                <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-100/60 p-3 sm:p-4">
-                  <p className="text-sm font-semibold text-gray-900">1. Source Content</p>
-                  <div className="rounded-xl bg-slate-100 p-1">
+              <div className="w-full space-y-4 rounded-2xl border border-sky-200 dark:border-sky-800 bg-sky-50/50 dark:bg-sky-900/40 p-3 sm:p-4 text-left">
+                <div className="space-y-3 rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-100/60 dark:bg-sky-800/40 p-3 sm:p-4">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">1. Source Content</p>
+                  <div className="rounded-xl bg-[#eef4ff] dark:bg-[#16213e] p-1">
                     <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
                       {CONTENT_SOURCE_OPTIONS.map((option) => {
                         const active = !useCategorySource && contentSourceType === option.value;
@@ -3814,8 +3814,8 @@ export default function AIUserStudio({
                               setContentSourceType(option.value);
                             }}
                             className={`inline-flex items-center justify-center rounded-lg px-2 py-2 text-[11px] sm:text-xs font-semibold transition ${active
-                              ? "bg-white text-sky-700 shadow-sm"
-                              : "text-slate-500 hover:text-slate-700"
+                              ? "bg-white dark:bg-[#0b1120] text-sky-700 shadow-sm"
+                              : "text-[#6c7590] dark:text-[#94a3b8] hover:text-[#334155]"
                               }`}
                           >
                             {sourceLabel}
@@ -3826,21 +3826,21 @@ export default function AIUserStudio({
                         type="button"
                         onClick={() => setUseCategorySource(true)}
                         className={`inline-flex items-center justify-center rounded-lg px-2 py-2 text-[11px] sm:text-xs font-semibold transition ${useCategorySource
-                          ? "bg-white text-sky-700 shadow-sm"
-                          : "text-slate-500 hover:text-slate-700"
+                          ? "bg-white dark:bg-[#0b1120] text-sky-700 shadow-sm"
+                          : "text-[#6c7590] dark:text-[#94a3b8] hover:text-[#334155]"
                           }`}
                       >
                         Category Source
                       </button>
                     </div>
                   </div>
-                  <p className="text-xs text-gray-600">
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
                     {useCategorySource
                       ? "Category linked source mode is active. Select categories below."
                       : "Choose one source tab and provide input below."}
                   </p>
                   {useCategorySource ? (
-                    <div className="rounded-md border border-sky-200 bg-white p-3">
+                    <div className="rounded-md border border-sky-200 dark:border-sky-800 bg-white dark:bg-[#0b1120] p-3">
                       <CategorySelector
                         quizKind={quizKind}
                         examId={globalExamId}
@@ -3851,7 +3851,7 @@ export default function AIUserStudio({
                   ) : null}
                   {!useCategorySource && contentSourceType === "text" ? (
                     <textarea
-                      className="min-h-[160px] w-full rounded-md border border-sky-300 bg-white px-3 py-2 text-sm"
+                      className="dark:text-white min-h-[160px] w-full rounded-md border border-sky-300 dark:border-sky-700 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                       value={contentText}
                       onChange={(event) => setContentText(event.target.value)}
                       placeholder="Paste source text for quiz generation"
@@ -3859,7 +3859,7 @@ export default function AIUserStudio({
                   ) : null}
                   {!useCategorySource && contentSourceType === "url" ? (
                     <input
-                      className="w-full rounded-md border border-sky-300 bg-white px-3 py-2 text-sm"
+                      className="dark:text-white w-full rounded-md border border-sky-300 dark:border-sky-700 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                       value={contentUrl}
                       onChange={(event) => setContentUrl(event.target.value)}
                       placeholder="https://example.com/content"
@@ -3868,8 +3868,8 @@ export default function AIUserStudio({
                   {!useCategorySource && contentSourceType === "image" ? (
                     <div className="space-y-3 rounded-md border border-emerald-200 bg-emerald-50/60 p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs text-gray-600">Upload photo pages and extract text in the same sequence.</p>
-                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100">
+                        <p className="text-xs text-gray-600 dark:text-gray-400">Upload photo pages and extract text in the same sequence.</p>
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100">
                           <UploadCloud className="h-3.5 w-3.5" />
                           Add Photos
                           <input
@@ -3886,7 +3886,7 @@ export default function AIUserStudio({
                       {ocrImages.length > 0 ? (
                         <div className="max-h-44 space-y-2 overflow-auto pr-1">
                           {ocrImages.map((file, index) => (
-                            <div key={file.id} className="flex items-center gap-3 rounded-md border border-gray-200 bg-white px-3 py-2">
+                            <div key={file.id} className="flex items-center gap-3 rounded-md border border-gray-200 bg-white dark:bg-[#0b1120] px-3 py-2">
                               <Image
                                 src={file.preview}
                                 alt={file.name}
@@ -3896,13 +3896,13 @@ export default function AIUserStudio({
                                 className="h-12 w-9 rounded border border-gray-200 object-cover"
                               />
                               <div className="min-w-0 flex-1">
-                                <p className="truncate text-xs font-semibold text-gray-800">Page {index + 1}</p>
+                                <p className="truncate text-xs font-semibold text-gray-800 dark:text-gray-300">Page {index + 1}</p>
                                 <p className="truncate text-[11px] text-gray-500">{file.name}</p>
                               </div>
                               <div className="flex items-center gap-1">
                                 <button
                                   type="button"
-                                  className="rounded-md border border-gray-300 bg-white px-1.5 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                                  className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-1.5 py-1 text-gray-600 dark:text-gray-400 hover:bg-gray-100 disabled:opacity-40"
                                   onClick={() => moveOcrImage(index, "up")}
                                   disabled={index === 0}
                                 >
@@ -3910,7 +3910,7 @@ export default function AIUserStudio({
                                 </button>
                                 <button
                                   type="button"
-                                  className="rounded-md border border-gray-300 bg-white px-1.5 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                                  className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-1.5 py-1 text-gray-600 dark:text-gray-400 hover:bg-gray-100 disabled:opacity-40"
                                   onClick={() => moveOcrImage(index, "down")}
                                   disabled={index >= ocrImages.length - 1}
                                 >
@@ -3918,7 +3918,7 @@ export default function AIUserStudio({
                                 </button>
                                 <button
                                   type="button"
-                                  className="rounded-md border border-red-300 bg-white px-1.5 py-1 text-red-700 hover:bg-red-50"
+                                  className="rounded-md border border-red-300 bg-white dark:bg-[#0b1120] px-1.5 py-1 text-red-700 hover:bg-red-50"
                                   onClick={() => removeOcrImage(file.id)}
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
@@ -3934,7 +3934,7 @@ export default function AIUserStudio({
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                          className="rounded-md border border-emerald-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
                           onClick={extractTextFromImages}
                           disabled={extractingImageText || ocrImages.length === 0}
                         >
@@ -3951,7 +3951,7 @@ export default function AIUserStudio({
                       </div>
 
                       <textarea
-                        className="min-h-[120px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                        className="dark:text-white min-h-[120px] w-full rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                         value={ocrExtractedText}
                         onChange={(event) => setOcrExtractedText(event.target.value)}
                         placeholder="Extracted text will appear here. You can edit before generation."
@@ -3961,7 +3961,7 @@ export default function AIUserStudio({
                   {!useCategorySource && contentSourceType === "pdf" ? (
                     <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50/60 p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <label className="inline-flex items-center gap-2 text-xs text-gray-700">
+                        <label className="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
                           <input
                             type="checkbox"
                             checked={ocrOnUpload}
@@ -3972,7 +3972,7 @@ export default function AIUserStudio({
                         </label>
                         <button
                           type="button"
-                          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                          className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 disabled:opacity-60"
                           onClick={() => loadUploadedPdfs()}
                           disabled={loadingUploadedPdfs}
                         >
@@ -3980,7 +3980,7 @@ export default function AIUserStudio({
                         </button>
                       </div>
 
-                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100">
+                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100">
                         {uploadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
                         {uploadingPdf ? "Uploading PDF..." : "Upload PDF"}
                         <input
@@ -3994,7 +3994,7 @@ export default function AIUserStudio({
 
                       <div className="space-y-2">
                         <select
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                          className="w-full rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                           value={selectedUploadedPdfId}
                           onChange={(event) => setSelectedUploadedPdfId(event.target.value)}
                           disabled={loadingUploadedPdfs || uploadedPdfs.length === 0}
@@ -4012,9 +4012,9 @@ export default function AIUserStudio({
                             {uploadedPdfs.map((pdf) => {
                               const isSelected = selectedUploadedPdfId === String(pdf.id);
                               return (
-                                <div key={pdf.id} className={`flex items-center justify-between rounded-md border px-3 py-2 ${isSelected ? "border-indigo-300 bg-indigo-50" : "border-gray-200 bg-white"}`}>
+                                <div key={pdf.id} className={`flex items-center justify-between rounded-md border px-3 py-2 ${isSelected ? "border-indigo-300 bg-indigo-50" : "border-gray-200 bg-white dark:bg-[#0b1120]"}`}>
                                   <div className="min-w-0">
-                                    <p className="truncate text-xs font-semibold text-gray-800">{pdf.filename}</p>
+                                    <p className="truncate text-xs font-semibold text-gray-800 dark:text-gray-300">{pdf.filename}</p>
                                     <p className="text-[11px] text-gray-500">
                                       <FileText className="mr-1 inline-block h-3 w-3" />
                                       {pdf.page_count ? `${pdf.page_count} page(s)` : "Pages: n/a"}
@@ -4027,14 +4027,14 @@ export default function AIUserStudio({
                                   <div className="flex items-center gap-2">
                                     <button
                                       type="button"
-                                      className="rounded-md border border-gray-300 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-100"
+                                      className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-2 py-1 text-[11px] font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100"
                                       onClick={() => setSelectedUploadedPdfId(String(pdf.id))}
                                     >
                                       Use
                                     </button>
                                     <button
                                       type="button"
-                                      className="rounded-md border border-red-300 bg-white px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                                      className="rounded-md border border-red-300 bg-white dark:bg-[#0b1120] px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
                                       onClick={() => handleDeleteUploadedPdf(pdf)}
                                       disabled={deletingPdfId === pdf.id}
                                     >
@@ -4054,14 +4054,14 @@ export default function AIUserStudio({
 
                   {useUnifiedMainsLikeLayout ? (
                     <>
-                      <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                      <div className="overflow-hidden rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a]">
                         <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-3">
-                          <div className="space-y-1 border-b border-slate-200 px-3 py-3 sm:border-r lg:border-b-0">
-                            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Question</label>
+                          <div className="space-y-1 border-b border-[#dce3fb] dark:border-[#1e2a4a] px-3 py-3 sm:border-r lg:border-b-0">
+                            <label className="text-[10px] font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Question</label>
                             <select
                               value={desiredQuestionCount}
                               onChange={(event) => setDesiredQuestionCount(event.target.value)}
-                              className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-sky-500"
+                              className="w-full rounded-md border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-sky-500"
                             >
                               {["5", "10", "15", "20"].map((value) => (
                                 <option key={`desired-count-${value}`} value={value}>
@@ -4070,15 +4070,15 @@ export default function AIUserStudio({
                               ))}
                             </select>
                           </div>
-                          <div className="space-y-1 border-b border-slate-200 px-3 py-3 lg:border-r lg:border-b-0">
-                            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Output Language</label>
+                          <div className="space-y-1 border-b border-[#dce3fb] dark:border-[#1e2a4a] px-3 py-3 lg:border-r lg:border-b-0">
+                            <label className="text-[10px] font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Output Language</label>
                             <select
                               value={outputLanguage}
                               onChange={(event) => {
                                 const next = persistOutputLanguage(event.target.value);
                                 setOutputLanguage(next);
                               }}
-                              className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-sky-500"
+                              className="w-full rounded-md border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-sky-500"
                             >
                               {OUTPUT_LANGUAGE_OPTIONS.map((option) => (
                                 <option key={option.value} value={option.value}>
@@ -4091,7 +4091,7 @@ export default function AIUserStudio({
                             <button
                               type="button"
                               onClick={() => setShowAdvancedFormatControls((prev) => !prev)}
-                              className="inline-flex w-full items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                              className="inline-flex w-full items-center justify-center rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                             >
                               Prompt Settings
                               {showAdvancedFormatControls ? <ChevronUp className="ml-1 h-3.5 w-3.5" /> : <ChevronDown className="ml-1 h-3.5 w-3.5" />}
@@ -4102,39 +4102,39 @@ export default function AIUserStudio({
 
                       <div className="space-y-3 rounded-xl border border-violet-200 bg-violet-50/60 p-3 sm:p-4">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-semibold text-slate-900">2. Question Style</p>
-                          <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-700">
+                          <p className="text-sm font-semibold text-[#141b2d] dark:text-white">2. Question Style</p>
+                          <span className="rounded-full border border-violet-200 bg-white dark:bg-[#0b1120] px-2.5 py-1 text-[11px] font-semibold text-violet-700">
                             Styles selected: {activeMixPlan.length}
                           </span>
                         </div>
-                        <div className="rounded-lg border border-sky-200 bg-white px-3 py-3">
-                          <p className="text-xs font-semibold text-slate-900">
+                        <div className="rounded-lg border border-sky-200 dark:border-sky-800 bg-white dark:bg-[#0b1120] px-3 py-3">
+                          <p className="text-xs font-semibold text-[#141b2d] dark:text-white">
                             You can select how many questions of each question style to be generated.
                           </p>
-                          <p className="mt-1 text-xs text-slate-600">Select the number given below each style.</p>
+                          <p className="mt-1 text-xs text-[#636b86] dark:text-[#94a3b8]">Select the number given below each style.</p>
                           {activeMixPlan.length > 0 ? (
                             <div className="mt-2 flex flex-wrap gap-2">
                               {activeMixPlan.map((plan) => (
                                 <span
                                   key={plan.id}
-                                  className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700"
+                                  className="rounded-full border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950 px-2.5 py-1 text-[11px] font-semibold text-[#334155]"
                                 >
                                   {plan.analysis.title}: {plan.count}
                                 </span>
                               ))}
                             </div>
                           ) : (
-                            <p className="mt-2 text-xs text-slate-600">No question styles selected yet.</p>
+                            <p className="mt-2 text-xs text-[#636b86] dark:text-[#94a3b8]">No question styles selected yet.</p>
                           )}
                         </div>
 
-                        <div className="rounded-xl border border-violet-200 bg-white p-1">
+                        <div className="rounded-xl border border-violet-200 bg-white dark:bg-[#0b1120] p-1">
                           <div className="grid grid-cols-2 gap-1">
                             <button
                               type="button"
                               onClick={() => setQuestionStyleTab("existing")}
                               className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                                questionStyleTab === "existing" ? "bg-violet-100 text-violet-800" : "text-slate-600 hover:bg-slate-100"
+                                questionStyleTab === "existing" ? "bg-violet-100 text-violet-800" : "text-[#636b86] dark:text-[#94a3b8] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                               }`}
                             >
                               Provided Examples
@@ -4143,7 +4143,7 @@ export default function AIUserStudio({
                               type="button"
                               onClick={() => setQuestionStyleTab("own")}
                               className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                                questionStyleTab === "own" ? "bg-violet-100 text-violet-800" : "text-slate-600 hover:bg-slate-100"
+                                questionStyleTab === "own" ? "bg-violet-100 text-violet-800" : "text-[#636b86] dark:text-[#94a3b8] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                               }`}
                             >
                               Enter Example
@@ -4152,21 +4152,21 @@ export default function AIUserStudio({
                         </div>
 
                         {questionStyleTab === "existing" ? (
-                          <div className="space-y-3 rounded-xl border border-violet-200 bg-white p-3 sm:p-4">
+                          <div className="space-y-3 rounded-xl border border-violet-200 bg-white dark:bg-[#0b1120] p-3 sm:p-4">
                             <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Saved Example Formats</p>
-                              <span className="text-[11px] text-slate-500">Use provided examples as the default format source.</span>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-[#636b86] dark:text-[#94a3b8]">Saved Example Formats</p>
+                              <span className="text-[11px] text-[#6c7590] dark:text-[#94a3b8]">Use provided examples as the default format source.</span>
                             </div>
                             <div className="space-y-3">
                               <div className="flex flex-col gap-3">
-                              <div className="flex flex-wrap md:flex-nowrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-                                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 min-w-[60px] shrink-0">STYLE 1</p>
+                              <div className="flex flex-wrap md:flex-nowrap items-center gap-3 rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-2.5">
+                                <p className="text-[10px] font-bold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8] min-w-[60px] shrink-0">STYLE 1</p>
                                 <div className="-mx-1 flex flex-wrap gap-2 px-1">
                                   <button
                                     type="button"
                                     className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${!analysisTagL1Filter
                                       ? "border-violet-400 bg-violet-100 text-violet-800"
-                                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                                      : "border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                                       }`}
                                     onClick={() => {
                                       setAnalysisTagL1Filter("");
@@ -4183,7 +4183,7 @@ export default function AIUserStudio({
                                         type="button"
                                         className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${active
                                           ? "border-violet-400 bg-violet-100 text-violet-800"
-                                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                                          : "border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                                           }`}
                                         onClick={() => {
                                           setAnalysisTagL1Filter(tag);
@@ -4198,14 +4198,14 @@ export default function AIUserStudio({
                               </div>
 
                               {analysisTagL1Filter ? (
-                                <div className="flex flex-wrap md:flex-nowrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-                                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 min-w-[60px] shrink-0">STYLE 2</p>
+                                <div className="flex flex-wrap md:flex-nowrap items-center gap-3 rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-2.5">
+                                  <p className="text-[10px] font-bold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8] min-w-[60px] shrink-0">STYLE 2</p>
                                   <div className="-mx-1 flex flex-wrap gap-2 px-1">
                                     <button
                                       type="button"
                                       className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${!analysisTagL2Filter
                                         ? "border-violet-400 bg-violet-100 text-violet-800"
-                                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                                        : "border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                                         }`}
                                       onClick={() => setAnalysisTagL2Filter("")}
                                     >
@@ -4219,7 +4219,7 @@ export default function AIUserStudio({
                                           type="button"
                                           className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${active
                                             ? "border-violet-400 bg-violet-100 text-violet-800"
-                                            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                                            : "border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                                             }`}
                                           onClick={() => setAnalysisTagL2Filter(tag)}
                                         >
@@ -4243,7 +4243,7 @@ export default function AIUserStudio({
                                     <button
                                       type="button"
                                       onClick={() => setMixEntries([])}
-                                      className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
+                                      className="rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-1 text-[10px] font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                                     >
                                       Clear counts
                                     </button>
@@ -4252,7 +4252,7 @@ export default function AIUserStudio({
                               </div>
 
                               {filteredAnalyses.length === 0 ? (
-                                <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                                <p className="rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-3 py-2 text-xs text-[#6c7590] dark:text-[#94a3b8]">
                                   No examples found for current filters.
                                 </p>
                               ) : (
@@ -4265,7 +4265,7 @@ export default function AIUserStudio({
                                       <div
                                         key={item.id}
                                         className={`rounded-xl border p-3 shadow-sm transition ${
-                                          active ? "border-violet-300 bg-violet-50/70" : "border-slate-200 bg-white hover:border-violet-200"
+                                          active ? "border-violet-300 bg-violet-50/70" : "border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] hover:border-violet-200"
                                         }`}
                                       >
                                         <button
@@ -4273,11 +4273,11 @@ export default function AIUserStudio({
                                           onClick={() => setSelectedAnalysisId(analysisId)}
                                           className="w-full text-left"
                                         >
-                                          <p className={`text-sm font-semibold ${active ? "text-violet-900" : "text-slate-900"}`}>
+                                          <p className={`text-sm font-semibold ${active ? "text-violet-900" : "text-[#141b2d] dark:text-white"}`}>
                                             {item.title}
                                           </p>
                                           {item.description ? (
-                                            <p className="mt-1.5 line-clamp-2 text-[11px] text-slate-500">{item.description}</p>
+                                            <p className="mt-1.5 line-clamp-2 text-[11px] text-[#6c7590] dark:text-[#94a3b8]">{item.description}</p>
                                           ) : null}
                                           {item.example_questions && item.example_questions.length > 0 ? (
                                             <button
@@ -4293,14 +4293,14 @@ export default function AIUserStudio({
                                           ) : null}
                                         </button>
 
-                                        <div className="mt-3 border-t border-slate-200 pt-2">
-                                          <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                        <div className="mt-3 border-t border-[#dce3fb] dark:border-[#1e2a4a] pt-2">
+                                          <label className="text-[10px] font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">
                                             Questions
                                           </label>
                                           <select
                                             value={selectedCount}
                                             onChange={(event) => setMixCountForAnalysis(analysisId, event.target.value)}
-                                            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                                            className="mt-1 w-full rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2 py-1.5 text-xs"
                                           >
                                             {["0", "1", "2", "3", "5", "8", "10", "15", "20"].map((value) => (
                                               <option key={`style-count-${analysisId}-${value}`} value={value}>
@@ -4315,29 +4315,29 @@ export default function AIUserStudio({
                                 </div>
                               )}
 
-                              <p className="text-[11px] text-slate-500">
+                              <p className="text-[11px] text-[#6c7590] dark:text-[#94a3b8]">
                                 Set `0` if you do not want that style in the generated mix.
                               </p>
                             </div>
                           </div>
                         ) : (
-                          <div className="space-y-3 rounded-xl border border-violet-200 bg-white p-3 sm:p-4">
+                          <div className="space-y-3 rounded-xl border border-violet-200 bg-white dark:bg-[#0b1120] p-3 sm:p-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div>
-                                <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Enter Example</p>
-                                <p className="mt-1 text-[11px] text-slate-500">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Enter Example</p>
+                                <p className="mt-1 text-[11px] text-[#6c7590] dark:text-[#94a3b8]">
                                   Add your own example manually or extract it from images with OCR.
                                 </p>
                               </div>
                             </div>
 
-                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-1">
+                            <div className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-1">
                               <div className="grid grid-cols-2 gap-1">
                                 <button
                                   type="button"
                                   onClick={() => setExampleInputMode("manual")}
                                   className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                                    exampleInputMode === "manual" ? "bg-white text-violet-800 shadow-sm" : "text-slate-600 hover:bg-white/70"
+                                    exampleInputMode === "manual" ? "bg-white dark:bg-[#0b1120] text-violet-800 shadow-sm" : "text-[#636b86] dark:text-[#94a3b8] hover:bg-white dark:bg-[#0b1120]/70"
                                   }`}
                                 >
                                   Manual Entry
@@ -4346,7 +4346,7 @@ export default function AIUserStudio({
                                   type="button"
                                   onClick={() => setExampleInputMode("ocr")}
                                   className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                                    exampleInputMode === "ocr" ? "bg-white text-violet-800 shadow-sm" : "text-slate-600 hover:bg-white/70"
+                                    exampleInputMode === "ocr" ? "bg-white dark:bg-[#0b1120] text-violet-800 shadow-sm" : "text-[#636b86] dark:text-[#94a3b8] hover:bg-white dark:bg-[#0b1120]/70"
                                   }`}
                                 >
                                   OCR
@@ -4357,13 +4357,13 @@ export default function AIUserStudio({
                             {exampleInputMode === "manual" ? (
                               <>
                                 <input
-                                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                                  className="dark:text-white w-full rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                                   value={exampleQuestion}
                                   onChange={(event) => setExampleQuestion(event.target.value)}
                                   placeholder="Optional: one example question to steer the generator."
                                 />
                                 <textarea
-                                  className="min-h-[110px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                                  className="dark:text-white min-h-[110px] w-full rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                                   value={exampleQuestionsInput}
                                   onChange={(event) => setExampleQuestionsInput(event.target.value)}
                                   placeholder="Optional: one example per line or one full question block."
@@ -4372,7 +4372,7 @@ export default function AIUserStudio({
                             ) : (
                               <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100">
+                                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100">
                                     <UploadCloud className="h-4 w-4" />
                                     Upload example images
                                     <input
@@ -4385,7 +4385,7 @@ export default function AIUserStudio({
                                   </label>
                                   <button
                                     type="button"
-                                    className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                    className="rounded-md border border-emerald-300 bg-white dark:bg-[#0b1120] px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
                                     onClick={extractTextFromExampleImages}
                                     disabled={extractingExampleImageText || exampleOcrImages.length === 0}
                                   >
@@ -4403,16 +4403,16 @@ export default function AIUserStudio({
                                 {exampleOcrImages.length > 0 ? (
                                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                                     {exampleOcrImages.map((file, index) => (
-                                      <div key={file.id} className="overflow-hidden rounded-md border border-gray-200 bg-white">
-                                        <div className="relative aspect-[4/3] bg-slate-100">
+                                      <div key={file.id} className="overflow-hidden rounded-md border border-gray-200 bg-white dark:bg-[#0b1120]">
+                                        <div className="relative aspect-[4/3] bg-[#eef4ff] dark:bg-[#16213e]">
                                           <Image src={file.preview} alt={file.name} fill className="object-cover" unoptimized />
                                         </div>
                                         <div className="space-y-2 p-2">
-                                          <p className="truncate text-[11px] font-semibold text-gray-700">{file.name}</p>
+                                          <p className="truncate text-[11px] font-semibold text-gray-700 dark:text-gray-300">{file.name}</p>
                                           <div className="flex items-center gap-1">
                                             <button
                                               type="button"
-                                              className="rounded-md border border-gray-300 bg-white px-1.5 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                                              className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-1.5 py-1 text-gray-600 dark:text-gray-400 hover:bg-gray-100 disabled:opacity-40"
                                               onClick={() => moveExampleOcrImage(index, "up")}
                                               disabled={index === 0}
                                             >
@@ -4420,7 +4420,7 @@ export default function AIUserStudio({
                                             </button>
                                             <button
                                               type="button"
-                                              className="rounded-md border border-gray-300 bg-white px-1.5 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                                              className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-1.5 py-1 text-gray-600 dark:text-gray-400 hover:bg-gray-100 disabled:opacity-40"
                                               onClick={() => moveExampleOcrImage(index, "down")}
                                               disabled={index >= exampleOcrImages.length - 1}
                                             >
@@ -4428,7 +4428,7 @@ export default function AIUserStudio({
                                             </button>
                                             <button
                                               type="button"
-                                              className="rounded-md border border-red-300 bg-white px-1.5 py-1 text-red-700 hover:bg-red-50"
+                                              className="rounded-md border border-red-300 bg-white dark:bg-[#0b1120] px-1.5 py-1 text-red-700 hover:bg-red-50"
                                               onClick={() => removeExampleOcrImage(file.id)}
                                             >
                                               <Trash2 className="h-3.5 w-3.5" />
@@ -4443,7 +4443,7 @@ export default function AIUserStudio({
                                 )}
 
                                 <textarea
-                                  className="min-h-[120px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                                  className="dark:text-white min-h-[120px] w-full rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                                   value={exampleQuestionsInput}
                                   onChange={(event) => setExampleQuestionsInput(event.target.value)}
                                   placeholder="Extracted example text will appear here. You can edit it before analysis."
@@ -4454,7 +4454,7 @@ export default function AIUserStudio({
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
-                                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                                className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 disabled:opacity-60"
                                 onClick={analyzeExampleStyle}
                                 disabled={analyzingExampleStyle || !exampleQuestionsInput.trim()}
                               >
@@ -4463,7 +4463,7 @@ export default function AIUserStudio({
                               {analyzedExampleStyle ? (
                                 <button
                                   type="button"
-                                  className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                                  className="rounded-md border border-gray-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100"
                                   onClick={() => setAnalyzedExampleStyle("")}
                                 >
                                   Clear Analysis
@@ -4481,19 +4481,19 @@ export default function AIUserStudio({
 
                       {showAdvancedFormatControls ? (
                         <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
-                          <p className="text-sm font-semibold text-gray-900">Prompt Settings</p>
-                          <p className="text-xs text-gray-600">
+                          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Prompt Settings</p>
+                          <p className="text-xs text-gray-600 dark:text-gray-400">
                             Add user instructions to guide question generation.
                           </p>
                           <div className="space-y-2">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Instruction presets</p>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Instruction presets</p>
                             <div className="flex flex-wrap gap-2">
                               {INSTRUCTION_PRESETS.map((preset) => (
                                 <button
                                   key={preset.id}
                                   type="button"
                                   onClick={() => setAdditionalInstructions(preset.text)}
-                                  className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                                  className="rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-1 text-xs font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                                 >
                                   {preset.label}
                                 </button>
@@ -4501,7 +4501,7 @@ export default function AIUserStudio({
                             </div>
                           </div>
                           <textarea
-                            className="min-h-[90px] w-full rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm"
+                            className="dark:text-white min-h-[90px] w-full rounded-md border border-emerald-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                             value={additionalInstructions}
                             onChange={(event) => setAdditionalInstructions(event.target.value)}
                             placeholder="User instructions (optional)"
@@ -4559,7 +4559,7 @@ export default function AIUserStudio({
                   <div className="flex justify-between pt-4">
                     <button
                       onClick={() => setCurrentStep(3)}
-                      className="inline-flex items-center text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 text-sm font-bold bg-white px-6 py-2.5 rounded-xl border border-slate-200 shadow-sm transition-all"
+                      className="inline-flex items-center text-[#6c7590] dark:text-[#94a3b8] hover:text-indigo-600 hover:bg-indigo-50 text-sm font-bold bg-white dark:bg-[#0b1120] px-6 py-2.5 rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] shadow-sm transition-all"
                     >
                       Back
                     </button>
@@ -4583,7 +4583,7 @@ export default function AIUserStudio({
                 <div className="h-8 w-8 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 flex items-center justify-center shrink-0 shadow-sm mt-1 hidden sm:flex">
                   <Wand2 className="h-4 w-4 text-white" />
                 </div>
-                <div className="rounded-2xl rounded-tl-sm border border-emerald-200 bg-emerald-50/70 shadow-sm p-4 md:p-5 text-sm md:text-[15px] text-slate-700 space-y-3 leading-relaxed">
+                <div className="rounded-2xl rounded-tl-sm border border-emerald-200 bg-emerald-50/70 shadow-sm p-4 md:p-5 text-sm md:text-[15px] text-[#334155] space-y-3 leading-relaxed">
                   <p>Almost there. Any final <strong className="text-indigo-700">instructions</strong> before we generate the quiz?</p>
                 </div>
               </div>
@@ -4594,27 +4594,27 @@ export default function AIUserStudio({
             <div className="order-3 w-full animate-in fade-in slide-in-from-bottom-2 mb-4">
               <div className="w-full space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 text-left">
                 <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
-                  <p className="text-sm font-semibold text-gray-900">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                     {useUnifiedMainsLikeLayout ? "Prompt Settings" : "3. Instructions"}
                   </p>
                   <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
                     Explanation formatting is hardcoded: generated explanations are always requested in HTML format.
                   </p>
-                  <p className="text-xs text-gray-600">
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
                     Add any extra generation constraints here.
                   </p>
                   <p className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
                     Language and question style are controlled from the settings row above.
                   </p>
                   <div className="space-y-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Instruction presets</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Instruction presets</p>
                     <div className="flex flex-wrap gap-2">
                       {INSTRUCTION_PRESETS.map((preset) => (
                         <button
                           key={preset.id}
                           type="button"
                           onClick={() => setAdditionalInstructions(preset.text)}
-                          className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          className="rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-1 text-xs font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e]"
                         >
                           {preset.label}
                         </button>
@@ -4622,7 +4622,7 @@ export default function AIUserStudio({
                     </div>
                   </div>
                   <textarea
-                    className="min-h-[90px] w-full rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm"
+                    className="dark:text-white min-h-[90px] w-full rounded-md border border-emerald-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                     value={additionalInstructions}
                     onChange={(event) => setAdditionalInstructions(event.target.value)}
                     placeholder="Additional instructions"
@@ -4633,7 +4633,7 @@ export default function AIUserStudio({
                   {useUnifiedMainsLikeLayout ? (
                     <button
                       type="button"
-                      className="rounded-xl border border-slate-300 bg-white px-6 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-all"
+                      className="rounded-xl border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-6 py-2.5 text-sm font-bold text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a] transition-all"
                       onClick={resetComposerSession}
                     >
                       Clear
@@ -4642,7 +4642,7 @@ export default function AIUserStudio({
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        className="rounded-xl border border-slate-300 bg-white px-6 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-all"
+                        className="rounded-xl border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-6 py-2.5 text-sm font-bold text-[#334155] hover:bg-[#f8faff] dark:bg-[#0f172a] transition-all"
                         onClick={resetComposerSession}
                       >
                         Clear
@@ -4671,7 +4671,7 @@ export default function AIUserStudio({
           {(generating && mixJobTasks.length > 0) || lastMixJobFailedCount > 0 ? (
             <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Async Mix Job Queue</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Async Mix Job Queue</p>
                 {lastMixJobFailedCount > 0 ? (
                   <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700">
                     <AlertTriangle className="h-3.5 w-3.5" />
@@ -4690,9 +4690,9 @@ export default function AIUserStudio({
                     ? `Retry ${task.attempt}/${task.maxAttempts}`
                     : task.status.toUpperCase();
                   return (
-                    <div key={task.id} className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs">
+                    <div key={task.id} className="rounded-md border border-gray-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="font-semibold text-gray-800">{task.title}</p>
+                        <p className="font-semibold text-gray-800 dark:text-gray-300">{task.title}</p>
                         <span className={`font-semibold ${tone}`}>{statusLabel}</span>
                       </div>
                       <p className="mt-1 text-gray-500">Requested: {task.requestedCount} question(s)</p>
@@ -4706,18 +4706,18 @@ export default function AIUserStudio({
         </section>
 
         {(currentStep >= 4 || resultView || attemptableQuestions.length > 0) && (
-          <section className="space-y-4 rounded-3xl border border-indigo-200 bg-white p-6 shadow-xl w-full mt-8 animate-in fade-in slide-in-from-bottom-4 col-span-1">
+          <section className="space-y-4 rounded-3xl border border-indigo-200 bg-white dark:bg-[#0b1120] p-6 shadow-xl w-full mt-8 animate-in fade-in slide-in-from-bottom-4 col-span-1">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
-                <h2 className="text-xl font-bold text-slate-900">Generated Output</h2>
-                <p className="mt-1 text-xs text-slate-600">Review generated questions, attempt them, then export or add to Prelims Tests.</p>
+                <h2 className="text-xl font-bold text-[#141b2d] dark:text-white">Generated Output</h2>
+                <p className="mt-1 text-xs text-[#636b86] dark:text-[#94a3b8]">Review generated questions, attempt them, then export or add to Prelims Tests.</p>
               </div>
               <button
                 onClick={() => {
                   setResult(null);
                   setCurrentStep(3);
                 }}
-                className="inline-flex items-center text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 text-sm font-bold bg-white px-6 py-2.5 rounded-full border border-slate-200 shadow-sm transition-all shrink-0"
+                className="inline-flex items-center text-[#6c7590] dark:text-[#94a3b8] hover:text-indigo-600 hover:bg-indigo-50 text-sm font-bold bg-white dark:bg-[#0b1120] px-6 py-2.5 rounded-full border border-[#dce3fb] dark:border-[#1e2a4a] shadow-sm transition-all shrink-0"
               >
                 <RefreshCcw className="mr-2 h-4 w-4" />
                 Start Over
@@ -4727,22 +4727,22 @@ export default function AIUserStudio({
             <div className="space-y-4 rounded-xl border border-indigo-200 bg-gradient-to-br from-white via-slate-50 to-indigo-50 p-4 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-slate-900">Post-Generation Actions</p>
-                  <p className="mt-1 text-xs text-slate-600">Export your output or move it directly into Prelims Tests.</p>
+                  <p className="text-sm font-semibold text-[#141b2d] dark:text-white">Post-Generation Actions</p>
+                  <p className="mt-1 text-xs text-[#636b86] dark:text-[#94a3b8]">Export your output or move it directly into Prelims Tests.</p>
                 </div>
-                <span className="inline-flex rounded-full border border-indigo-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+                <span className="inline-flex rounded-full border border-indigo-200 bg-white dark:bg-[#0b1120] px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
                   {attemptableQuestions.length} Ready
                 </span>
               </div>
-              <p className="text-xs text-slate-600">
-                Generated questions: <span className="font-semibold text-slate-900">{attemptableQuestions.length}</span>
+              <p className="text-xs text-[#636b86] dark:text-[#94a3b8]">
+                Generated questions: <span className="font-semibold text-[#141b2d] dark:text-white">{attemptableQuestions.length}</span>
               </p>
-              <p className="text-xs text-slate-600">
-                Selected for actions: <span className="font-semibold text-slate-900">{selectedGeneratedItems.length}</span>
+              <p className="text-xs text-[#636b86] dark:text-[#94a3b8]">
+                Selected for actions: <span className="font-semibold text-[#141b2d] dark:text-white">{selectedGeneratedItems.length}</span>
               </p>
 
               <div className="space-y-3">
-                <div className="overflow-x-auto rounded-xl bg-slate-100 p-1">
+                <div className="overflow-x-auto rounded-xl bg-[#eef4ff] dark:bg-[#16213e] p-1">
                   <div className="inline-flex min-w-full gap-1">
                     {postActionTabs.map((tab) => {
                       const active = activePostActionTab === tab.id;
@@ -4752,8 +4752,8 @@ export default function AIUserStudio({
                           type="button"
                           onClick={() => setActivePostActionTab(tab.id)}
                           className={`inline-flex shrink-0 items-center justify-center rounded-lg px-3 py-2 text-xs font-semibold transition sm:flex-1 ${active
-                            ? "bg-white text-indigo-700 shadow-sm"
-                            : "text-slate-600 hover:text-slate-800"
+                            ? "bg-white dark:bg-[#0b1120] text-indigo-700 shadow-sm"
+                            : "text-[#636b86] dark:text-[#94a3b8] hover:text-[#1c263c]"
                             }`}
                         >
                           {tab.label}
@@ -4763,13 +4763,13 @@ export default function AIUserStudio({
                   </div>
                 </div>
 
-                <div className="space-y-3 rounded-lg border border-slate-200 bg-white/90 p-3 sm:p-4">
+                <div className="space-y-3 rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120]/90 p-3 sm:p-4">
                   {activePostActionTab === "pdf" ? (
                     <>
-                      <p className="text-xs text-slate-600">Create a PDF from selected generated questions.</p>
+                      <p className="text-xs text-[#636b86] dark:text-[#94a3b8]">Create a PDF from selected generated questions.</p>
                       <button
                         type="button"
-                        className="inline-flex w-full items-center justify-center rounded-md border border-indigo-300 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-60 sm:w-auto"
+                        className="inline-flex w-full items-center justify-center rounded-md border border-indigo-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-60 sm:w-auto"
                         onClick={handleCreatePdf}
                         disabled={isGeneratingPdf || selectedGeneratedItems.length === 0}
                       >
@@ -4781,11 +4781,11 @@ export default function AIUserStudio({
 
                   {activePostActionTab === "share" ? (
                     <>
-                      <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Share Selected Quizzes</label>
+                      <label className="text-xs font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Share Selected Quizzes</label>
                       <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                         <button
                           type="button"
-                          className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                          className="inline-flex items-center justify-center rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e] disabled:opacity-60"
                           onClick={() => void shareSelectedQuizzes("native")}
                           disabled={selectedGeneratedItems.length === 0}
                         >
@@ -4794,7 +4794,7 @@ export default function AIUserStudio({
                         </button>
                         <button
                           type="button"
-                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                          className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e] disabled:opacity-60"
                           onClick={() => void shareSelectedQuizzes("whatsapp")}
                           disabled={selectedGeneratedItems.length === 0}
                         >
@@ -4802,7 +4802,7 @@ export default function AIUserStudio({
                         </button>
                         <button
                           type="button"
-                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                          className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e] disabled:opacity-60"
                           onClick={() => void shareSelectedQuizzes("x")}
                           disabled={selectedGeneratedItems.length === 0}
                         >
@@ -4810,7 +4810,7 @@ export default function AIUserStudio({
                         </button>
                         <button
                           type="button"
-                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                          className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e] disabled:opacity-60"
                           onClick={() => void shareSelectedQuizzes("telegram")}
                           disabled={selectedGeneratedItems.length === 0}
                         >
@@ -4818,7 +4818,7 @@ export default function AIUserStudio({
                         </button>
                         <button
                           type="button"
-                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                          className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e] disabled:opacity-60"
                           onClick={() => void shareSelectedQuizzes("facebook")}
                           disabled={selectedGeneratedItems.length === 0}
                         >
@@ -4826,7 +4826,7 @@ export default function AIUserStudio({
                         </button>
                         <button
                           type="button"
-                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                          className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e] disabled:opacity-60"
                           onClick={() => void shareSelectedQuizzes("copy")}
                           disabled={selectedGeneratedItems.length === 0}
                         >
@@ -4848,12 +4848,12 @@ export default function AIUserStudio({
                             : `Bound to Prelims Test #${requestedCollectionId}. Selected quizzes will be added only to this test.`}
                         </p>
                       ) : null}
-                      <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">
                         {requireSpecificTargetCollection ? "Add to Bound Prelims Test" : "Add to Existing Prelims Test"}
                       </label>
                       <div className="flex flex-col gap-2 sm:flex-row">
                         <select
-                          className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                          className="flex-1 rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                           value={selectedCollectionId}
                           onChange={(event) => setSelectedCollectionId(event.target.value)}
                           disabled={requireSpecificTargetCollection}
@@ -4867,7 +4867,7 @@ export default function AIUserStudio({
                         </select>
                         <button
                           type="button"
-                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 sm:w-auto"
+                          className="w-full rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#eef4ff] dark:bg-[#16213e] disabled:opacity-60 sm:w-auto"
                           onClick={handleAddToSelectedCollection}
                           disabled={
                             isAddingToCollection
@@ -4884,10 +4884,10 @@ export default function AIUserStudio({
 
                   {activePostActionTab === "create_new" && !requireSpecificTargetCollection ? (
                     <>
-                      <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Create New Prelims Test</label>
+                      <label className="text-xs font-semibold uppercase tracking-wide text-[#6c7590] dark:text-[#94a3b8]">Create New Prelims Test</label>
                       <div className="flex flex-col gap-2 sm:flex-row">
                         <input
-                          className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                          className="dark:text-white flex-1 rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
                           value={newCollectionName}
                           onChange={(event) => setNewCollectionName(event.target.value)}
                           placeholder="e.g. AI Prelims Practice Set"
@@ -4922,26 +4922,26 @@ export default function AIUserStudio({
       {/* Example Questions Modal */}
       {exampleQuestionsModalItem ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-          <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col transition-all">
-            <div className="flex items-center justify-between border-b border-slate-100 p-5 bg-slate-50">
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-white dark:bg-[#0b1120] shadow-2xl flex flex-col transition-all">
+            <div className="flex items-center justify-between border-b border-slate-100 p-5 bg-[#f8faff] dark:bg-[#0f172a]">
               <div>
-                <h3 className="text-lg font-bold text-slate-800">{exampleQuestionsModalItem.title}</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Reference Patterns for AI Generator</p>
+                <h3 className="text-lg font-bold text-[#1c263c]">{exampleQuestionsModalItem.title}</h3>
+                <p className="text-xs text-[#6c7590] dark:text-[#94a3b8] mt-0.5">Reference Patterns for AI Generator</p>
               </div>
               <button
                 type="button"
-                className="rounded-full p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors"
+                className="rounded-full p-2 text-[#94a3b8] hover:bg-slate-200 hover:text-[#636b86] dark:text-[#94a3b8] transition-colors"
                 onClick={() => setExampleQuestionsModalItem(null)}
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-50 space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 bg-[#f8faff] dark:bg-[#0f172a] space-y-4">
               {exampleQuestionsModalItem.example_questions.map((question, index) => (
-                <div key={index} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm relative group overflow-hidden">
+                <div key={index} className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4 shadow-sm relative group overflow-hidden">
                   <div className="absolute top-0 left-0 w-1 h-full bg-violet-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <p className="text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-widest">Example {index + 1}</p>
-                  <pre className="whitespace-pre-wrap text-sm text-slate-700 font-sans leading-relaxed">{question}</pre>
+                  <p className="text-[10px] font-bold text-[#94a3b8] mb-2 uppercase tracking-widest">Example {index + 1}</p>
+                  <pre className="whitespace-pre-wrap text-sm text-[#334155] font-sans leading-relaxed">{question}</pre>
                 </div>
               ))}
             </div>

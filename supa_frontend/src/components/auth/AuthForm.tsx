@@ -50,7 +50,8 @@ const Label = ({ children, htmlFor }: { children: ReactNode, htmlFor: string }) 
     </label>
 )
 
-export default function AuthForm({ view }: { view: 'sign_in' | 'sign_up' }) {
+export default function AuthForm({ view: initialView }: { view: 'sign_in' | 'sign_up' | 'forgot_password' }) {
+    const [view, setView] = useState(initialView)
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [isLoading, setIsLoading] = useState(false)
@@ -72,7 +73,7 @@ export default function AuthForm({ view }: { view: 'sign_in' | 'sign_up' }) {
                 if (error) throw error
                 router.refresh()
                 router.push('/')
-            } else {
+            } else if (view === 'sign_up') {
                 const siteUrl = getPublicSiteUrl()
                 const emailRedirectTo = siteUrl ? `${siteUrl}/auth/callback` : undefined
                 const { error } = await supabase.auth.signUp({
@@ -85,6 +86,16 @@ export default function AuthForm({ view }: { view: 'sign_in' | 'sign_up' }) {
                 if (error) throw error
                 toast.message('Verification email sent', {
                     description: 'Check your email to confirm your account.'
+                })
+            } else if (view === 'forgot_password') {
+                const siteUrl = getPublicSiteUrl()
+                const redirectTo = siteUrl ? `${siteUrl}/auth/callback?next=/auth/reset-password` : undefined
+                const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                    redirectTo,
+                })
+                if (error) throw error
+                toast.message('Reset link sent', {
+                    description: 'Check your email for the password reset link.'
                 })
             }
         } catch (err: unknown) {
@@ -114,17 +125,30 @@ export default function AuthForm({ view }: { view: 'sign_in' | 'sign_up' }) {
                         />
                     </div>
                     <div className="grid gap-1">
-                        <Label htmlFor="password">Password</Label>
-                        <Input
-                            id="password"
-                            placeholder="********"
-                            type="password"
-                            autoCapitalize="none"
-                            autoComplete="current-password"
-                            disabled={isLoading}
-                            value={password}
-                            onChange={(e: ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
-                        />
+                        <div className="flex items-center justify-between">
+                            <Label htmlFor="password">Password</Label>
+                            {view === 'sign_in' && (
+                                <button
+                                    type="button"
+                                    onClick={() => setView('forgot_password')}
+                                    className="text-xs text-slate-500 hover:text-slate-900 underline underline-offset-4"
+                                >
+                                    Forgot password?
+                                </button>
+                            )}
+                        </div>
+                        {view !== 'forgot_password' && (
+                            <Input
+                                id="password"
+                                placeholder="********"
+                                type="password"
+                                autoCapitalize="none"
+                                autoComplete="current-password"
+                                disabled={isLoading}
+                                value={password}
+                                onChange={(e: ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
+                            />
+                        )}
                     </div>
                     {error && (
                         <div className="text-red-500 text-sm p-2 bg-red-50 rounded border border-red-200">
@@ -132,8 +156,18 @@ export default function AuthForm({ view }: { view: 'sign_in' | 'sign_up' }) {
                         </div>
                     )}
                     <Button isLoading={isLoading}>
-                        {view === 'sign_in' ? 'Sign In with Email' : 'Sign Up with Email'}
+                        {view === 'sign_in' ? 'Sign In with Email' : 
+                         view === 'sign_up' ? 'Sign Up with Email' : 'Send Reset Link'}
                     </Button>
+                    {view === 'forgot_password' && (
+                        <button
+                            type="button"
+                            onClick={() => setView('sign_in')}
+                            className="text-sm text-slate-500 hover:text-slate-900 text-center"
+                        >
+                            Back to Sign In
+                        </button>
+                    )}
                 </div>
             </form>
             <div className="relative">

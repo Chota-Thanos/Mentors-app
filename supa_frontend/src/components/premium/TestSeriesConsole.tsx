@@ -434,12 +434,12 @@ export default function TestSeriesConsole() {
   };
 
   if (loading) {
-    return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading workspace...</div>;
+    return <div className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6 text-sm text-[#6c7590] dark:text-[#94a3b8]">Loading workspace...</div>;
   }
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 to-slate-700 p-6 text-white">
+      <div className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-gradient-to-r from-slate-900 to-slate-700 p-6 text-white">
         <h1 className="text-2xl font-bold">Programs & Mentorship Hub</h1>
         <p className="mt-2 text-sm text-slate-100/90">
           Mobile-friendly workspace for Prelims and Mains operations, with role-based access for Quiz Masters and Mains Mentors.
@@ -448,7 +448,7 @@ export default function TestSeriesConsole() {
           <button
             type="button"
             onClick={() => setMode("explore")}
-            className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "explore" ? "bg-white text-slate-900" : "bg-white/20 text-white"}`}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "explore" ? "bg-white dark:bg-[#0b1120] text-[#141b2d] dark:text-white" : "bg-white dark:bg-[#0b1120]/20 text-white"}`}
           >
             Explore
           </button>
@@ -456,7 +456,7 @@ export default function TestSeriesConsole() {
             <button
               type="button"
               onClick={() => setMode("provider")}
-              className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "provider" ? "bg-white text-slate-900" : "bg-white/20 text-white"}`}
+              className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "provider" ? "bg-white dark:bg-[#0b1120] text-[#141b2d] dark:text-white" : "bg-white dark:bg-[#0b1120]/20 text-white"}`}
             >
               Operations Console
             </button>
@@ -471,7 +471,7 @@ export default function TestSeriesConsole() {
               if (canBuildSeries) void loadProviderSummary();
               if (moderatorLike && !canBuildSeries) void loadModerationSummary();
             }}
-            className="inline-flex items-center gap-1 rounded-md bg-white/20 px-3 py-1.5 text-sm font-semibold text-white"
+            className="inline-flex items-center gap-1 rounded-md bg-white dark:bg-[#0b1120]/20 px-3 py-1.5 text-sm font-semibold text-white"
           >
             <RefreshCw className="h-4 w-4" />
             Refresh
@@ -500,10 +500,10 @@ export default function TestSeriesConsole() {
                     { key: "slots", label: "Upcoming Slots", value: providerSummary?.upcoming_slots ?? 0, icon: CalendarDays },
                   ]
               ).map((card) => (
-                <div key={card.key} className="rounded-xl border border-slate-200 bg-white p-4">
-                  <card.icon className="h-4 w-4 text-slate-500" />
-                  <p className="mt-2 text-xs font-semibold uppercase text-slate-500">{card.label}</p>
-                  <p className="text-2xl font-bold text-slate-900">{providerSummaryLoading ? "..." : card.value}</p>
+                <div key={card.key} className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4">
+                  <card.icon className="h-4 w-4 text-[#6c7590] dark:text-[#94a3b8]" />
+                  <p className="mt-2 text-xs font-semibold uppercase text-[#6c7590] dark:text-[#94a3b8]">{card.label}</p>
+                  <p className="text-2xl font-bold text-[#141b2d] dark:text-white">{providerSummaryLoading ? "..." : card.value}</p>
                 </div>
               ))}
             </div>
@@ -517,26 +517,26 @@ export default function TestSeriesConsole() {
                 { key: "mentorship", label: "Mentorship Pending", value: moderationSummary?.mentorship_pending_requests ?? 0, icon: ShieldCheck },
                 { key: "copytotal", label: "Total Copy Submissions", value: moderationSummary?.copy_submissions_total ?? 0, icon: CalendarDays },
               ].map((card) => (
-                <div key={card.key} className="rounded-xl border border-slate-200 bg-white p-4">
-                  <card.icon className="h-4 w-4 text-slate-500" />
-                  <p className="mt-2 text-xs font-semibold uppercase text-slate-500">{card.label}</p>
-                  <p className="text-2xl font-bold text-slate-900">{moderationSummaryLoading ? "..." : card.value}</p>
+                <div key={card.key} className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4">
+                  <card.icon className="h-4 w-4 text-[#6c7590] dark:text-[#94a3b8]" />
+                  <p className="mt-2 text-xs font-semibold uppercase text-[#6c7590] dark:text-[#94a3b8]">{card.label}</p>
+                  <p className="text-2xl font-bold text-[#141b2d] dark:text-white">{moderationSummaryLoading ? "..." : card.value}</p>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+            <div className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4 text-sm text-[#636b86] dark:text-gray-300">
               Monitoring mode: series authoring stats are visible only to Quiz Master, Mains Mentor, or admin roles.
             </div>
           )}
 
           <div className="space-y-4">
-            <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+            <div className="space-y-4 rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4">
               {canBuildSeries ? (
                 <>
                   <>
                     <div className="flex items-center justify-between mb-4">
-                      <p className="text-sm font-semibold text-slate-900">{editingSeriesId ? "Edit Programs" : "Programs Console"}</p>
+                      <p className="text-sm font-semibold text-[#141b2d] dark:text-white">{editingSeriesId ? "Edit Programs" : "Programs Console"}</p>
                       {!editingSeriesId && (
                         <Link href="/programs/create" className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
                           <Plus className="h-4 w-4" />
@@ -549,7 +549,7 @@ export default function TestSeriesConsole() {
                         <input
                           value={seriesForm.title || ""}
                           onChange={(event) => setSeriesForm((prev) => ({ ...prev, title: event.target.value }))}
-                          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          className="w-full rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] px-3 py-2 text-sm"
                           placeholder="Series title"
                         />
                         <RichTextField
@@ -562,7 +562,7 @@ export default function TestSeriesConsole() {
                         <input
                           value={seriesForm.cover_image_url || ""}
                           onChange={(event) => setSeriesForm((prev) => ({ ...prev, cover_image_url: event.target.value }))}
-                          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          className="w-full rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] px-3 py-2 text-sm"
                           placeholder="Cover image URL"
                         />
                         <div className="grid gap-2 md:grid-cols-2">
@@ -570,7 +570,7 @@ export default function TestSeriesConsole() {
                             value={seriesForm.series_kind || seriesKindOptions[0]?.value || "quiz"}
                             onChange={(event) => setSeriesForm((prev) => ({ ...prev, series_kind: event.target.value as "mains" | "quiz" | "hybrid" }))}
                             disabled={seriesKindOptions.length <= 1}
-                            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                            className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] px-3 py-2 text-sm"
                           >
                             {seriesKindOptions.map((option) => (
                               <option key={option.value} value={option.value}>
@@ -581,7 +581,7 @@ export default function TestSeriesConsole() {
                           <select
                             value={seriesForm.access_type || "subscription"}
                             onChange={(event) => setSeriesForm((prev) => ({ ...prev, access_type: event.target.value as "subscription" | "free" | "paid" }))}
-                            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                            className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] px-3 py-2 text-sm"
                           >
                             <option value="subscription">Subscription</option>
                             <option value="free">Free</option>
@@ -594,10 +594,10 @@ export default function TestSeriesConsole() {
                             min={0}
                             value={String(seriesForm.price || 0)}
                             onChange={(event) => setSeriesForm((prev) => ({ ...prev, price: Number(event.target.value) }))}
-                            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                            className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] px-3 py-2 text-sm"
                             placeholder="Price"
                           />
-                          <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm">
+                          <label className="inline-flex items-center gap-2 rounded-md border border-[#dce3fb] dark:border-[#1e2a4a] px-3 py-2 text-sm">
                             <input
                               type="checkbox"
                               checked={Boolean(seriesForm.is_public)}
@@ -608,12 +608,12 @@ export default function TestSeriesConsole() {
                         </div>
                         <div className="space-y-2">
                           <div className="flex items-center justify-between gap-3">
-                            <label className="text-xs font-semibold uppercase text-slate-500">Target exams</label>
-                            <span className="text-xs text-slate-500">Programs and tests show under these exams.</span>
+                            <label className="text-xs font-semibold uppercase text-[#6c7590] dark:text-[#94a3b8]">Target exams</label>
+                            <span className="text-xs text-[#6c7590] dark:text-[#94a3b8]">Programs and tests show under these exams.</span>
                           </div>
-                          <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                          <div className="flex flex-wrap gap-2 rounded-md border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3">
                             {availableExams.length === 0 ? (
-                              <span className="text-sm text-slate-500">No active exams available.</span>
+                              <span className="text-sm text-[#6c7590] dark:text-[#94a3b8]">No active exams available.</span>
                             ) : availableExams.map((exam) => {
                               const active = (seriesForm.exam_ids || []).includes(exam.id);
                               return (
@@ -624,7 +624,7 @@ export default function TestSeriesConsole() {
                                   className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
                                     active
                                       ? "border-indigo-500 bg-indigo-600 text-white"
-                                      : "border-slate-300 bg-white text-slate-700"
+                                      : "border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] text-[#334155] dark:text-gray-200"
                                   }`}
                                 >
                                   {exam.name}
@@ -643,13 +643,13 @@ export default function TestSeriesConsole() {
                             <Plus className="h-4 w-4" />
                             Update
                           </button>
-                          <button type="button" onClick={resetSeriesForm} className="rounded-md border border-slate-300 px-3 py-2 text-sm">
+                          <button type="button" onClick={resetSeriesForm} className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] px-3 py-2 text-sm">
                             Cancel
                           </button>
                         </div>
                       </div>
                     ) : (
-                      <p className="text-xs text-slate-500">Use the cards below to open or manage a program, or use the button above to create a new one.</p>
+                      <p className="text-xs text-[#6c7590] dark:text-[#94a3b8]">Use the cards below to open or manage a program, or use the button above to create a new one.</p>
                     )}
                   </>
                 </>
@@ -657,33 +657,33 @@ export default function TestSeriesConsole() {
                 <p className="text-xs text-amber-700">Read-only mode. Quiz Master, Mains Mentor, or admin role is required to create or edit programs.</p>
               )}
 
-              <div className="border-t border-slate-200 pt-4">
-                <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Your Series</p>
+              <div className="border-t border-[#dce3fb] dark:border-[#1e2a4a] pt-4">
+                <p className="mb-2 text-xs font-semibold uppercase text-[#6c7590] dark:text-[#94a3b8]">Your Series</p>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {seriesRows.map((series) => (
-                    <article key={series.id} className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_14px_32px_rgba(15,23,42,0.06)] transition hover:-translate-y-1 hover:shadow-[0_22px_48px_rgba(15,23,42,0.12)]">
-                      <div className="bg-[linear-gradient(135deg,#eef4ff_0%,#f8fbff_55%,#edfdf7_100%)] px-4 py-4">
+                    <article key={series.id} className="overflow-hidden rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] shadow-[0_14px_32px_rgba(15,23,42,0.06)] transition hover:-translate-y-1 hover:shadow-[0_22px_48px_rgba(15,23,42,0.12)]">
+                      <div className="bg-gradient-to-b from-white to-[#f7f9ff] dark:from-[#0b1120] dark:to-[#0f172a] px-4 py-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="truncate text-base font-black tracking-tight text-[#091a4a]">{series.title}</p>
-                            <p className="mt-1 text-xs text-slate-600">
+                            <p className="mt-1 text-xs text-[#636b86] dark:text-gray-300">
                               {series.test_count} tests
                             </p>
                           </div>
-                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${series.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>
+                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${series.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-[#636b86] dark:text-gray-300"}`}>
                             {series.is_active ? "Active" : "Archived"}
                           </span>
                         </div>
                       </div>
                       <div className="px-4 py-4">
                         <div className="flex flex-wrap gap-2">
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                          <span className="rounded-full border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-2.5 py-1 text-[11px] font-semibold text-[#636b86] dark:text-gray-300">
                             {String(series.series_kind || "").trim() || "series"}
                           </span>
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                          <span className="rounded-full border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-2.5 py-1 text-[11px] font-semibold text-[#636b86] dark:text-gray-300">
                             {String(series.access_type || "").trim() || "subscription"}
                           </span>
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                          <span className="rounded-full border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-2.5 py-1 text-[11px] font-semibold text-[#636b86] dark:text-gray-300">
                             {series.is_public ? "Public" : "Private"}
                           </span>
                           {(series.exam_ids || []).map((examId) => (
@@ -693,7 +693,7 @@ export default function TestSeriesConsole() {
                           ))}
                         </div>
                         <div className="mt-4 flex flex-wrap gap-2">
-                          <Link href={`/programs/${series.id}`} className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700">
+                          <Link href={`/programs/${series.id}`} className="inline-flex items-center rounded-xl border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-[11px] font-semibold text-[#334155] dark:text-gray-200">
                           Detail
                         </Link>
                         <Link href={`/programs/${series.id}/manage`} className="inline-flex items-center rounded-xl border border-indigo-300 bg-indigo-50 px-3 py-2 text-[11px] font-semibold text-indigo-700">
@@ -703,18 +703,18 @@ export default function TestSeriesConsole() {
                       </div>
                     </article>
                   ))}
-                  {!seriesLoading && seriesRows.length === 0 ? <p className="text-sm text-slate-500">No series yet.</p> : null}
+                  {!seriesLoading && seriesRows.length === 0 ? <p className="text-sm text-[#6c7590] dark:text-[#94a3b8]">No series yet.</p> : null}
                 </div>
               </div>
             </div>
           </div>
 
           {canBuildMainsSeries || canHandleMentorship ? (
-            <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900">Mentorship Workspace</h3>
-                  <p className="mt-1 text-xs text-slate-600">
+                  <h3 className="text-lg font-semibold text-[#141b2d] dark:text-white">Mentorship Workspace</h3>
+                  <p className="mt-1 text-xs text-[#636b86] dark:text-gray-300">
                     Availability planning, mentorship settings, upcoming calls, and session records now live on the
                     dedicated mentorship manage page to avoid duplicate mentor workflows.
                   </p>
@@ -728,25 +728,25 @@ export default function TestSeriesConsole() {
               </div>
 
               <div className="mt-4 grid gap-3 md:grid-cols-4 text-xs">
-                <div className="rounded border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-slate-500">Published slots</p>
-                  <p className="mt-1 text-lg font-semibold text-slate-900">{slots.length}</p>
+                <div className="rounded border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3">
+                  <p className="text-[#6c7590] dark:text-[#94a3b8]">Published slots</p>
+                  <p className="mt-1 text-lg font-semibold text-[#141b2d] dark:text-white">{slots.length}</p>
                 </div>
-                <div className="rounded border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-slate-500">Open requests</p>
-                  <p className="mt-1 text-lg font-semibold text-slate-900">
+                <div className="rounded border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3">
+                  <p className="text-[#6c7590] dark:text-[#94a3b8]">Open requests</p>
+                  <p className="mt-1 text-lg font-semibold text-[#141b2d] dark:text-white">
                     {mentorshipRequests.filter((request) => request.status === "requested").length}
                   </p>
                 </div>
-                <div className="rounded border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-slate-500">Scheduled calls</p>
-                  <p className="mt-1 text-lg font-semibold text-slate-900">
+                <div className="rounded border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3">
+                  <p className="text-[#6c7590] dark:text-[#94a3b8]">Scheduled calls</p>
+                  <p className="mt-1 text-lg font-semibold text-[#141b2d] dark:text-white">
                     {mentorshipRequests.filter((request) => request.status === "scheduled").length}
                   </p>
                 </div>
-                <div className="rounded border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-slate-500">Completed calls</p>
-                  <p className="mt-1 text-lg font-semibold text-slate-900">
+                <div className="rounded border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3">
+                  <p className="text-[#6c7590] dark:text-[#94a3b8]">Completed calls</p>
+                  <p className="mt-1 text-lg font-semibold text-[#141b2d] dark:text-white">
                     {mentorshipRequests.filter((request) => request.status === "completed").length}
                   </p>
                 </div>
@@ -755,11 +755,11 @@ export default function TestSeriesConsole() {
               <div className="mt-4 flex flex-wrap gap-2">
                 <Link
                   href={selectedSeriesId ? `/mentorship/manage?seriesId=${selectedSeriesId}` : "/mentorship/manage"}
-                  className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                  className="rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] dark:text-gray-200"
                 >
                   Open Series Queue
                 </Link>
-                <Link href="/mentorship/manage" className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                <Link href="/mentorship/manage" className="rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] dark:text-gray-200">
                   Open All Calls & Records
                 </Link>
               </div>
@@ -772,24 +772,24 @@ export default function TestSeriesConsole() {
             {seriesRows.map((series) => {
               const tests = seriesTestsById[String(series.id)] || [];
               return (
-                <article key={series.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
-                  <div className="bg-[linear-gradient(135deg,#f9fbff_0%,#eef4ff_52%,#f5fffb_100%)] px-5 py-5">
+                <article key={series.id} className="overflow-hidden rounded-[28px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+                  <div className="bg-gradient-to-b from-white to-[#f7f9ff] dark:from-[#0b1120] dark:to-[#0f172a] px-5 py-5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h2 className="text-xl font-black tracking-tight text-[#091a4a]">{series.title}</h2>
-                        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{richTextToPlainText(series.description || "") || "No description."}</p>
+                        <p className="mt-2 max-w-3xl text-sm leading-6 text-[#636b86] dark:text-gray-300">{richTextToPlainText(series.description || "") || "No description."}</p>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <span className="rounded-full border border-white/70 bg-white/80 px-3 py-1 text-[11px] font-semibold text-slate-600">
+                        <span className="rounded-full border border-white/70 bg-white dark:bg-[#0b1120]/80 px-3 py-1 text-[11px] font-semibold text-[#636b86] dark:text-gray-300">
                           {String(series.series_kind || "").trim() || "series"}
                         </span>
-                        <span className="rounded-full border border-white/70 bg-white/80 px-3 py-1 text-[11px] font-semibold text-slate-600">
+                        <span className="rounded-full border border-white/70 bg-white dark:bg-[#0b1120]/80 px-3 py-1 text-[11px] font-semibold text-[#636b86] dark:text-gray-300">
                           {series.test_count} tests
                         </span>
                       </div>
                     </div>
                     <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <Link href={`/programs/${series.id}`} className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                      <Link href={`/programs/${series.id}`} className="inline-flex items-center rounded-xl border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] dark:text-gray-200">
                       Open Detail
                     </Link>
                     {isAuthenticated ? (
@@ -801,25 +801,25 @@ export default function TestSeriesConsole() {
                     {tests.map((test) => {
                       const submissions = copySubmissionsByTest[String(test.id)] || [];
                       return (
-                        <div key={test.id} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
+                        <div key={test.id} className="rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-slate-50/80 p-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
-                              <p className="text-sm font-semibold text-slate-900">{test.title}</p>
-                              <p className="text-xs text-slate-500">{richTextToPlainText(test.description || "") || "No description."}</p>
+                              <p className="text-sm font-semibold text-[#141b2d] dark:text-white">{test.title}</p>
+                              <p className="text-xs text-[#6c7590] dark:text-[#94a3b8]">{richTextToPlainText(test.description || "") || "No description."}</p>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              <Link href={`/collections/${test.id}`} className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700">Open</Link>
-                              <Link href={test.test_kind === "mains" ? `/collections/${test.id}` : `/collections/${test.id}/test`} className="rounded-xl border border-indigo-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-700">{test.test_kind === "mains" ? "Open Test" : "Start"}</Link>
+                              <Link href={`/collections/${test.id}`} className="rounded-xl border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-1.5 text-xs font-semibold text-[#334155] dark:text-gray-200">Open</Link>
+                              <Link href={test.test_kind === "mains" ? `/collections/${test.id}` : `/collections/${test.id}/test`} className="rounded-xl border border-indigo-300 bg-white dark:bg-[#0b1120] px-2.5 py-1.5 text-xs font-semibold text-indigo-700">{test.test_kind === "mains" ? "Open Test" : "Start"}</Link>
                             </div>
                           </div>
                           {test.test_kind === "mains" && isAuthenticated ? (
                             <div className="mt-2 space-y-2">
-                              <p className="text-xs text-slate-600">Use the main test page to submit a full answer PDF or question-wise answer photos. That same page now runs the full evaluation and mentorship flow.</p>
+                              <p className="text-xs text-[#636b86] dark:text-gray-300">Use the main test page to submit a full answer PDF or question-wise answer photos. That same page now runs the full evaluation and mentorship flow.</p>
                               <div className="flex flex-wrap gap-2">
-                                <button type="button" onClick={() => void loadCopySubmissions(test.id)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs">Refresh Submissions</button>
+                                <button type="button" onClick={() => void loadCopySubmissions(test.id)} className="rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2 py-1 text-xs">Refresh Submissions</button>
                               </div>
                               {submissions.map((submission) => (
-                                <div key={submission.id} className="rounded border border-slate-200 bg-white px-2 py-1 text-xs">
+                                <div key={submission.id} className="rounded border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] px-2 py-1 text-xs">
                                   #{submission.id} | {submission.status}
                                   {submission.total_marks !== null && submission.total_marks !== undefined ? ` | Marks: ${submission.total_marks}` : ""}
                                   {submission.checked_copy_pdf_url ? (
@@ -837,26 +837,26 @@ export default function TestSeriesConsole() {
               );
             })}
             {!seriesLoading && seriesRows.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-sm text-slate-500">
+              <div className="rounded-xl border border-dashed border-[#c9d6fb] dark:border-[#2a3c6b] bg-[#f8faff] dark:bg-[#0f172a] p-10 text-center text-sm text-[#6c7590] dark:text-[#94a3b8]">
                 No public programs available yet.
               </div>
             ) : null}
           </div>
 
           <div className="space-y-4">
-            <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="text-lg font-semibold text-slate-900">Mentorship Booking</h3>
-                <Link href="/mentorship/manage" className="rounded border border-slate-300 px-2 py-1 text-[11px]">
+                <h3 className="text-lg font-semibold text-[#141b2d] dark:text-white">Mentorship Booking</h3>
+                <Link href="/mentorship/manage" className="rounded border border-[#c9d6fb] dark:border-[#2a3c6b] px-2 py-1 text-[11px]">
                   Full Page
                 </Link>
               </div>
-              <p className="mt-3 text-sm text-slate-600">
+              <p className="mt-3 text-sm text-[#636b86] dark:text-gray-300">
                 Use the dedicated mentorship manage page to compare mentor availability, review detailed mentor profiles,
                 and book calls without duplicating the request flow here.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
-                <Link href="/mentors" className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                <Link href="/mentors" className="rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-xs font-semibold text-[#334155] dark:text-gray-200">
                   Browse Mentors
                 </Link>
                 <Link href="/mentorship/manage" className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
@@ -865,29 +865,29 @@ export default function TestSeriesConsole() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-4">
-              <h3 className="text-lg font-semibold text-slate-900">My Entitlements</h3>
+            <div className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4">
+              <h3 className="text-lg font-semibold text-[#141b2d] dark:text-white">My Entitlements</h3>
               <div className="mt-2 space-y-1">
                 {entitlements.map((entitlement) => (
-                  <div key={entitlement.id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs">
+                  <div key={entitlement.id} className="rounded border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] px-2 py-1 text-xs">
                     {entitlement.source} | Remaining: {entitlement.sessions_remaining}
                   </div>
                 ))}
-                {entitlements.length === 0 ? <p className="text-sm text-slate-500">No active mentorship entitlements.</p> : null}
+                {entitlements.length === 0 ? <p className="text-sm text-[#6c7590] dark:text-[#94a3b8]">No active mentorship entitlements.</p> : null}
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-4">
-              <h3 className="text-lg font-semibold text-slate-900">My Mains Performance</h3>
+            <div className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4">
+              <h3 className="text-lg font-semibold text-[#141b2d] dark:text-white">My Mains Performance</h3>
               {performanceReport ? (
                 <div className="mt-2 space-y-2 text-xs">
-                  <div className="flex items-center justify-between rounded bg-slate-50 px-2 py-1"><span>Total submissions</span><span className="font-semibold">{performanceReport.total_submissions}</span></div>
-                  <div className="flex items-center justify-between rounded bg-slate-50 px-2 py-1"><span>Checked submissions</span><span className="font-semibold">{performanceReport.checked_submissions}</span></div>
-                  <div className="flex items-center justify-between rounded bg-slate-50 px-2 py-1"><span>Average provider marks</span><span className="font-semibold">{performanceReport.average_provider_marks}</span></div>
-                  <div className="flex items-center justify-between rounded bg-slate-50 px-2 py-1"><span>Average AI score</span><span className="font-semibold">{performanceReport.average_ai_score}</span></div>
+                  <div className="flex items-center justify-between rounded bg-[#f8faff] dark:bg-[#0f172a] px-2 py-1"><span>Total submissions</span><span className="font-semibold">{performanceReport.total_submissions}</span></div>
+                  <div className="flex items-center justify-between rounded bg-[#f8faff] dark:bg-[#0f172a] px-2 py-1"><span>Checked submissions</span><span className="font-semibold">{performanceReport.checked_submissions}</span></div>
+                  <div className="flex items-center justify-between rounded bg-[#f8faff] dark:bg-[#0f172a] px-2 py-1"><span>Average provider marks</span><span className="font-semibold">{performanceReport.average_provider_marks}</span></div>
+                  <div className="flex items-center justify-between rounded bg-[#f8faff] dark:bg-[#0f172a] px-2 py-1"><span>Average AI score</span><span className="font-semibold">{performanceReport.average_ai_score}</span></div>
                 </div>
-              ) : <p className="mt-2 text-sm text-slate-500">No mains report yet.</p>}
-              <button type="button" onClick={() => void loadMyPerformance()} className="mt-2 inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs">
+              ) : <p className="mt-2 text-sm text-[#6c7590] dark:text-[#94a3b8]">No mains report yet.</p>}
+              <button type="button" onClick={() => void loadMyPerformance()} className="mt-2 inline-flex items-center gap-1 rounded border border-[#c9d6fb] dark:border-[#2a3c6b] px-2 py-1 text-xs">
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 Refresh Report
               </button>

@@ -584,7 +584,7 @@ function LearnerHome({ user }: { user: unknown }) {
         title: series.title,
         meta: `${String(series.series_kind || "").toUpperCase()} · ${String(series.access_type || "").toLowerCase()}`,
         status: "Continue",
-        statusClass: "border-[#cfe0ff] bg-[#eef4ff] text-[#1739ac]",
+        statusClass: "border-[#cfe0ff] bg-[#eef4ff] dark:bg-[#16213e] text-[#1739ac]",
         href: `/programs/${series.series_id}`,
       })),
     ].slice(0, 4),
@@ -628,10 +628,13 @@ function LearnerHome({ user }: { user: unknown }) {
       const total = Math.max(0, Number(row.attempt.total_questions || 0));
       const score = Math.max(0, Number(row.attempt.score || 0));
       const accuracy = total > 0 ? ((Math.max(0, Number(row.attempt.correct_answers || 0)) / total) * 100).toFixed(1) : "0.0";
+      
+      const sourceLabel = row.seriesId > 0 ? "Prelims Program" : "AI Quiz";
+      
       return {
         key: `quiz-${row.attempt.id}`,
         title,
-        subtitle: `Prelims quiz | ${formatDateTime(row.attempt.created_at)}`,
+        subtitle: `${sourceLabel} | ${formatDateTime(row.attempt.created_at)}`,
         scoreText: `${score}/${total} | ${accuracy}%`,
         href: row.seriesId > 0 ? `/programs/${row.seriesId}` : "/dashboard",
         createdAt: row.attempt.created_at,
@@ -645,7 +648,7 @@ function LearnerHome({ user }: { user: unknown }) {
       return {
         key: `mains-${row.id}`,
         title: shortText(row.question_text || "Mains Evaluation", 72) || "Mains Evaluation",
-        subtitle: `Mains evaluation | ${formatDateTime(row.created_at)}`,
+        subtitle: `AI Mains Evaluation | ${formatDateTime(row.created_at)}`,
         scoreText: `${score.toFixed(1)}/${maxScore.toFixed(1)} | ${pct}%`,
         href: "/dashboard",
         createdAt: row.created_at,
@@ -676,89 +679,75 @@ function LearnerHome({ user }: { user: unknown }) {
       href: "/dashboard/requests",
       cta: "Open mentorship request",
     },
-  ];
+  ];  const isNewUser = activeSeries.length === 0 && latestAttempts.length === 0 && overviewItems.length === 0;
 
   return (
     <div className="space-y-8 pb-8">
-      <section className="relative overflow-hidden rounded-[28px] border border-[#d7def4] bg-[linear-gradient(135deg,#ffffff_0%,#f6f8ff_54%,#edf8f5_100%)] px-5 py-6 shadow-[0_22px_55px_rgba(9,26,74,0.08)] sm:px-8 sm:py-8 lg:rounded-[34px]">
+      {/* 1. Hero / CTA Section */}
+      <section className="relative overflow-hidden rounded-[28px] border border-[#d7def4] bg-[linear-gradient(135deg,#ffffff_0%,#f6f8ff_54%,#edf8f5_100%)] dark:bg-[linear-gradient(135deg,#0a1120_0%,#0c1426_54%,#08171f_100%)] px-5 py-6 shadow-[0_22px_55px_rgba(9,26,74,0.08)] sm:px-8 sm:py-8 lg:rounded-[34px]">
         <div className="absolute right-[-7rem] top-[-6rem] h-56 w-56 rounded-full bg-[#dce7ff]/70 blur-3xl" />
         <div className="absolute bottom-[-8rem] left-[-4rem] h-56 w-56 rounded-full bg-[#d8f3ec]/75 blur-3xl" />
-        <div className="relative grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="space-y-5">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#c9d6fb] bg-white/85 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-[#304a92]">
-              <Sparkles className="h-4 w-4" />
-              Learner Workspace
-            </div>
-            <div>
-              <h1 className="max-w-3xl text-[30px] font-black tracking-tight text-[#091a4a] sm:text-[38px] lg:text-[46px]">
-                Welcome back, {firstName}.
-              </h1>
-              <p className="mt-3 max-w-2xl text-[14px] leading-6 text-slate-600 sm:text-[15px] sm:leading-7">
-                Track your ongoing programs, continue active attempts, open AI practice systems, and move straight into the next study action without hunting across pages.
+        <div className="relative">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120]/85 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-[#304a92]">
+            <Sparkles className="h-4 w-4" />
+            Learner Workspace
+          </div>
+          <div className="mt-5">
+            <h1 className="max-w-3xl font-sans text-[34px] font-extrabold leading-[0.98] tracking-[-0.06em] text-[#1235ae] dark:text-[#a5bdf8] sm:text-[46px] lg:text-[54px]">
+              Welcome back, {firstName}.
+            </h1>
+            {isNewUser ? (
+              <p className="mt-4 max-w-2xl text-[14px] leading-7 text-[#636b86] dark:text-[#94a3b8] sm:text-[16px] sm:leading-8">
+                Your preparation journey starts here. Explore our expert-led Prelims and Mains programs to build a structured foundation, or test the waters immediately with our AI Quiz systems.
               </p>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-              <Link href={featuredSeries ? `/programs/${featuredSeries.series_id}` : "/dashboard"} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#091a4a] px-5 py-3 text-sm font-bold text-white">
-                {featuredSeries ? "Continue active program" : "Open performance evaluation"}
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link href="/my-purchases" className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#c9d6fb] bg-white px-5 py-3 text-sm font-bold text-[#091a4a]">
-                View purchases
-              </Link>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-[22px] border border-white/70 bg-white/80 p-4 backdrop-blur">
+            ) : (
+              <p className="mt-4 max-w-2xl text-[14px] leading-7 text-[#636b86] dark:text-[#94a3b8] sm:text-[16px] sm:leading-8">
+                Track your ongoing programs, pick up exactly where you left off, and jump into your scheduled tasks.
+              </p>
+            )}
+          </div>
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            {isNewUser ? (
+              <>
+                <Link href="/programs" className="inline-flex items-center justify-center gap-2 rounded-full bg-[#173aa9] px-6 py-3 text-[14px] font-semibold text-white shadow-[0_15px_28px_rgba(23,58,169,0.24)] transition hover:bg-[#15328f]">
+                  Browse Study Programs
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+                <Link href="/ai-quiz-generator/gk" className="inline-flex items-center justify-center gap-2 rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-6 py-3 text-[14px] font-semibold text-[#17328f] dark:text-[#9bb5ff] shadow-[0_14px_28px_rgba(21,31,76,0.08)] transition hover:bg-[#f2f5ff]">
+                  Take an AI Practice Quiz
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link href={featuredSeries ? `/programs/${featuredSeries.series_id}` : "/dashboard"} className="inline-flex items-center justify-center gap-2 rounded-full bg-[#173aa9] px-6 py-3 text-[14px] font-semibold text-white shadow-[0_15px_28px_rgba(23,58,169,0.24)] transition hover:bg-[#15328f]">
+                  {featuredSeries ? "Continue active program" : "Open performance evaluation"}
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+                <Link href="/my-purchases" className="inline-flex items-center justify-center gap-2 rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-6 py-3 text-[14px] font-semibold text-[#17328f] dark:text-[#9bb5ff] shadow-[0_14px_28px_rgba(21,31,76,0.08)] transition hover:bg-[#f2f5ff]">
+                  View purchases
+                </Link>
+              </>
+            )}
+          </div>
+          
+          {!isNewUser && (
+            <div className="mt-8 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-[22px] border border-white/70 bg-white dark:bg-[#0b1120]/80 p-4 backdrop-blur">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Active Programs</p>
-                <p className="mt-2 text-3xl font-black tracking-tight text-[#091a4a]">{activeSeries.length}</p>
+                <p className="mt-2 font-sans text-3xl font-extrabold tracking-[-0.04em] text-[#141b2d] dark:text-white">{activeSeries.length}</p>
               </div>
-              <div className="rounded-[22px] border border-white/70 bg-white/80 p-4 backdrop-blur">
+              <div className="rounded-[22px] border border-white/70 bg-white dark:bg-[#0b1120]/80 p-4 backdrop-blur">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Pending Requests</p>
-                <p className="mt-2 text-3xl font-black tracking-tight text-[#091a4a]">{requestSummary.pending}</p>
+                <p className="mt-2 font-sans text-3xl font-extrabold tracking-[-0.04em] text-[#141b2d] dark:text-white">{requestSummary.pending}</p>
               </div>
-              <div className="rounded-[22px] border border-white/70 bg-white/80 p-4 backdrop-blur">
+              <div className="rounded-[22px] border border-white/70 bg-white dark:bg-[#0b1120]/80 p-4 backdrop-blur">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Questions This Year</p>
-                <p className="mt-2 text-3xl font-black tracking-tight text-[#091a4a]">
+                <p className="mt-2 font-sans text-3xl font-extrabold tracking-[-0.04em] text-[#141b2d] dark:text-white">
                   {yearlyRows.reduce((sum, row) => sum + row.total_questions, 0)}
                 </p>
               </div>
             </div>
-          </div>
-
-          <div className="rounded-[28px] border border-white/70 bg-white/80 p-5 backdrop-blur">
-            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Current Overview</p>
-                <h2 className="mt-1 text-2xl font-black tracking-tight text-[#091a4a]">Ongoing mentorship and programs</h2>
-              </div>
-              <div className="rounded-full bg-[#edf4ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
-                Live
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {overviewItems.map((item) => (
-                <Link
-                  key={item.key}
-                  href={item.href}
-                  className="flex flex-col items-start gap-3 rounded-[22px] border border-[#dce3fb] bg-white px-4 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_32px_rgba(15,23,42,0.08)] sm:flex-row sm:items-start sm:justify-between"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.title}</p>
-                    <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">{item.meta}</p>
-                  </div>
-                  <span className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${item.statusClass}`}>
-                    {item.status}
-                  </span>
-                </Link>
-              ))}
-
-              {!loading && overviewItems.length === 0 ? (
-                <div className="rounded-[22px] border border-dashed border-[#cdd8f4] bg-[#f8faff] px-4 py-10 text-center text-sm text-[#6d7690]">
-                  No active mentorship or program flow yet.
-                </div>
-              ) : null}
-            </div>
-          </div>
+          )}
         </div>
       </section>
 
@@ -769,15 +758,90 @@ function LearnerHome({ user }: { user: unknown }) {
         </section>
       ) : null}
 
+      {/* 2. Primary Ongoing Activities (Shown if they exist) */}
+      {!isNewUser && (
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Programs</p>
+                <h2 className="mt-1 font-sans text-[26px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] dark:text-white sm:text-[32px]">Resume Active Programs</h2>
+              </div>
+              <Link href="/my-purchases" className="text-[13px] font-semibold text-[#173aa9] dark:text-[#8ea9ff] transition hover:text-[#122c84]">
+                Open purchases
+              </Link>
+            </div>
+            <div className="mt-5 space-y-4">
+              {activeSeries.slice(0, 3).map((series) => (
+                <Link
+                  key={series.enrollment_id}
+                  href={`/programs/${series.series_id}`}
+                  className="flex flex-col items-start gap-4 rounded-[26px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[linear-gradient(180deg,#ffffff_0%,#f8faff_100%)] dark:bg-[linear-gradient(180deg,#0b1120_0%,#091124_100%)] p-4 transition hover:-translate-y-0.5 hover:shadow-[0_16px_32px_rgba(15,23,42,0.06)] sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className={`mb-2 h-1.5 w-16 rounded-full ${String(series.series_kind || "").toLowerCase() === "mains" ? "bg-[#1f9c57]" : "bg-[#f59e0b]"}`} />
+                    <p className="truncate text-[18px] font-bold tracking-[-0.02em] text-[#141b2d] dark:text-white">{series.title}</p>
+                    <p className="mt-1 text-[13px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">
+                      {String(series.series_kind || "").toUpperCase()} | {String(series.access_type || "").toLowerCase()}
+                    </p>
+                  </div>
+                  <div className="shrink-0 inline-flex items-center gap-2 rounded-full bg-[#eef4ff] dark:bg-[#16213e] px-4 py-2 text-[12px] font-semibold text-[#1739ac]">
+                    <ArrowRight className="h-3.5 w-3.5" />
+                    Continue
+                  </div>
+                </Link>
+              ))}
+              {!loading && activeSeries.length === 0 ? (
+                <div className="rounded-[22px] border border-dashed border-[#cdd8f4] dark:border-[#2a3c6b] bg-[#f8faff] dark:bg-[#0f172a] px-4 py-10 text-center text-sm text-[#6d7690]">
+                  No active programs yet.
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Attempts</p>
+                <h2 className="mt-1 font-sans text-[26px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] dark:text-white sm:text-[32px]">Ongoing and recent attempts</h2>
+              </div>
+              <Link href="/dashboard" className="text-[13px] font-semibold text-[#173aa9] dark:text-[#8ea9ff] transition hover:text-[#122c84]">
+                Detailed evaluation
+              </Link>
+            </div>
+            <div className="mt-5 space-y-3">
+              {latestAttempts.slice(0, 4).map((item) => (
+                <Link
+                  key={item.key}
+                  href={item.href}
+                  className="flex flex-col items-start gap-3 rounded-[22px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[linear-gradient(180deg,#ffffff_0%,#f8faff_100%)] dark:bg-[linear-gradient(180deg,#0b1120_0%,#091124_100%)] px-4 py-4 transition hover:border-[#bdd1ff] sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.title}</p>
+                    <p className="mt-1 text-[12px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{item.subtitle}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-[14px] font-semibold text-[#1739ac]">{item.scoreText}</p>
+                  </div>
+                </Link>
+              ))}
+              {!loading && latestAttempts.length === 0 ? (
+                <div className="rounded-[22px] border border-dashed border-[#cdd8f4] dark:border-[#2a3c6b] bg-[#f8faff] dark:bg-[#0f172a] px-4 py-12 text-center text-sm text-[#6d7690]">
+                  No attempts recorded yet.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* 3. AI Tools and Support Links */}
       <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <div className="rounded-[30px] border border-[#dce3fb] bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+        <div className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Quick Links</p>
-              <h2 className="mt-1 text-[24px] font-black tracking-tight text-[#091a4a] sm:text-[28px]">Daily actions</h2>
-            </div>
-            <div className="rounded-full bg-[#eef4ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
-              Jump fast
+              <h2 className="mt-1 font-sans text-[24px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] dark:text-white sm:text-[28px]">Daily actions</h2>
             </div>
           </div>
           <div className="mt-5 space-y-3">
@@ -785,14 +849,14 @@ function LearnerHome({ user }: { user: unknown }) {
               <Link
                 key={item.href}
                 href={item.href}
-                className="flex items-start gap-3 rounded-[22px] border border-[#dce3fb] bg-[linear-gradient(180deg,#ffffff_0%,#f8faff_100%)] px-4 py-4 transition hover:border-[#bdd1ff]"
+                className="flex items-start gap-3 rounded-[22px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[linear-gradient(180deg,#ffffff_0%,#f8faff_100%)] dark:bg-[linear-gradient(180deg,#0b1120_0%,#091124_100%)] px-4 py-4 transition hover:border-[#bdd1ff]"
               >
-                <div className="inline-flex rounded-[14px] bg-[#eef4ff] p-3 text-[#1739ac]">
+                <div className="inline-flex rounded-[14px] bg-[#eef4ff] dark:bg-[#16213e] p-3 text-[#1739ac]">
                   <item.icon className="h-4 w-4" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.label}</p>
-                  <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">{item.note}</p>
+                  <p className="mt-1 text-[12px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{item.note}</p>
                 </div>
               </Link>
             ))}
@@ -800,18 +864,18 @@ function LearnerHome({ user }: { user: unknown }) {
         </div>
 
         <div className="overflow-hidden rounded-[30px] bg-[linear-gradient(140deg,#0a1a54_0%,#163fa4_62%,#1f56cf_100%)] p-5 text-white shadow-[0_22px_46px_rgba(9,26,74,0.18)]">
-          <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-white/6 px-5 py-5">
-            <div className="absolute right-[-2rem] top-[-2rem] h-28 w-28 rounded-full bg-white/10" />
-            <div className="absolute bottom-[-3rem] left-[-2rem] h-28 w-28 rounded-full bg-white/10" />
+          <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-white dark:bg-[#0b1120]/6 px-5 py-5">
+            <div className="absolute right-[-2rem] top-[-2rem] h-28 w-28 rounded-full bg-white dark:bg-[#0b1120]/10" />
+            <div className="absolute bottom-[-3rem] left-[-2rem] h-28 w-28 rounded-full bg-white dark:bg-[#0b1120]/10" />
             <div className="relative flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
               <div className="max-w-xl">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">AI Workspace</p>
-                <h2 className="mt-2 text-[24px] font-black tracking-tight sm:text-[30px]">Generation and evaluation systems</h2>
-                <p className="mt-2 text-[13px] leading-6 text-white/80">
+                <h2 className="mt-2 font-sans text-[28px] font-semibold leading-[1.08] tracking-[-0.04em] text-white sm:text-[34px]">AI Based Generation and evaluation systems</h2>
+                <p className="mt-3 text-[14px] leading-7 text-[#dae4ff]">
                   Move between GK, Maths, Passage, and Mains AI tools from one surface and continue wherever you left off.
                 </p>
               </div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-white/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/80">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white dark:bg-[#0b1120]/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/80">
                 <Sparkles className="h-3.5 w-3.5" />
                 Active AI Systems
               </div>
@@ -821,13 +885,13 @@ function LearnerHome({ user }: { user: unknown }) {
                 <Link
                   key={system.href + system.label}
                   href={system.href}
-                  className="rounded-[22px] border border-white/12 bg-white/8 px-4 py-4 transition hover:bg-white/12"
+                  className="rounded-[22px] border border-white/12 bg-white dark:bg-[#0b1120]/8 px-4 py-4 transition hover:bg-white dark:bg-[#0b1120]/12"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="inline-flex rounded-[14px] bg-white/12 p-3 text-white">
+                    <div className="inline-flex rounded-[14px] bg-white dark:bg-[#0b1120]/12 p-3 text-white">
                       <system.icon className="h-4 w-4" />
                     </div>
-                    <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/85">
+                    <span className="rounded-full border border-white/15 bg-white dark:bg-[#0b1120]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/85">
                       {system.status}
                     </span>
                   </div>
@@ -840,131 +904,95 @@ function LearnerHome({ user }: { user: unknown }) {
         </div>
       </section>
 
-      <FeaturedMixedRail
-        title="Featured Programs and Mentors"
-        subtitle="One row with current prelims tracks, mains tracks, and mentors chosen from the featured catalog."
-      />
-
-      <section>
-        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Programs</p>
-            <h2 className="mt-1 text-[24px] font-black tracking-tight text-[#091a4a] sm:text-[30px]">Resume Active Programs</h2>
-          </div>
-          <Link href="/my-purchases" className="text-sm font-bold text-[#2b4dac]">
-            Open purchases
-          </Link>
-        </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {activeSeries.slice(0, 3).map((series) => (
-            <Link
-              key={series.enrollment_id}
-              href={`/programs/${series.series_id}`}
-              className="rounded-[26px] border border-[#dce3fb] bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_44px_rgba(15,23,42,0.08)]"
-            >
-              <div className={`h-1.5 w-24 rounded-full ${String(series.series_kind || "").toLowerCase() === "mains" ? "bg-[#1f9c57]" : "bg-[#f59e0b]"}`} />
-              <p className="mt-5 text-[22px] font-black tracking-[-0.04em] text-[#091a4a] sm:text-[26px]">{series.title}</p>
-              <p className="mt-2 text-[13px] leading-6 text-[#6c7590]">
-                {String(series.series_kind || "").toUpperCase()} | {String(series.access_type || "").toLowerCase()}
-              </p>
-              <div className="mt-6 inline-flex items-center gap-2 rounded-full bg-[#eef4ff] px-4 py-2 text-[12px] font-semibold text-[#1739ac]">
-                <ArrowRight className="h-3.5 w-3.5" />
-                Continue
+      {/* 4. Mentorship Overview and Yearly Summary */}
+      {!isNewUser && (
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[linear-gradient(180deg,#f3f6ff_0%,#eef3ff_100%)] dark:bg-[linear-gradient(180deg,#121a30_0%,#0d1426_100%)] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Mentorship Status</p>
+                <h2 className="mt-1 font-sans text-[26px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] dark:text-white sm:text-[32px]">Ongoing Mentorship and Requests</h2>
               </div>
-            </Link>
-          ))}
-          {!loading && activeSeries.length === 0 ? (
-            <div className="rounded-[26px] border border-dashed border-[#cdd8f4] bg-[#f8faff] px-5 py-12 text-center text-sm text-[#6d7690]">
-              No active programs yet.
-            </div>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="rounded-[30px] border border-[#dce3fb] bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
-          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Attempts</p>
-              <h2 className="mt-1 text-[24px] font-black tracking-tight text-[#091a4a] sm:text-[30px]">Ongoing and recent attempts</h2>
-            </div>
-            <Link href="/dashboard" className="text-sm font-bold text-[#2b4dac]">
-              Open performance evaluation
-            </Link>
-          </div>
-          <div className="mt-5 space-y-3">
-            {latestAttempts.map((item) => (
-              <Link
-                key={item.key}
-                href={item.href}
-                className="flex flex-col items-start gap-3 rounded-[22px] border border-[#dce3fb] bg-[linear-gradient(180deg,#ffffff_0%,#f8faff_100%)] px-4 py-4 transition hover:border-[#bdd1ff] sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.title}</p>
-                  <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">{item.subtitle}</p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-[14px] font-semibold text-[#1739ac]">{item.scoreText}</p>
-                </div>
-              </Link>
-            ))}
-            {!loading && latestAttempts.length === 0 ? (
-              <div className="rounded-[22px] border border-dashed border-[#cdd8f4] bg-[#f8faff] px-4 py-12 text-center text-sm text-[#6d7690]">
-                No attempts recorded yet.
+              <div className="rounded-full bg-white dark:bg-[#0b1120] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
+                Live
               </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="rounded-[30px] border border-[#dce3fb] bg-[linear-gradient(180deg,#f3f6ff_0%,#eef3ff_100%)] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
-          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Yearly Overview</p>
-              <h2 className="mt-1 text-[24px] font-black tracking-tight text-[#091a4a] sm:text-[30px]">Questions and marks this year</h2>
             </div>
-            <div className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
-              {yearlySummary?.year || new Date().getFullYear()}
-            </div>
-          </div>
-          <div className="mt-5 overflow-x-auto rounded-[24px] border border-[#d8e1fb] bg-white">
-            <div className="min-w-[640px]">
-              <div className="grid grid-cols-[1.1fr_0.9fr_0.8fr_1fr] gap-3 border-b border-[#e5ebfb] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5f7aa9]">
-                <span>Content</span>
-                <span>Total Questions</span>
-                <span>Total Marks</span>
-                <span>Marks Obtained</span>
-              </div>
-              <div className="divide-y divide-[#e5ebfb]">
-                {yearlyRows.map((row) => (
-                  <div key={row.content_type} className="grid grid-cols-[1.1fr_0.9fr_0.8fr_1fr] gap-3 px-4 py-4 text-[14px] text-[#182033]">
-                    <span className="font-semibold">{row.label}</span>
-                    <span>{row.total_questions}</span>
-                    <span>{row.total_marks}</span>
-                    <span className="font-semibold text-[#1739ac]">{row.marks_obtained}</span>
+            <div className="mt-5 space-y-3">
+              {overviewItems.map((item) => (
+                <Link
+                  key={item.key}
+                  href={item.href}
+                  className="flex flex-col items-start gap-3 rounded-[22px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] px-4 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_32px_rgba(15,23,42,0.08)] sm:flex-row sm:items-start sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.title}</p>
+                    <p className="mt-1 text-[12px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{item.meta}</p>
                   </div>
-                ))}
-                {!loading && yearlyRows.length === 0 ? (
-                  <div className="px-4 py-12 text-center text-sm text-[#6d7690]">No yearly summary available yet.</div>
-                ) : null}
+                  <span className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${item.statusClass}`}>
+                    {item.status}
+                  </span>
+                </Link>
+              ))}
+
+              {!loading && overviewItems.length === 0 ? (
+                <div className="rounded-[22px] border border-dashed border-[#cdd8f4] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-4 py-10 text-center text-sm text-[#6d7690]">
+                  No active mentorship or program flow yet.
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Yearly Overview</p>
+                <h2 className="mt-1 font-sans text-[26px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] dark:text-white sm:text-[32px]">Questions and marks this year</h2>
+              </div>
+              <div className="rounded-full bg-[#eef4ff] dark:bg-[#16213e] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
+                {yearlySummary?.year || new Date().getFullYear()}
+              </div>
+            </div>
+            <div className="mt-5 overflow-x-auto rounded-[24px] border border-[#d8e1fb] dark:border-[#1e2a4a] bg-gradient-to-b from-white to-[#f8faff] dark:from-[#0b1120] dark:to-[#091124]">
+              <div className="min-w-[400px]">
+                <div className="grid grid-cols-[1.2fr_1fr_1fr] gap-3 border-b border-[#e5ebfb] dark:border-[#2a3c6b] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5f7aa9] dark:text-[#a5bdf8]">
+                  <span>Content</span>
+                  <span>Questions</span>
+                  <span>Scored</span>
+                </div>
+                <div className="divide-y divide-[#e5ebfb] dark:divide-[#2a3c6b]">
+                  {yearlyRows.map((row) => (
+                    <div key={row.content_type} className="grid grid-cols-[1.2fr_1fr_1fr] gap-3 px-4 py-4 text-[14px] text-[#182033] dark:text-gray-200">
+                      <span className="font-semibold">{row.label}</span>
+                      <span>{row.total_questions}</span>
+                      <span className="font-semibold text-[#1739ac] dark:text-[#a5bdf8]">{row.marks_obtained}/{row.total_marks}</span>
+                    </div>
+                  ))}
+                  {!loading && yearlyRows.length === 0 ? (
+                    <div className="px-4 py-12 text-center text-sm text-[#6d7690] dark:text-[#94a3b8]">No yearly summary available yet.</div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      <section className="rounded-[30px] border border-[#dce3fb] bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+      {/* 5. Recommended Programs & Discovery Phase */}
+      <section className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Suggested Next Step</p>
-            <h2 className="mt-1 text-[24px] font-black tracking-tight text-[#091a4a] sm:text-[30px]">Programs based on your current prep</h2>
-            <p className="mt-2 max-w-2xl text-[13px] leading-6 text-[#6c7590]">
-              These suggestions are positioned for your ongoing programs, recent attempts, and visible weak areas.
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{isNewUser ? "Discovery" : "Suggested Next Step"}</p>
+            <h2 className="mt-1 font-sans text-[26px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] dark:text-white sm:text-[32px]">{isNewUser ? "Featured recommended tracks" : "Programs based on your current prep"}</h2>
+            <p className="mt-3 max-w-2xl text-[14px] leading-7 text-[#636b86] dark:text-[#94a3b8]">
+              {isNewUser ? "Join tracked programs to maintain consistency and evaluate yourself." : "These suggestions are positioned for your ongoing programs, recent attempts, and visible weak areas."}
             </p>
           </div>
-          <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-full bg-[#eef4ff] px-4 py-2 text-[12px] font-semibold text-[#1739ac]">
-            View detailed evaluation
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+          {!isNewUser && (
+             <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-full bg-[#eef4ff] dark:bg-[#16213e] px-4 py-2 text-[12px] font-semibold text-[#1739ac] dark:text-[#a5bdf8]">
+              View detailed evaluation
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          )}
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -977,14 +1005,14 @@ function LearnerHome({ user }: { user: unknown }) {
               <Link
                 key={`${title}-${index}`}
                 href={href}
-                className="rounded-[24px] border border-[#dce3fb] bg-[linear-gradient(180deg,#ffffff_0%,#f7f9ff_100%)] p-5 transition hover:-translate-y-0.5 hover:border-[#bdd1ff] hover:shadow-[0_16px_30px_rgba(15,23,42,0.06)]"
+                className="block rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-gradient-to-b from-white to-[#f7f9ff] dark:from-[#0a1120] dark:to-[#050810] p-5 transition hover:-translate-y-0.5 hover:border-[#bdd1ff] hover:shadow-[0_16px_30px_rgba(15,23,42,0.06)]"
               >
-                <div className="inline-flex items-center gap-2 rounded-full bg-[#eef4ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
+                <div className="inline-flex items-center gap-2 rounded-full bg-[#eef4ff] dark:bg-[#16213e] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1739ac]">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   Recommended
                 </div>
-                <p className="mt-4 text-[20px] font-black tracking-[-0.03em] text-[#091a4a]">{title}</p>
-                <p className="mt-2 text-[13px] leading-6 text-[#6c7590]">{description}</p>
+                <p className="mt-4 text-[20px] font-bold tracking-[-0.03em] text-[#141b2d] dark:text-white">{title}</p>
+                <p className="mt-2 text-[13px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{description}</p>
                 <div className="mt-5 inline-flex items-center gap-2 text-[13px] font-semibold text-[#1739ac]">
                   {cta}
                   <ArrowRight className="h-3.5 w-3.5" />
@@ -995,138 +1023,11 @@ function LearnerHome({ user }: { user: unknown }) {
         </div>
       </section>
 
-      {false ? (
-        <>
+      <FeaturedMixedRail
+        title="Featured Mentors & Study Paths"
+        subtitle="Current highlighted programs and top educators available immediately."
+      />
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-black tracking-tight text-slate-900">Recent Results</h2>
-            <Link href="/dashboard" className="text-xs font-bold text-[#1b44b8]">View Analytics</Link>
-          </div>
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              onClick={() => setResultTab("prelims")}
-              className={`rounded-xl px-3 py-2 text-xs font-bold ${resultTab === "prelims" ? "bg-[#1b44b8] text-white" : "bg-slate-100 text-slate-700"}`}
-            >
-              Prelims
-            </button>
-            <button
-              type="button"
-              onClick={() => setResultTab("mains")}
-              className={`rounded-xl px-3 py-2 text-xs font-bold ${resultTab === "mains" ? "bg-[#1b44b8] text-white" : "bg-slate-100 text-slate-700"}`}
-            >
-              Mains
-            </button>
-          </div>
-          <div className="mt-4 space-y-3">
-            {resultTab === "prelims"
-              ? prelimsResults.slice(0, 4).map((row) => {
-                  const testTitle = String(row.collection?.title || row.collection?.name || `Collection #${row.attempt.collection_id}`);
-                  const total = Math.max(0, Number(row.attempt.total_questions || 0));
-                  const score = Math.max(0, Number(row.attempt.score || 0));
-                  const accuracy = total > 0 ? ((Math.max(0, Number(row.attempt.correct_answers || 0)) / total) * 100).toFixed(1) : "0.0";
-                  return (
-                    <article key={`prelims-${row.attempt.id}`} className="flex items-center justify-between gap-3 rounded-[20px] bg-slate-50 px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-slate-900">{testTitle}</p>
-                        <p className="mt-1 text-xs text-slate-500">{formatDateTime(row.attempt.created_at)}</p>
-                      </div>
-                      <p className="shrink-0 text-sm font-bold text-slate-900">{score}/{total} · {accuracy}%</p>
-                    </article>
-                  );
-                })
-              : mainsResults.slice(0, 4).map((row) => {
-                  const score = Number(row.score || 0);
-                  const maxScore = Number(row.max_score || 10);
-                  const pct = maxScore > 0 ? ((score / maxScore) * 100).toFixed(1) : "0.0";
-                  return (
-                    <article key={`mains-${row.id}`} className="flex items-center justify-between gap-3 rounded-[20px] bg-slate-50 px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-slate-900">{shortText(row.question_text || "Mains Evaluation", 74)}</p>
-                        <p className="mt-1 text-xs text-slate-500">{formatDateTime(row.created_at)}</p>
-                      </div>
-                      <p className="shrink-0 text-sm font-bold text-slate-900">{score.toFixed(1)}/{maxScore.toFixed(1)} · {pct}%</p>
-                    </article>
-                  );
-                })}
-            {!loading && resultTab === "prelims" && prelimsResults.length === 0 ? (
-              <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
-                No recent prelims results yet.
-              </div>
-            ) : null}
-            {!loading && resultTab === "mains" && mainsResults.length === 0 ? (
-              <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
-                No recent mains evaluations yet.
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="rounded-[26px] bg-[#0f1f4a] p-5 text-white shadow-[0_18px_40px_rgba(15,31,74,0.18)]">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-lg font-black">Track Requests</h2>
-              <Link href="/dashboard/requests" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#2457ff] text-lg leading-none">+</Link>
-            </div>
-            <p className="mt-2 text-xs text-slate-300">Status of your pending evaluations and mentorship calls.</p>
-            <div className="mt-4 space-y-3">
-              {recentRequests.map((request) => (
-                <Link key={request.id} href={`/my-purchases/mentorship/${request.id}`} className="block rounded-[18px] border border-white/10 bg-white/5 px-3 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold">{requestTypeLabel(request)}</p>
-                    <span className="h-2.5 w-2.5 rounded-full bg-[#56d488]" />
-                  </div>
-                  <p className="mt-1 text-[11px] text-slate-300">{requestMetaLabel(request, orders?.mentorNameByUserId || {})}</p>
-                </Link>
-              ))}
-              {!loading && recentRequests.length === 0 ? (
-                <div className="rounded-[18px] border border-white/10 bg-white/5 px-3 py-6 text-center text-xs text-slate-300">
-                  No active requests yet.
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
-            <p className="text-sm italic leading-6 text-slate-700">&ldquo;The mind is not a vessel to be filled, but a fire to be kindled.&rdquo;</p>
-            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Plutarch</p>
-            <div className="mt-5 rounded-[18px] bg-slate-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Prep Snapshot</p>
-              <div className="mt-3 space-y-2 text-sm">
-                <div className="flex items-center justify-between"><span className="text-slate-600">Quiz Attempts</span><span className="font-bold text-slate-900">{analytics?.summary.total_quiz_attempts || 0}</span></div>
-                <div className="flex items-center justify-between"><span className="text-slate-600">Pending Requests</span><span className="font-bold text-slate-900">{requestSummary.pending}</span></div>
-                <div className="flex items-center justify-between"><span className="text-slate-600">Mains Requests</span><span className="font-bold text-slate-900">{requestSummary.evaluation}</span></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section>
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-black tracking-tight text-slate-900">Resume Active Programs</h2>
-          <Link href="/my-purchases" className="text-xs font-bold text-[#1b44b8]">Open Purchases</Link>
-        </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {activeSeries.slice(0, 3).map((series) => (
-            <Link key={series.enrollment_id} href={`/programs/${series.series_id}`} className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]">
-              <div className={`h-1.5 w-20 rounded-full ${String(series.series_kind || "").toLowerCase() === "mains" ? "bg-[#159947]" : "bg-[#f59e0b]"}`} />
-              <p className="mt-4 truncate text-sm font-bold text-slate-900">{series.title}</p>
-              <p className="mt-1 text-xs text-slate-500">{String(series.series_kind || "").toUpperCase()} · {String(series.access_type || "").toLowerCase()}</p>
-              <div className="mt-4 inline-flex rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">Continue</div>
-            </Link>
-          ))}
-          {!loading && activeSeries.length === 0 ? (
-            <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
-              No active programs yet.
-            </div>
-          ) : null}
-        </div>
-      </section>
-        </>
-      ) : null}
     </div>
   );
 }
@@ -1163,8 +1064,8 @@ function MinimalCreatorHome({
           })),
           kind === "mains_mentor"
             ? premiumApi.get<MentorshipRequest[]>("/mentorship/requests", {
-                params: { scope: "provider" },
-              })
+              params: { scope: "provider" },
+            })
             : Promise.resolve({ data: [] as MentorshipRequest[] }),
         ]);
 
@@ -1224,31 +1125,31 @@ function MinimalCreatorHome({
         <div className="absolute bottom-[-8rem] left-[-5rem] h-56 w-56 rounded-full bg-[#d7f5ef]/65 blur-3xl" />
         <div className="relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#c9d6fb] bg-white/85 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-[#304a92]">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120]/85 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-[#304a92]">
               <Sparkles className="h-4 w-4" />
               {copy.badge}
             </div>
             <div>
-              <h1 className="max-w-3xl text-[30px] font-black tracking-tight text-[#091a4a] sm:text-4xl">{copy.title}</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{copy.subtitle}</p>
+              <h1 className="max-w-3xl font-sans text-[30px] font-extrabold leading-[1.05] tracking-[-0.04em] text-[#1235ae] dark:text-[#a5bdf8] sm:text-4xl">{copy.title}</h1>
+              <p className="mt-2 max-w-2xl text-[14px] leading-6 text-slate-600 sm:text-[15px] sm:leading-7">{copy.subtitle}</p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-              <Link href={copy.primaryHref} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#091a4a] px-5 py-3 text-sm font-bold text-white">
+              <Link href={copy.primaryHref} className="inline-flex items-center justify-center gap-2 rounded-full bg-[#173aa9] px-5 py-3 text-[13px] font-semibold text-white shadow-[0_15px_28px_rgba(23,58,169,0.24)] transition hover:bg-[#15328f]">
                 {copy.primaryLabel}
                 <ArrowRight className="h-4 w-4" />
               </Link>
-              <Link href={copy.secondaryHref} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#c9d6fb] bg-white px-5 py-3 text-sm font-bold text-[#091a4a]">
+              <Link href={copy.secondaryHref} className="inline-flex items-center justify-center gap-2 rounded-full border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-5 py-3 text-[13px] font-semibold text-[#17328f] dark:text-[#9bb5ff] shadow-[0_14px_28px_rgba(21,31,76,0.08)] transition hover:bg-[#f2f5ff]">
                 {copy.secondaryLabel}
               </Link>
             </div>
           </div>
 
-          <div className="rounded-[26px] border border-white/70 bg-white/75 p-4 backdrop-blur">
+          <div className="rounded-[26px] border border-white/70 bg-white dark:bg-[#0b1120]/75 p-4 backdrop-blur">
             <div className="grid grid-cols-2 gap-3">
               {stats.map((stat) => (
-                <div key={stat.label} className="rounded-[20px] border border-slate-200 bg-white/95 p-4">
+                <div key={stat.label} className="rounded-[20px] border border-slate-200 bg-white dark:bg-[#0b1120]/95 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{stat.label}</p>
-                  <p className="mt-2 text-3xl font-black tracking-tight text-[#091a4a]">{loading ? "..." : stat.value}</p>
+                  <p className="mt-2 font-sans text-3xl font-extrabold tracking-[-0.04em] text-[#141b2d] dark:text-white">{loading ? "..." : stat.value}</p>
                 </div>
               ))}
             </div>
@@ -1264,11 +1165,11 @@ function MinimalCreatorHome({
       ) : null}
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+        <div className="rounded-[28px] border border-slate-200 bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Latest Requests</p>
-              <h2 className="mt-1 text-xl font-black tracking-tight text-[#091a4a]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Latest Requests</p>
+              <h2 className="mt-1 font-sans text-[24px] font-semibold leading-[1.08] tracking-[-0.04em] text-[#141b2d] dark:text-white">
                 {kind === "mains_mentor" ? "New learner activity" : "Recent programs"}
               </h2>
             </div>
@@ -1279,31 +1180,31 @@ function MinimalCreatorHome({
           <div className="mt-4 space-y-3">
             {kind === "mains_mentor"
               ? newRequests.map((request) => (
-                  <article key={request.id} className="flex flex-col items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-slate-900">{learnerNameFromRequest(request)}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {formatRelativeDate(request.requested_at)} · {String(request.service_type || "").replaceAll("_", " ")}
-                      </p>
-                    </div>
-                    <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${requestStatusTone(request.status)}`}>
-                      {String(request.status || "").replaceAll("_", " ")}
-                    </span>
-                  </article>
-                ))
+                <article key={request.id} className="flex flex-col items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-900">{learnerNameFromRequest(request)}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {formatRelativeDate(request.requested_at)} · {String(request.service_type || "").replaceAll("_", " ")}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${requestStatusTone(request.status)}`}>
+                    {String(request.status || "").replaceAll("_", " ")}
+                  </span>
+                </article>
+              ))
               : snapshot.series.slice(0, 4).map((series) => (
-                  <article key={series.id} className="flex flex-col items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-slate-900">{series.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {Number(series.test_count || 0)} tests · {series.is_active ? "active" : "archived"}
-                      </p>
-                    </div>
-                    <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-                      {String(series.series_kind || "quiz")}
-                    </span>
-                  </article>
-                ))}
+                <article key={series.id} className="flex flex-col items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-900">{series.title}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {Number(series.test_count || 0)} tests · {series.is_active ? "active" : "archived"}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-slate-200 bg-white dark:bg-[#0b1120] px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                    {String(series.series_kind || "quiz")}
+                  </span>
+                </article>
+              ))}
             {!loading && kind === "mains_mentor" && newRequests.length === 0 ? (
               <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
                 No recent requests.
@@ -1318,11 +1219,11 @@ function MinimalCreatorHome({
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+          <div className="rounded-[28px] border border-slate-200 bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Quick Actions</p>
             <div className="mt-4 grid gap-3">
               {actions.slice(0, 3).map((action) => (
-                <Link key={action.href} href={action.href} className="group flex flex-col items-start gap-3 rounded-[22px] border border-slate-200 bg-white px-4 py-3 transition hover:border-slate-300 hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between">
+                <Link key={action.href} href={action.href} className="group flex flex-col items-start gap-3 rounded-[22px] border border-slate-200 bg-white dark:bg-[#0b1120] px-4 py-3 transition hover:border-slate-300 hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3">
                     <div className={`inline-flex rounded-2xl bg-gradient-to-r ${action.accent} p-2.5 text-white`}>
                       <action.icon className="h-4 w-4" />
@@ -1338,7 +1239,7 @@ function MinimalCreatorHome({
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+          <div className="rounded-[28px] border border-slate-200 bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Programs</p>
             <div className="mt-4 space-y-3">
               {snapshot.series.slice(0, 3).map((series) => (
@@ -1363,10 +1264,18 @@ function MinimalCreatorHome({
 }
 
 export default function Home() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
   const kind = useMemo(() => resolveHomeKind(user), [user]);
   const copy = homeCopy[kind];
   const quickActions = quickActionsByKind[kind];
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f8faff] dark:bg-[#0f172a]">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#173aa9] border-r-transparent"></div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <PublicLandingPage />;

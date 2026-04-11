@@ -13,3 +13,4 @@ beautifulsoup4==4.12.3
 pypdf==5.4.0
 PyMuPDF==1.26.4
 agora-token-builder==1.0.0
+cryptography==42.0.8

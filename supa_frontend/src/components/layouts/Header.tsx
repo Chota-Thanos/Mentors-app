@@ -185,7 +185,12 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
   ]);
 
   const accountLinks = useMemo(() => {
-    const links: NavLink[] = [{ href: "/my-results", label: "My Results" }, { href: "/my-purchases", label: "Purchases & Requests" }, { href: "/subscriptions", label: "Subscriptions" }];
+    const links: NavLink[] = [
+      { href: "/my-results", label: "My Results" },
+      { href: "/my-purchases", label: "Purchases & Requests" },
+      { href: "/subscriptions", label: "Subscriptions" },
+      { href: "/auth/reset-password", label: "Update Password" },
+    ];
     if (canEditProfessionalProfile) {
       links.push({ href: "/profile/professional", label: "Professional Profile" });
     } else {

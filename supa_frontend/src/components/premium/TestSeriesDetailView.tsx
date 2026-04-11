@@ -80,7 +80,7 @@ const isSafeMobileReturnUrl = (value: string | null): value is string =>
   Boolean(value && value.trim().startsWith("mentorsappmobile://"));
 
 const mainsStatusToneClasses: Record<MainsTestSectionTone, string> = {
-  slate: "border-slate-300 bg-slate-100 text-slate-800",
+  slate: "border-[#c9d6fb] dark:border-[#2a3c6b] bg-[#eef4ff] dark:bg-[#16213e] text-[#1c263c] dark:text-gray-100",
   amber: "border-amber-300 bg-amber-50 text-amber-900",
   emerald: "border-emerald-300 bg-emerald-50 text-emerald-900",
   indigo: "border-indigo-300 bg-indigo-50 text-indigo-900",
@@ -345,7 +345,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
   }, [programItems, tests]);
 
   if (loading) {
-    return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading programs...</div>;
+    return <div className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-6 text-sm text-[#6c7590] dark:text-[#94a3b8]">Loading programs...</div>;
   }
 
   if (!series) {
@@ -406,17 +406,17 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
       <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <p className="text-sm font-semibold text-slate-900">{discussion.title || defaultTitle}</p>
+            <p className="text-sm font-semibold text-[#141b2d] dark:text-white">{discussion.title || defaultTitle}</p>
             <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-violet-700">
               {isVideo ? "Discussion Video" : "Live Agora Class"}
             </p>
           </div>
-          <span className="inline-flex rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
+          <span className="inline-flex rounded-full bg-white dark:bg-[#0b1120] px-2.5 py-1 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
             {hasSeriesAccess ? "Access Active" : "Locked"}
           </span>
         </div>
         {discussion.description ? (
-          <div className="mt-2 text-sm text-slate-700">
+          <div className="mt-2 text-sm text-[#334155] dark:text-gray-200">
             <RichTextContent value={discussion.description} />
           </div>
         ) : null}
@@ -426,16 +426,16 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
               <button
                 type="button"
                 onClick={() => setExpandedDiscussionKey((current) => (current === discussionKey ? null : discussionKey))}
-                className="rounded-md border border-violet-300 bg-white px-3 py-2 text-sm font-semibold text-violet-700"
+                className="rounded-md border border-violet-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm font-semibold text-violet-700"
               >
                 {isExpanded ? "Hide Video" : "Watch Discussion Video"}
               </button>
             ) : (
-              <p className="text-xs text-slate-600">Activate series access to watch this discussion.</p>
+              <p className="text-xs text-[#636b86] dark:text-gray-300">Activate series access to watch this discussion.</p>
             )}
             {hasSeriesAccess && isExpanded && presentation ? (
               presentation.kind === "iframe" ? (
-                <div className="overflow-hidden rounded-xl border border-slate-200 bg-black">
+                <div className="overflow-hidden rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-black">
                   <iframe
                     src={presentation.src}
                     title={discussion.title || defaultTitle}
@@ -445,7 +445,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                   />
                 </div>
               ) : presentation.kind === "video" ? (
-                <video controls className="aspect-video w-full rounded-xl border border-slate-200 bg-black" src={presentation.src} />
+                <video controls className="aspect-video w-full rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-black" src={presentation.src} />
               ) : (
                 <a href={presentation.src} target="_blank" rel="noreferrer" className="inline-flex text-sm font-semibold text-violet-700 hover:underline">
                   Open discussion video
@@ -454,23 +454,23 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
             ) : null}
           </div>
         ) : (
-          <div className="mt-3 space-y-2 text-sm text-slate-700">
+          <div className="mt-3 space-y-2 text-sm text-[#334155] dark:text-gray-200">
             <p>
               Scheduled for <span className="font-semibold">{formatDateTime(discussion.scheduled_for)}</span>
               {discussion.duration_minutes ? ` | ${discussion.duration_minutes} min` : ""}
             </p>
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-[#636b86] dark:text-gray-300">
               This is a creator-led live class. Learners join the in-app Agora room directly from the series and can enter as soon as the host opens the session.
             </p>
             {hasSeriesAccess ? (
               <Link
                 href={discussionHref}
-                className="inline-flex rounded-md border border-violet-300 bg-white px-3 py-2 text-sm font-semibold text-violet-700"
+                className="inline-flex rounded-md border border-violet-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm font-semibold text-violet-700"
               >
                 Join Live Class
               </Link>
             ) : (
-              <p className="text-xs text-slate-600">Activate series access to join this live class.</p>
+              <p className="text-xs text-[#636b86] dark:text-gray-300">Activate series access to join this live class.</p>
             )}
           </div>
         )}
@@ -483,13 +483,13 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
       <HistoryBackButton
         fallbackHref={fallbackHref}
         label="Back to Programs"
-        className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
+        className="inline-flex items-center gap-1 text-sm text-[#636b86] dark:text-gray-300 hover:text-[#141b2d] dark:text-white"
         iconClassName="h-4 w-4"
       />
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <section className="overflow-hidden rounded-2xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120]">
         <div className="grid gap-0 md:grid-cols-[280px_1fr]">
-          <div className="min-h-[180px] bg-slate-100">
+          <div className="min-h-[180px] bg-[#eef4ff] dark:bg-[#16213e]">
             {series.cover_image_url ? (
               <Image
                 src={series.cover_image_url}
@@ -506,16 +506,16 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
           <div className="p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h1 className="text-2xl font-bold text-slate-900">{series.title}</h1>
+                <h1 className="text-2xl font-bold text-[#141b2d] dark:text-white">{series.title}</h1>
                 {series.description ? (
-                  <RichTextContent value={series.description} className="mt-2 text-sm text-slate-600" />
+                  <RichTextContent value={series.description} className="mt-2 text-sm text-[#636b86] dark:text-gray-300" />
                 ) : (
-                  <p className="mt-2 text-sm text-slate-600">No description provided.</p>
+                  <p className="mt-2 text-sm text-[#636b86] dark:text-gray-300">No description provided.</p>
                 )}
-                <p className="mt-2 text-xs text-slate-500">
+                <p className="mt-2 text-xs text-[#6c7590] dark:text-[#94a3b8]">
                   Access: <span className="font-semibold">{series.access_type}</span> | Type: <span className="font-semibold">{series.series_kind}</span> | Curriculum items: <span className="font-semibold">{sortedProgramEntries.length}</span>
                 </p>
-                <p className="mt-2 text-xs text-slate-500">{accessSummaryText}</p>
+                <p className="mt-2 text-xs text-[#6c7590] dark:text-[#94a3b8]">{accessSummaryText}</p>
                 {finalDiscussion ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[11px] font-semibold text-violet-800">
@@ -530,7 +530,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                     {headerStartLabel}
                   </Link>
                 ) : hasSeriesAccess ? (
-                  <span className="inline-flex items-center rounded-md bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
+                  <span className="inline-flex items-center rounded-md bg-[#eef4ff] dark:bg-[#16213e] px-3 py-2 text-xs font-semibold text-[#334155] dark:text-gray-200">
                     No Published Tests Yet
                   </span>
                 ) : (
@@ -559,7 +559,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                   </span>
                 )}
                 {isMainsSeries ? (
-                  <Link href="/mentorship/manage" className="rounded-md border border-slate-300 px-3 py-2 text-sm">
+                  <Link href="/mentorship/manage" className="rounded-md border border-[#c9d6fb] dark:border-[#2a3c6b] px-3 py-2 text-sm">
                     Mentorship Management
                   </Link>
                 ) : null}
@@ -576,11 +576,11 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
 
       {isMainsSeries ? <UserLifecycleBoard metrics={lifecycleMetrics} /> : null}
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
+      <section className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">Program Curriculum</h2>
+          <h2 className="text-lg font-semibold text-[#141b2d] dark:text-white">Program Curriculum</h2>
         </div>
-        <p className="mb-3 text-xs text-slate-600">
+        <p className="mb-3 text-xs text-[#636b86] dark:text-gray-300">
           {isMainsSeries
             ? "This program can now mix mains papers, PDF handouts, and scheduled lecture blocks in one ordered preparation flow."
             : hasSeriesAccess
@@ -606,17 +606,17 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                   })
                 : null;
               return (
-                <article key={entry.entry_key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <article key={entry.entry_key} className="rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="text-base font-semibold text-slate-900">{test.title}</p>
-                      <p className="text-xs text-slate-500">{richTextToPlainText(test.description || "") || "No description"}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                      <p className="text-base font-semibold text-[#141b2d] dark:text-white">{test.title}</p>
+                      <p className="text-xs text-[#6c7590] dark:text-[#94a3b8]">{richTextToPlainText(test.description || "") || "No description"}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#6c7590] dark:text-[#94a3b8]">
                         <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5">
                           <BookOpenCheck className="h-3.5 w-3.5" />
                           {test.test_label}
                         </span>
-                        <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">
+                        <span className="inline-flex items-center rounded-full bg-white dark:bg-[#0b1120] px-2 py-0.5 font-semibold text-[#636b86] dark:text-gray-300">
                           Order {Math.max(Number(test.series_order || 0), 0)}
                         </span>
                         {showAttemptCount ? (
@@ -644,7 +644,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {canOpenTest ? (
-                        <Link href={testStartHref} className="rounded border border-indigo-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-700">
+                        <Link href={testStartHref} className="rounded border border-indigo-300 bg-white dark:bg-[#0b1120] px-2.5 py-1.5 text-xs font-semibold text-indigo-700">
                           {test.test_kind === "mains" ? "Open Test" : "Start Test"}
                         </Link>
                       ) : (
@@ -667,10 +667,10 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                     <div className={`mt-3 rounded-xl border px-3 py-3 text-xs ${mainsStatusToneClasses[mainsFlow.sections[mainsFlow.activeSection].tone]}`}>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-[11px] font-bold uppercase tracking-[0.22em]">Active Status</span>
-                        <span className="inline-flex rounded-full border border-white/80 bg-white/80 px-2 py-0.5 font-semibold">
+                        <span className="inline-flex rounded-full border border-white/80 bg-white dark:bg-[#0b1120]/80 px-2 py-0.5 font-semibold">
                           {mainsFlow.sections[mainsFlow.activeSection].label}
                         </span>
-                        <span className="inline-flex rounded-full border border-white/80 bg-white/80 px-2 py-0.5 font-semibold">
+                        <span className="inline-flex rounded-full border border-white/80 bg-white dark:bg-[#0b1120]/80 px-2 py-0.5 font-semibold">
                           {mainsFlow.overallStatus}
                         </span>
                       </div>
@@ -685,25 +685,25 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
             const isPdf = item.item_type === "pdf";
             const canOpenResource = Boolean(hasSeriesAccess && item.resource_url);
             return (
-              <article key={entry.entry_key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <article key={entry.entry_key} className="rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <p className="text-base font-semibold text-slate-900">{item.title}</p>
-                    <p className="text-xs text-slate-500">{richTextToPlainText(item.description || "") || (isPdf ? "PDF handout" : "Scheduled lecture")}</p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                    <p className="text-base font-semibold text-[#141b2d] dark:text-white">{item.title}</p>
+                    <p className="text-xs text-[#6c7590] dark:text-[#94a3b8]">{richTextToPlainText(item.description || "") || (isPdf ? "PDF handout" : "Scheduled lecture")}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#6c7590] dark:text-[#94a3b8]">
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold ${isPdf ? "bg-sky-100 text-sky-800" : "bg-violet-100 text-violet-800"}`}>
                         {isPdf ? "PDF Resource" : "Lecture Session"}
                       </span>
-                      <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">
+                      <span className="inline-flex items-center rounded-full bg-white dark:bg-[#0b1120] px-2 py-0.5 font-semibold text-[#636b86] dark:text-gray-300">
                         Order {Math.max(Number(item.series_order || 0), 0)}
                       </span>
                       {item.scheduled_for ? (
-                        <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">
+                        <span className="inline-flex items-center rounded-full bg-white dark:bg-[#0b1120] px-2 py-0.5 font-semibold text-[#636b86] dark:text-gray-300">
                           {formatDateTime(item.scheduled_for)}
                         </span>
                       ) : null}
                       {item.duration_minutes ? (
-                        <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">
+                        <span className="inline-flex items-center rounded-full bg-white dark:bg-[#0b1120] px-2 py-0.5 font-semibold text-[#636b86] dark:text-gray-300">
                           {item.duration_minutes} min
                         </span>
                       ) : null}
@@ -715,12 +715,12 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                         href={item.resource_url || "#"}
                         target="_blank"
                         rel="noreferrer"
-                        className={`rounded border bg-white px-2.5 py-1.5 text-xs font-semibold ${isPdf ? "border-sky-300 text-sky-700" : "border-violet-300 text-violet-700"}`}
+                        className={`rounded border bg-white dark:bg-[#0b1120] px-2.5 py-1.5 text-xs font-semibold ${isPdf ? "border-sky-300 text-sky-700" : "border-violet-300 text-violet-700"}`}
                       >
                         {isPdf ? "Open PDF" : "Open Lecture Link"}
                       </a>
                     ) : hasSeriesAccess ? (
-                      <span className="rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600">
+                      <span className="rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-1.5 text-xs font-semibold text-[#636b86] dark:text-gray-300">
                         {isPdf ? "PDF link pending" : "Lecture link pending"}
                       </span>
                     ) : (
@@ -733,14 +733,14 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
               </article>
             );
           })}
-          {sortedProgramEntries.length === 0 ? <p className="text-sm text-slate-500">No curriculum items published in this program yet.</p> : null}
+          {sortedProgramEntries.length === 0 ? <p className="text-sm text-[#6c7590] dark:text-[#94a3b8]">No curriculum items published in this program yet.</p> : null}
         </div>
       </section>
 
       {finalDiscussion ? (
-        <section className="rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-lg font-semibold text-slate-900">Series Wrap-Up Discussion</h2>
-          <p className="mt-1 text-xs text-slate-600">
+        <section className="rounded-xl border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4">
+          <h2 className="text-lg font-semibold text-[#141b2d] dark:text-white">Series Wrap-Up Discussion</h2>
+          <p className="mt-1 text-xs text-[#636b86] dark:text-gray-300">
             Use this after learners finish the series or when you want a guided final debrief.
           </p>
           {renderDiscussionCard(
