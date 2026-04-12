@@ -983,10 +983,38 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
                         <input value={programItemForm.title || ""} onChange={e => setProgramItemForm(prev => ({ ...prev, title: e.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" placeholder={programItemForm.item_type === "pdf" ? "e.g. Budget 2024 Summary" : "e.g. Strategy session for prelims"} />
                     </div>
                     <RichTextField label="Description" value={programItemForm.description || ""} onChange={val => setProgramItemForm(prev => ({ ...prev, description: val }))} placeholder="Briefly describe the contents of this resource." />
-                    <div className="space-y-1">
-                        <label className="text-xs font-bold uppercase tracking-wider text-slate-500">{programItemForm.item_type === "pdf" ? "Final PDF URL" : "Meeting / Video Link"}</label>
-                        <input value={programItemForm.resource_url || ""} onChange={e => setProgramItemForm(prev => ({ ...prev, resource_url: e.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm placeholder:opacity-50" placeholder="https://..." />
-                    </div>
+                    
+                    {programItemForm.item_type === "lecture" && (
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Lecture Format</label>
+                        <select 
+                          value={((programItemForm.meta || {}) as any).delivery_mode === "live_zoom" ? "live_zoom" : "external"}
+                          onChange={e => setProgramItemForm(prev => ({ 
+                            ...prev, 
+                            meta: { ...(prev.meta || {}), delivery_mode: e.target.value === "live_zoom" ? "live_zoom" : null }
+                          }))}
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                        >
+                          <option value="external">External Meeting Link (Zoom, Meet, Etc)</option>
+                          <option value="live_zoom">In-App Agora Room (Hosted directly in app)</option>
+                        </select>
+                      </div>
+                    )}
+
+                    {programItemForm.item_type === "pdf" || (((programItemForm.meta || {}) as any).delivery_mode !== "live_zoom") ? (
+                      <div className="space-y-1">
+                          <label className="text-xs font-bold uppercase tracking-wider text-slate-500">{programItemForm.item_type === "pdf" ? "Final PDF URL" : "Meeting / Video Link (Optional)"}</label>
+                          <input value={programItemForm.resource_url || ""} onChange={e => setProgramItemForm(prev => ({ ...prev, resource_url: e.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm placeholder:opacity-50" placeholder={programItemForm.item_type === "pdf" ? "https://..." : "e.g. YouTube Live or Zoom link"} />
+                          {programItemForm.item_type === "lecture" && (
+                              <p className="text-[11px] text-slate-500">You can paste a link from Google Meet, Zoom, or YouTube for learners to join. If you haven't created the meeting yet, leave this blank and add it later.</p>
+                          )}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-xs text-indigo-700">
+                        <p className="font-semibold uppercase tracking-wide text-indigo-800">Agora Room Flow</p>
+                        <p className="mt-2 text-indigo-900 leading-relaxed">Learners join this class directly inside the app with Agora. No external link is required. You can start the class anytime.</p>
+                      </div>
+                    )}
                     {(programItemForm.item_type === "lecture") && (
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div className="space-y-1">

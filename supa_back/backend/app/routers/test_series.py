@@ -2213,10 +2213,10 @@ def _enforce_series_kind_authoring_access(*, user_ctx: Dict[str, Any], series_ki
     is_quiz_master = _is_provider_like(user_ctx)
     is_mains_mentor = _is_mentor_like(user_ctx)
 
-    if normalized_kind in {TestSeriesKind.MAINS.value, TestSeriesKind.HYBRID.value} and not is_mains_mentor:
+    if normalized_kind in {TestSeriesKind.MAINS.value, TestSeriesKind.HYBRID.value} and not (is_mains_mentor or is_quiz_master):
         raise HTTPException(
             status_code=403,
-            detail="Mains series authoring requires Mains Mentor access.",
+            detail="Mains series authoring requires Mains Mentor or Quiz Master access.",
         )
     if normalized_kind == TestSeriesKind.QUIZ.value and not is_quiz_master:
         raise HTTPException(
@@ -2233,10 +2233,10 @@ def _enforce_test_kind_authoring_access(*, user_ctx: Dict[str, Any], test_kind: 
     is_quiz_master = _is_provider_like(user_ctx)
     is_mains_mentor = _is_mentor_like(user_ctx)
 
-    if normalized_kind == CollectionTestKind.MAINS.value and not is_mains_mentor:
+    if normalized_kind == CollectionTestKind.MAINS.value and not (is_mains_mentor or is_quiz_master):
         raise HTTPException(
             status_code=403,
-            detail="Mains test authoring requires Mains Mentor access.",
+            detail="Mains test authoring requires Mains Mentor or Quiz Master access.",
         )
     if normalized_kind == CollectionTestKind.PRELIMS.value and not is_quiz_master:
         raise HTTPException(
@@ -2675,7 +2675,11 @@ def _ensure_series_owner_or_admin(series_row: Dict[str, Any], user_ctx: Dict[str
         return user_id
     provider_user_id = str(series_row.get("provider_user_id") or "").strip()
     if provider_user_id != user_id:
-        raise HTTPException(status_code=403, detail="Only the provider can manage this programs.")
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only the provider can manage this program. "
+                   f"(series provider={provider_user_id!r}, your id={user_id!r})",
+        )
     return user_id
 
 
@@ -4355,6 +4359,7 @@ def update_test_series(
         else:
             merged_meta.pop("exam_ids", None)
         updates["meta"] = _normalize_series_meta(merged_meta, strict=True)
+    updates.pop("exam_ids", None)
     updates["updated_at"] = _utc_now_iso()
 
     updated = _first(supabase.table(TEST_SERIES_TABLE).update(updates).eq("id", series_id).execute())
@@ -4977,6 +4982,28 @@ def get_test_discussion_context(
         supabase=supabase,
     )
 
+@router.post("/programs/items/{item_id}/discussion-context", response_model=DiscussionCallContextResponse)
+def get_lecture_discussion_context(
+    item_id: int,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    resource = _resolve_discussion_resource(
+        scope_type="lecture",
+        scope_id=item_id,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+    return _build_discussion_call_context(
+        scope_type=str(resource["scope_type"]),
+        scope_id=int(resource["scope_id"]),
+        discussion_key=str(resource["discussion_key"]),
+        series_row=resource["series_row"],
+        discussion=resource["discussion"],
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
 
 def _discussion_speaker_request_or_404(request_id: int, supabase: Client) -> Dict[str, Any]:
     row = _safe_first(
@@ -5314,6 +5341,8 @@ def update_series_test(
 
     if "test_kind" in updates:
         updates.pop("test_kind", None)
+    if "exam_ids" in updates:
+        updates.pop("exam_ids", None)
     if "series_order" not in updates and payload.series_order is not None:
         updates["series_order"] = payload.series_order
 
@@ -9875,6 +9904,8 @@ def _agora_uid_for_session(session_id: int, user_id: str) -> int:
 
 
 def _discussion_room_channel(scope_type: str, scope_id: int, discussion_key: str) -> str:
+    if scope_type == "lecture":
+        return f"lecture-discussion-{scope_id}"
     normalized_scope = "series" if scope_type == "series" else "test"
     normalized_key = "final" if discussion_key == "final_discussion" else "test"
     return f"{normalized_scope}-discussion-{normalized_key}-{scope_id}"
@@ -9886,8 +9917,13 @@ def _series_discussion_host_allowed(*, user_ctx: Dict[str, Any], series_row: Dic
     user_id = str(user_ctx.get("user_id") or "").strip()
     if not user_id:
         return False
+    # Series owner is always a host (works for both quiz masters and mains mentors)
     if str(series_row.get("provider_user_id") or "").strip() == user_id:
         return True
+    # Any provider-like user (quiz master) who is also a series author is a host
+    if _is_provider_like(user_ctx):
+        return True
+    # Assigned mentors on the series are also hosts
     return user_id in _series_mentor_user_ids(series_row)
 
 
@@ -10006,6 +10042,33 @@ def _resolve_discussion_resource(
             "discussion_key": "test_discussion",
             "discussion": discussion,
             "discussion_channel": _discussion_room_channel("test", scope_id, "test_discussion"),
+        }
+    if normalized_scope == "lecture":
+        item_row = _fetch_program_item_or_404(scope_id, supabase)
+        series_id = int(item_row.get("series_id") or 0)
+        series_row = _fetch_series_or_404(series_id, supabase)
+        if not _can_access_series_content(user_ctx=user_ctx, series_row=series_row, supabase=supabase):
+            raise HTTPException(status_code=403, detail="Activate series access before joining this class.")
+        meta = _meta_dict(item_row.get("meta"))
+        if str(meta.get("delivery_mode") or "").strip() != "live_zoom":
+            raise HTTPException(status_code=404, detail="No in-app live discussion is configured for this lecture.")
+        
+        discussion = {
+            "delivery_mode": "live_zoom",
+            "title": str(item_row.get("title") or ""),
+            "description": str(item_row.get("description") or ""),
+            "scheduled_for": str(item_row.get("scheduled_for") or ""),
+            "duration_minutes": item_row.get("duration_minutes") or 60,
+            "starts_when_creator_joins": True,
+        }
+        return {
+            "scope_type": "lecture",
+            "scope_id": scope_id,
+            "series_id": series_id,
+            "series_row": series_row,
+            "discussion_key": f"lecture_{scope_id}",
+            "discussion": discussion,
+            "discussion_channel": _discussion_room_channel("lecture", scope_id, f"lecture_{scope_id}"),
         }
 
     raise HTTPException(status_code=400, detail="Unsupported discussion scope.")

@@ -106,7 +106,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
   const autoBuyAttemptedRef = useRef(false);
 
   const userId = String(user?.id || "").trim();
-  const isSeriesOwner = Boolean(providerLike && userId && series?.provider_user_id === userId);
+  const isSeriesOwner = Boolean(userId && series?.provider_user_id === userId);
   const canOpenManageView = Boolean(
     isAuthenticated
     && (
@@ -710,24 +710,47 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {canOpenResource ? (
-                      <a
-                        href={item.resource_url || "#"}
-                        target="_blank"
-                        rel="noreferrer"
-                        className={`w-full rounded border bg-white dark:bg-[#0b1120] px-2.5 py-2 text-center text-xs font-semibold sm:w-auto ${isPdf ? "border-sky-300 text-sky-700" : "border-violet-300 text-violet-700"}`}
-                      >
-                        {isPdf ? "Open PDF" : "Open Lecture Link"}
-                      </a>
-                    ) : hasSeriesAccess ? (
-                      <span className="w-full rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-2 text-center text-xs font-semibold text-[#636b86] dark:text-gray-300 sm:w-auto">
-                        {isPdf ? "PDF link pending" : "Lecture link pending"}
-                      </span>
-                    ) : (
-                      <span className="w-full rounded border border-amber-300 bg-amber-50 px-2.5 py-2 text-center text-xs font-semibold text-amber-800 sm:w-auto">
-                        Access this program to unlock
-                      </span>
-                    )}
+                    {(() => {
+                      if (!hasSeriesAccess) {
+                        return (
+                          <span className="w-full rounded border border-amber-300 bg-amber-50 px-2.5 py-2 text-center text-xs font-semibold text-amber-800 sm:w-auto">
+                            Access this program to unlock
+                          </span>
+                        );
+                      }
+                      
+                      const isAgoraLecture = !isPdf && (item.meta as Record<string, any>)?.delivery_mode === "live_zoom";
+                      
+                      if (isAgoraLecture) {
+                         return (
+                            <Link
+                              href={`/discussion/lecture/${item.id}?seriesId=${seriesId}&autojoin=1`}
+                              className="w-full rounded-md border border-violet-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-center text-xs font-semibold text-violet-700 hover:bg-violet-50 dark:hover:bg-[#16213e] sm:w-auto shadow-sm"
+                            >
+                              Join Agora Live Class
+                            </Link>
+                         );
+                      }
+                      
+                      if (canOpenResource) {
+                        return (
+                          <a
+                            href={item.resource_url || "#"}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`w-full rounded border bg-white dark:bg-[#0b1120] px-2.5 py-2 text-center text-xs font-semibold sm:w-auto hover:opacity-80 transition-opacity ${isPdf ? "border-sky-300 text-sky-700" : "border-violet-300 text-violet-700"}`}
+                          >
+                            {isPdf ? "Open PDF" : "Open Lecture Link"}
+                          </a>
+                        );
+                      }
+                      
+                      return (
+                        <span className="w-full rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-2 text-center text-xs font-semibold text-[#636b86] dark:text-gray-300 sm:w-auto">
+                          {isPdf ? "PDF link pending" : "Lecture link pending"}
+                        </span>
+                      );
+                    })()}
                   </div>
                 </div>
               </article>
