@@ -5,8 +5,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { BookOpenCheck, ClipboardCheck } from "lucide-react";
+import { BookOpenCheck, CalendarDays, ClipboardCheck, Radio, Tv } from "lucide-react";
 import { toast } from "sonner";
+
+import { createClient } from "@/lib/supabase/client";
 
 import { useAuth } from "@/context/AuthContext";
 import { resolveMainsTestFlowSummary, type MainsTestSectionTone } from "@/lib/mainsTestFlow";
@@ -98,6 +100,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
   const [tests, setTests] = useState<TestSeriesTest[]>([]);
   const [programItems, setProgramItems] = useState<TestSeriesProgramItem[]>([]);
   const [enrollments, setEnrollments] = useState<TestSeriesEnrollment[]>([]);
+  const supabase = createClient();
   const [copySubmissionsByTest, setCopySubmissionsByTest] = useState<Record<string, MainsCopySubmission[]>>({});
   const [quizAttemptCountsByTest, setQuizAttemptCountsByTest] = useState<Record<string, number> | null>(null);
   const [mentorshipRequests, setMentorshipRequests] = useState<MentorshipRequest[]>([]);
@@ -202,6 +205,28 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
   useEffect(() => {
     void loadBase();
   }, [loadBase]);
+
+  useEffect(() => {
+    if (!seriesId) return;
+    const channel = supabase
+      .channel(`series-items-${seriesId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "test_series_program_items",
+          filter: `series_id=eq.${seriesId}`,
+        },
+        () => {
+          void loadBase();
+        }
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [seriesId, supabase, loadBase]);
 
   const isEnrolled = useMemo(
     () => enrollments.some((row) => row.series_id === seriesId && row.status === "active"),
@@ -313,7 +338,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
   }, [loadBase, returnToUrl, series, seriesId, seriesIsFree]);
 
   useEffect(() => {
-    if (!series || !isAuthenticated) return;
+    if (!isAuthenticated) return;
     if (searchParams.get("autobuy") !== "1" || autoBuyAttemptedRef.current || enrolling || hasSeriesAccess) return;
     autoBuyAttemptedRef.current = true;
     void enroll();
@@ -719,17 +744,31 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                         );
                       }
                       
-                      const isAgoraLecture = !isPdf && (item.meta as Record<string, any>)?.delivery_mode === "live_zoom";
+                      const itemMeta = (item.meta || {}) as Record<string, any>;
+                      const isAgoraLecture = !isPdf && itemMeta.delivery_mode === "live_zoom";
+                      const isLive = Boolean(itemMeta.is_live);
                       
                       if (isAgoraLecture) {
-                         return (
-                            <Link
-                              href={`/discussion/lecture/${item.id}?seriesId=${seriesId}&autojoin=1`}
-                              className="w-full rounded-md border border-violet-300 bg-white dark:bg-[#0b1120] px-3 py-2 text-center text-xs font-semibold text-violet-700 hover:bg-violet-50 dark:hover:bg-[#16213e] sm:w-auto shadow-sm"
-                            >
-                              Join Agora Live Class
-                            </Link>
-                         );
+                        if (isLive || isSeriesOwner) {
+                          return (
+                             <Link
+                               href={`/discussion/lecture/${item.id}?seriesId=${seriesId}&autojoin=1`}
+                               className={`w-full flex items-center justify-center gap-2 rounded-md border px-4 py-2 text-center text-xs font-bold sm:w-auto shadow-md ${isLive ? "bg-violet-600 text-white border-violet-400 animate-pulse" : "bg-white text-violet-700 border-violet-200"}`}
+                             >
+                               {isLive && <span className="flex h-2 w-2 rounded-full bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.8)]" />}
+                               {isLive ? "Join Live Class Now" : "Enter Classroom"}
+                             </Link>
+                          );
+                        }
+                        
+                        return (
+                          <div className="flex flex-col items-center gap-1 sm:items-end">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Scheduled Lecture</span>
+                            <span className="w-full text-center rounded border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-semibold text-slate-600 sm:w-auto">
+                              Starts at {item.scheduled_for ? new Date(item.scheduled_for).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'TBD'}
+                            </span>
+                          </div>
+                        );
                       }
                       
                       if (canOpenResource) {

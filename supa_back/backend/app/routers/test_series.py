@@ -41,6 +41,8 @@ from ..models import (
     DiscussionSpeakerRequestCreate,
     DiscussionSpeakerRequestResponse,
     DiscussionSpeakerRequestStatus,
+    DiscussionMessageCreate,
+    DiscussionMessageResponse,
     MentorshipEntitlementGrantCreate,
     MentorshipEntitlementResponse,
     MentorshipMode,
@@ -114,6 +116,7 @@ MENTORSHIP_REQUESTS_TABLE = "mentorship_requests"
 MENTORSHIP_SESSIONS_TABLE = "mentorship_sessions"
 MENTORSHIP_MESSAGES_TABLE = "mentorship_messages"
 DISCUSSION_SPEAKER_REQUESTS_TABLE = "discussion_speaker_requests"
+DISCUSSION_MESSAGES_TABLE = "discussion_messages"
 MENTORSHIP_ENTITLEMENTS_TABLE = "mentorship_entitlements"
 MENTOR_ZOOM_CONNECTIONS_TABLE = "mentor_zoom_connections"
 PROFILES_TABLE = "creator_mentor_profiles"
@@ -4934,6 +4937,7 @@ def _build_discussion_call_context(
         provider_payload=_meta_dict(discussion.get("provider_payload")),
         available_from=available_from,
         available_until=available_until,
+        is_live=bool(discussion.get("is_live")),
     )
 
 
@@ -5004,6 +5008,65 @@ def get_lecture_discussion_context(
         supabase=supabase,
     )
 
+class DiscussionLiveStatusUpdate(BaseModel):
+    is_live: bool
+
+@router.post("/discussion/live-status", response_model=DiscussionCallContextResponse)
+def toggle_discussion_live_status(
+    scope_type: str = Query(pattern="^(series|test|lecture)$"),
+    scope_id: int = Query(gt=0),
+    discussion_key: str = Query(default=""),
+    payload: DiscussionLiveStatusUpdate = Body(...),
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    resource = _resolve_discussion_resource(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+    if not _series_discussion_host_allowed(user_ctx=user_ctx, series_row=resource["series_row"]):
+        raise HTTPException(status_code=403, detail="Only host can modify live status.")
+
+    key_to_use = discussion_key or resource.get("discussion_key", "")
+    normalized_scope = scope_type.strip().lower()
+
+    if normalized_scope == "series":
+        meta = _meta_dict(resource["series_row"].get("meta"))
+        if key_to_use in meta and isinstance(meta[key_to_use], dict):
+            meta[key_to_use]["is_live"] = payload.is_live
+        else:
+            meta[key_to_use] = {"is_live": payload.is_live}
+        supabase.table(TEST_SERIES_TABLE).update({"meta": meta}).eq("id", resource["series_id"]).execute()
+        resource["discussion"]["is_live"] = payload.is_live
+        
+    elif normalized_scope == "test":
+        meta = _meta_dict(resource["collection_row"].get("meta"))
+        if key_to_use in meta and isinstance(meta[key_to_use], dict):
+            meta[key_to_use]["is_live"] = payload.is_live
+        else:
+            meta[key_to_use] = {"is_live": payload.is_live}
+        supabase.table("collections").update({"meta": meta}).eq("id", scope_id).execute()
+        resource["discussion"]["is_live"] = payload.is_live
+        
+    elif normalized_scope == "lecture":
+        meta = _meta_dict(resource["item_row"].get("meta"))
+        meta["is_live"] = payload.is_live
+        supabase.table(TEST_SERIES_PROGRAM_ITEMS_TABLE).update({"meta": meta}).eq("id", scope_id).execute()
+        resource["discussion"]["is_live"] = payload.is_live
+        
+    return _build_discussion_call_context(
+        scope_type=str(resource["scope_type"]),
+        scope_id=int(resource["scope_id"]),
+        discussion_key=str(resource["discussion_key"]),
+        series_row=resource["series_row"],
+        discussion=resource["discussion"],
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
+
 
 def _discussion_speaker_request_or_404(request_id: int, supabase: Client) -> Dict[str, Any]:
     row = _safe_first(
@@ -5060,9 +5123,9 @@ def _discussion_speaker_requests_for_viewer(
 
 @router.get("/discussion/speaker-requests", response_model=List[DiscussionSpeakerRequestResponse])
 def list_discussion_speaker_requests(
-    scope_type: str = Query(pattern="^(series|test)$"),
+    scope_type: str = Query(pattern="^(series|test|lecture)$"),
     scope_id: int = Query(gt=0),
-    discussion_key: str = Query(pattern="^(final_discussion|test_discussion)$"),
+    discussion_key: str = Query(pattern="^(final_discussion|test_discussion|lecture_.*)$"),
     user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
     supabase: Client = Depends(get_supabase_client),
 ):
@@ -5154,6 +5217,106 @@ def request_series_discussion_speaker_access(
         user_ctx=user_ctx,
         supabase=supabase,
     )
+
+
+@router.post("/programs/items/{item_id}/discussion-request-to-speak", response_model=DiscussionSpeakerRequestResponse)
+def request_lecture_discussion_speaker_access(
+    item_id: int,
+    payload: DiscussionSpeakerRequestCreate,
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    return _create_discussion_speaker_request(
+        scope_type="lecture",
+        scope_id=item_id,
+        payload=payload,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+
+@router.get("/discussion/messages", response_model=List[DiscussionMessageResponse])
+def list_discussion_messages(
+    scope_type: str = Query(pattern="^(series|test|lecture)$"),
+    scope_id: int = Query(gt=0),
+    discussion_key: str = Query(pattern="^(final_discussion|test_discussion|lecture_.*)$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    resource = _resolve_discussion_resource(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+    rows = _safe_rows(
+        supabase.table(DISCUSSION_MESSAGES_TABLE)
+        .select("*")
+        .eq("scope_type", str(resource["scope_type"]))
+        .eq("scope_id", int(resource["scope_id"]))
+        .eq("discussion_key", str(resource["discussion_key"]))
+        .order("created_at", desc=False)
+        .limit(limit)
+    )
+    return [
+        DiscussionMessageResponse(
+            id=int(row["id"]),
+            scope_type=str(row["scope_type"]),
+            scope_id=int(row["scope_id"]),
+            discussion_key=str(row["discussion_key"]),
+            sender_user_id=str(row["sender_user_id"]),
+            sender_name=str(row["sender_name"]),
+            body=str(row["body"]),
+            created_at=str(row["created_at"]),
+        )
+        for row in rows
+    ]
+
+
+@router.post("/discussion/messages", response_model=DiscussionMessageResponse)
+def send_discussion_message(
+    scope_type: str = Query(pattern="^(series|test|lecture)$"),
+    scope_id: int = Query(gt=0),
+    discussion_key: str = Query(pattern="^(final_discussion|test_discussion|lecture_.*)$"),
+    payload: DiscussionMessageCreate = Body(...),
+    user_ctx: Dict[str, Any] = Depends(require_authenticated_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    resource = _resolve_discussion_resource(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        user_ctx=user_ctx,
+        supabase=supabase,
+    )
+    
+    user_id = str(user_ctx.get("user_id") or "").strip()
+    sender_name = _user_ctx_display_name(user_ctx) or str(user_ctx.get("email") or "").split("@")[0] or "Participant"
+    
+    insert_payload = {
+        "scope_type": str(resource["scope_type"]),
+        "scope_id": int(resource["scope_id"]),
+        "discussion_key": str(resource["discussion_key"]),
+        "sender_user_id": user_id,
+        "sender_name": sender_name,
+        "body": payload.body.strip(),
+        "created_at": _utc_now_iso(),
+    }
+    
+    row = _first(supabase.table(DISCUSSION_MESSAGES_TABLE).insert(insert_payload).execute())
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to send message.")
+        
+    return DiscussionMessageResponse(
+        id=int(row["id"]),
+        scope_type=str(row["scope_type"]),
+        scope_id=int(row["scope_id"]),
+        discussion_key=str(row["discussion_key"]),
+        sender_user_id=str(row["sender_user_id"]),
+        sender_name=str(row["sender_name"]),
+        body=str(row["body"]),
+        created_at=str(row["created_at"]),
+    )
+
 
 
 @router.post("/tests/{test_id}/discussion-request-to-speak", response_model=DiscussionSpeakerRequestResponse)
@@ -10060,12 +10223,14 @@ def _resolve_discussion_resource(
             "scheduled_for": str(item_row.get("scheduled_for") or ""),
             "duration_minutes": item_row.get("duration_minutes") or 60,
             "starts_when_creator_joins": True,
+            "is_live": bool(meta.get("is_live")),
         }
         return {
             "scope_type": "lecture",
             "scope_id": scope_id,
             "series_id": series_id,
             "series_row": series_row,
+            "item_row": item_row,
             "discussion_key": f"lecture_{scope_id}",
             "discussion": discussion,
             "discussion_channel": _discussion_room_channel("lecture", scope_id, f"lecture_{scope_id}"),

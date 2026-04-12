@@ -809,9 +809,9 @@ export interface TestSeriesDiscussion {
 }
 
 export interface DiscussionCallContext {
-  scope_type: "series" | "test";
+  scope_type: "series" | "test" | "lecture" | string;
   scope_id: number;
-  discussion_key: "final_discussion" | "test_discussion";
+  discussion_key: "final_discussion" | "test_discussion" | string;
   discussion_channel?: string | null;
   title?: string | null;
   description?: string | null;
@@ -834,16 +834,32 @@ export interface DiscussionCallContext {
   provider_error?: string | null;
   available_from?: string | null;
   available_until?: string | null;
+  is_live?: boolean;
+}
+
+export interface DiscussionMessage {
+  id: number;
+  scope_type: string;
+  scope_id: number;
+  discussion_key: string;
+  sender_user_id: string;
+  sender_name: string;
+  body: string;
+  created_at: string;
+}
+
+export interface DiscussionMessagePayload {
+  body: string;
 }
 
 export type DiscussionSpeakerRequestStatus = "pending" | "approved" | "rejected" | "withdrawn" | "removed";
 
 export interface DiscussionSpeakerRequest {
   id: number;
-  scope_type: "series" | "test";
+  scope_type: "series" | "test" | "lecture" | string;
   scope_id: number;
   series_id: number;
-  discussion_key: "final_discussion" | "test_discussion";
+  discussion_key: "final_discussion" | "test_discussion" | string;
   discussion_channel: string;
   user_id: string;
   display_name: string;

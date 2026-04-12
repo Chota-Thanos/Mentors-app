@@ -1805,6 +1805,7 @@ class DiscussionCallContextResponse(BaseModel):
     provider_error: Optional[str] = None
     available_from: Optional[str] = None
     available_until: Optional[str] = None
+    is_live: bool = False
 
 
 class DiscussionSpeakerRequestCreate(BaseModel):
@@ -1971,6 +1972,21 @@ class MentorshipMessageResponse(BaseModel):
     sender_user_id: str
     body: str
     is_read: bool = False
+    created_at: str
+
+
+class DiscussionMessageCreate(BaseModel):
+    body: str
+
+
+class DiscussionMessageResponse(BaseModel):
+    id: int
+    scope_type: str
+    scope_id: int
+    discussion_key: str
+    sender_user_id: str
+    sender_name: str
+    body: str
     created_at: str
 
 

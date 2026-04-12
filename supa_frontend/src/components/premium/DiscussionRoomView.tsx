@@ -19,11 +19,15 @@ import {
   RefreshCw,
   Video,
   VideoOff,
+  MessageSquare,
+  Send,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 
 import { premiumApi } from "@/lib/premiumApi";
 import { createClient } from "@/lib/supabase/client";
-import type { DiscussionCallContext, DiscussionSpeakerRequest } from "@/types/premium";
+import type { DiscussionCallContext, DiscussionSpeakerRequest, DiscussionMessage } from "@/types/premium";
 
 type ParticipantTile = {
   key: string;
@@ -89,14 +93,27 @@ export default function DiscussionRoomView({
   const [videoOn, setVideoOn] = useState(false);
   const [participants, setParticipants] = useState<ParticipantTile[]>([]);
   const [speakerRequests, setSpeakerRequests] = useState<DiscussionSpeakerRequest[]>([]);
+  const [messages, setMessages] = useState<DiscussionMessage[]>([]);
+  const [messageBody, setMessageBody] = useState("");
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const clientRef = useRef<IAgoraRTCClient | null>(null);
   const localAudioTrackRef = useRef<IMicrophoneAudioTrack | null>(null);
   const localVideoTrackRef = useRef<ICameraVideoTrack | null>(null);
   const tileRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const clientListenersRef = useRef<Array<{ event: string; listener: (...args: unknown[]) => void }>>([]);
+  const channelRef = useRef<string | null>(null);
+  const messageScrollRef = useRef<HTMLDivElement>(null);
   const autoJoinAttemptedRef = useRef<string>("");
+
+  useEffect(() => {
+    const getSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      setUserId(data.session?.user.id || null);
+    };
+    void getSession();
+  }, [supabase]);
 
   const isAgoraRoom = Boolean(
     context?.call_provider === "zoom_video_sdk" && context.agora_app_id && context.agora_channel,
@@ -223,33 +240,45 @@ export default function DiscussionRoomView({
     }
   }, [endpoint]);
 
-  const loadSpeakerRequests = useCallback(
-    async (
-      scopeType?: "series" | "test",
-      scopeId?: number,
-      discussionKey?: "final_discussion" | "test_discussion",
-    ) => {
-      if (!scopeType || !scopeId || !discussionKey) {
-        setSpeakerRequests([]);
-        return;
-      }
-      try {
-        const response = await premiumApi.get<DiscussionSpeakerRequest[]>("/discussion/speaker-requests", {
-          params: {
-            scope_type: scopeType,
-            scope_id: scopeId,
-            discussion_key: discussionKey,
-          },
-        });
-        setSpeakerRequests(Array.isArray(response.data) ? response.data : []);
-      } catch (error: unknown) {
-        toast.error("Could not load speaker requests", {
-          description: describeError(error, "The speaker request queue could not be loaded."),
-        });
-      }
-    },
-    [],
-  );
+  const loadSpeakerRequests = useCallback(async (scopeType: string, scopeId: number, discussionKey: string) => {
+    try {
+      const response = await premiumApi.get<DiscussionSpeakerRequest[]>("/discussion/speaker-requests", {
+        params: { scope_type: scopeType, scope_id: scopeId, discussion_key: discussionKey },
+      });
+      setSpeakerRequests(Array.isArray(response.data) ? response.data : []);
+    } catch {
+      // Ignore speaker requests load failures for now.
+    }
+  }, []);
+
+  const loadMessages = useCallback(async (scopeType: string, scopeId: number, discussionKey: string) => {
+    try {
+      const response = await premiumApi.get<DiscussionMessage[]>("/discussion/messages", {
+        params: { scope_type: scopeType, scope_id: scopeId, discussion_key: discussionKey },
+      });
+      setMessages(Array.isArray(response.data) ? response.data : []);
+    } catch {
+      // Ignore message load failures.
+    }
+  }, []);
+
+  const sendMessage = useCallback(async () => {
+    if (!context || !messageBody.trim()) return;
+    const body = messageBody.trim();
+    setMessageBody("");
+    try {
+      await premiumApi.post("/discussion/messages", { body }, {
+        params: {
+          scope_type: context.scope_type,
+          scope_id: context.scope_id,
+          discussion_key: context.discussion_key,
+        }
+      });
+      void loadMessages(context.scope_type, context.scope_id, context.discussion_key);
+    } catch (error: unknown) {
+      toast.error("Message failed", { description: describeError(error, "Could not send your message.") });
+    }
+  }, [context, messageBody, loadMessages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -266,9 +295,25 @@ export default function DiscussionRoomView({
   }, [cleanupRoom, loadContext]);
 
   useEffect(() => {
+    if (!context) return;
+    const interval = setInterval(() => {
+      void loadSpeakerRequests(context.scope_type, context.scope_id, context.discussion_key);
+      void loadMessages(context.scope_type, context.scope_id, context.discussion_key);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [context, loadSpeakerRequests, loadMessages]);
+
+  useEffect(() => {
+    if (messageScrollRef.current) {
+        messageScrollRef.current.scrollTop = messageScrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  useEffect(() => {
     if (!context?.scope_type || !context?.scope_id || !context?.discussion_key) return;
     void loadSpeakerRequests(context.scope_type, context.scope_id, context.discussion_key);
-  }, [context?.discussion_key, context?.scope_id, context?.scope_type, loadSpeakerRequests]);
+    void loadMessages(context.scope_type, context.scope_id, context.discussion_key);
+  }, [context?.discussion_key, context?.scope_id, context?.scope_type, loadSpeakerRequests, loadMessages]);
 
   useEffect(() => {
     if (!context?.discussion_channel) return;
@@ -533,6 +578,28 @@ export default function DiscussionRoomView({
     }
   }, [context, loadContext, loadSpeakerRequests]);
 
+  const toggleLiveStatus = useCallback(async () => {
+    if (!context) return;
+    setActionBusy("toggle_live");
+    try {
+      await premiumApi.post("/discussion/live-status", { is_live: !context.is_live }, {
+        params: {
+          scope_type: context.scope_type,
+          scope_id: context.scope_id,
+          discussion_key: context.discussion_key,
+        }
+      });
+      toast.success(context.is_live ? "Class ended" : "Class is now live");
+      await loadContext(true);
+    } catch (error: unknown) {
+      toast.error("Could not change live status", {
+        description: describeError(error, "The class live status could not be updated."),
+      });
+    } finally {
+      setActionBusy(null);
+    }
+  }, [context, loadContext]);
+
   const requestToSpeak = useCallback(async () => {
     if (!context) return;
     setActionBusy("request-speaker");
@@ -540,7 +607,9 @@ export default function DiscussionRoomView({
       const endpointPath =
         context.scope_type === "series"
           ? `/programs/${context.scope_id}/discussion-request-to-speak`
-          : `/tests/${context.scope_id}/discussion-request-to-speak`;
+          : context.scope_type === "test"
+            ? `/tests/${context.scope_id}/discussion-request-to-speak`
+            : `/programs/items/${context.scope_id}/discussion-request-to-speak`;
       await premiumApi.post(endpointPath, {});
       await loadSpeakerRequests(context.scope_type, context.scope_id, context.discussion_key);
       toast.success("Speaker request sent");
@@ -756,160 +825,202 @@ export default function DiscussionRoomView({
                 </button>
               </>
             ) : null}
+
+            {isHost && inRoom && (
+              <button
+                type="button"
+                onClick={() => void toggleLiveStatus()}
+                disabled={actionBusy !== null}
+                className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                  context?.is_live 
+                    ? "border-rose-400/40 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20" 
+                    : "border-emerald-400/40 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
+                } disabled:opacity-60`}
+              >
+                {actionBusy === "toggle_live" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : context?.is_live ? (
+                  <PhoneOff className="h-4 w-4" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                {context?.is_live ? "End Class" : "Go Live"}
+              </button>
+            )}
           </div>
         </section>
 
-        <aside className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Session guide</p>
-          <h2 className="mt-4 text-[2rem] font-black leading-tight text-slate-900">Run the class from one room.</h2>
-          <p className="mt-4 text-base leading-8 text-slate-600">
-            Agora now powers live discussion classes inside the series. The host starts the class and learners join the same room directly from the series page.
-          </p>
-
-          <div className="mt-6 space-y-4">
-            <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Scheduled for</p>
-              <p className="mt-3 text-2xl font-semibold text-slate-900">
-                {context.scheduled_for ? new Date(context.scheduled_for).toLocaleString() : "Not scheduled"}
-              </p>
-            </div>
-            <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Duration</p>
-              <p className="mt-3 text-2xl font-semibold text-slate-900">
-                {context.duration_minutes ? `${context.duration_minutes} min` : "Flexible"}
-              </p>
-            </div>
-            <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Role</p>
-              <p className="mt-3 text-2xl font-semibold text-slate-900">
-                {participantRole === "host" ? "Host" : participantRole === "speaker" ? "Speaker" : "Listener"}
-              </p>
+        <aside className="flex flex-col h-[700px] sm:h-auto overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-sm">
+          {/* Sidebar Header: Guide & Info */}
+          <div className="border-b border-slate-100 bg-slate-50/50 p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Class Session</p>
+            <h2 className="mt-2 text-xl font-black leading-tight text-slate-900">{context.title || "Lecture Room"}</h2>
+            <div className="mt-4 flex flex-wrap gap-2">
+               <span className="inline-flex rounded-full bg-slate-200 px-2.5 py-1 text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                 {participantRole}
+               </span>
+               <span className="inline-flex rounded-full bg-indigo-100 px-2.5 py-1 text-[10px] font-bold text-indigo-700 uppercase tracking-wider">
+                 {context.duration_minutes ? `${context.duration_minutes} min` : "Flexible"}
+               </span>
+               {context.is_live && (
+                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
+                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                   Live Now
+                 </span>
+               )}
             </div>
           </div>
 
-          <div className="mt-6 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-              {hostControlsEnabled ? "Speaker queue" : "Speaker access"}
-            </p>
-            {hostControlsEnabled ? (
-              speakerRequests.length > 0 ? (
-                speakerRequests.map((request) => (
-                  <div key={request.id} className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{request.display_name}</p>
-                        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-500">{request.status}</p>
-                        <p className="mt-2 text-xs text-slate-500">{new Date(request.requested_at).toLocaleString()}</p>
-                        {request.note ? <p className="mt-2 text-sm text-slate-600">{request.note}</p> : null}
+          {/* Chat Section */}
+          <div className="flex flex-1 flex-col overflow-hidden min-h-[300px]">
+            <div className="bg-slate-50/30 px-6 py-3 border-b border-slate-100 flex items-center justify-between">
+              <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-400">Live Discussion Chat</p>
+              <MessageSquare className="h-3.5 w-3.5 text-slate-300" />
+            </div>
+            
+            <div ref={messageScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-white/50">
+              {messages.length > 0 ? (
+                messages.map((msg) => {
+                  const isMe = msg.sender_user_id === userId;
+                  return (
+                    <div key={msg.id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                      <div className="flex items-baseline gap-2 px-1">
+                        <span className="text-[10px] font-bold text-slate-400">{isMe ? "You" : msg.sender_name}</span>
+                        <span className="text-[9px] text-slate-300">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <div className={`mt-1 max-w-[90%] rounded-2xl px-4 py-2 text-sm shadow-sm ${isMe ? "bg-slate-900 text-white rounded-tr-none" : "bg-slate-100 text-slate-800 rounded-tl-none"}`}>
+                        <p className="whitespace-pre-wrap break-words">{msg.body}</p>
                       </div>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {request.status === "pending" ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void updateSpeakerRequest(request.id, "approve")}
-                            disabled={actionBusy !== null}
-                            className="rounded-full bg-emerald-500 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-60"
-                          >
-                            {actionBusy === `approve-${request.id}` ? "Approving..." : "Approve speaker"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void updateSpeakerRequest(request.id, "reject")}
-                            disabled={actionBusy !== null}
-                            className="rounded-full border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-60"
-                          >
-                            {actionBusy === `reject-${request.id}` ? "Declining..." : "Decline"}
-                          </button>
-                        </>
-                      ) : request.status === "approved" ? (
-                        <button
-                          type="button"
-                          onClick={() => void updateSpeakerRequest(request.id, "remove")}
-                          disabled={actionBusy !== null}
-                          className="rounded-full border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60"
-                        >
-                          {actionBusy === `remove-${request.id}` ? "Removing..." : "Return to listener"}
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
-                <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                  No active speaker requests yet.
+                <div className="flex h-full items-center justify-center text-center p-6">
+                  <p className="text-xs text-slate-400 leading-relaxed italic">No messages yet. Be the first to start the conversation!</p>
                 </div>
-              )
-            ) : latestOwnSpeakerRequest ? (
-              <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-semibold text-slate-900">
-                  {latestOwnSpeakerRequest.status === "approved"
-                    ? "You can speak now."
-                    : latestOwnSpeakerRequest.status === "pending"
-                      ? "Speaker request pending."
-                      : latestOwnSpeakerRequest.status === "rejected"
-                        ? "Speaker request declined."
-                        : latestOwnSpeakerRequest.status === "removed"
-                          ? "Speaker access was ended."
-                          : "Speaker request withdrawn."}
-                </p>
-                <p className="mt-2 text-sm text-slate-600">
-                  {latestOwnSpeakerRequest.status === "approved"
-                    ? "Refresh access if your controls do not appear immediately."
-                    : latestOwnSpeakerRequest.status === "pending"
-                      ? "The host will approve or decline your request."
-                      : "You can request speaking access again whenever needed."}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {latestOwnSpeakerRequest.status === "pending" || latestOwnSpeakerRequest.status === "approved" ? (
-                    <button
-                      type="button"
-                      onClick={() => void updateSpeakerRequest(latestOwnSpeakerRequest.id, "withdraw")}
-                      disabled={actionBusy !== null}
-                      className="rounded-full border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60"
-                    >
-                      {actionBusy === `withdraw-${latestOwnSpeakerRequest.id}`
-                        ? latestOwnSpeakerRequest.status === "approved" ? "Leaving speaker mode..." : "Withdrawing..."
-                        : latestOwnSpeakerRequest.status === "approved" ? "Return to listener" : "Withdraw request"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => void requestToSpeak()}
-                      disabled={actionBusy !== null}
-                      className="rounded-full bg-indigo-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                    >
-                      {actionBusy === "request-speaker" ? "Sending..." : "Request to speak"}
-                    </button>
-                  )}
-                </div>
+              )}
+            </div>
+
+            {/* Chat Input */}
+            <div className="border-t border-slate-100 bg-white p-3">
+              <div className="relative">
+                <textarea
+                  value={messageBody}
+                  onChange={(e) => setMessageBody(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void sendMessage();
+                    }
+                  }}
+                  placeholder="Type a message..."
+                  className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 pr-10 text-xs outline-none focus:border-slate-400 focus:bg-white transition"
+                  rows={1}
+                />
+                <button
+                  type="button"
+                  onClick={() => void sendMessage()}
+                  disabled={!messageBody.trim()}
+                  className="absolute bottom-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-xl bg-slate-900 text-white disabled:opacity-30 transition hover:bg-black"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
               </div>
-            ) : (
-              <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-semibold text-slate-900">Need to ask a question live?</p>
-                <p className="mt-2 text-sm text-slate-600">
-                  Request speaker access and the host can promote you from listener to speaker without reopening the room.
+            </div>
+          </div>
+
+          {/* Speaker Requests Section (at bottom) */}
+          <div className="border-t border-slate-100 bg-slate-50/80 p-6">
+            <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-slate-400 mb-4">
+              {hostControlsEnabled ? "Speaker queue" : "Speaker access"}
+            </p>
+            
+            {hostControlsEnabled ? (
+              <div className="space-y-3 max-h-[200px] overflow-y-auto">
+                {speakerRequests.length > 0 ? (
+                  speakerRequests.map((request) => (
+                    <div key={request.id} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold text-slate-900">{request.display_name}</p>
+                          <p className="text-[10px] text-slate-400">{request.status === "approved" ? "Broadcasting" : "Waiting"}</p>
+                        </div>
+                        <div className="flex gap-1.5">
+                          {request.status === "pending" ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void updateSpeakerRequest(request.id, "approve")}
+                                disabled={actionBusy !== null}
+                                className="h-8 w-8 flex items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm hover:scale-105 transition"
+                              >
+                                <CheckCircle2 className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void updateSpeakerRequest(request.id, "reject")}
+                                disabled={actionBusy !== null}
+                                className="h-8 w-8 flex items-center justify-center rounded-full border border-rose-200 bg-white text-rose-500 shadow-sm hover:bg-rose-50 transition"
+                              >
+                                <XCircle className="h-4 w-4" />
+                              </button>
+                            </>
+                          ) : request.status === "approved" ? (
+                            <button
+                              type="button"
+                              onClick={() => void updateSpeakerRequest(request.id, "remove")}
+                              disabled={actionBusy !== null}
+                              className="px-3 py-1 rounded-full border border-slate-200 bg-white text-[10px] font-bold text-slate-500 hover:bg-slate-50 transition"
+                            >
+                              Exit Speaker
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-[11px] text-slate-400 italic">Queue is empty</p>
+                )}
+              </div>
+            ) : latestOwnSpeakerRequest ? (
+              <div className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4">
+                <p className="text-sm font-bold text-indigo-900">
+                  {latestOwnSpeakerRequest.status === "approved" ? "You're a Speaker" : "Request Pending"}
+                </p>
+                <p className="mt-1 text-xs text-indigo-700/80 leading-relaxed">
+                  {latestOwnSpeakerRequest.status === "approved" 
+                    ? "Broadcasting is enabled. Check your camera/mic controls." 
+                    : "The host will promote you when they're ready for your question."}
                 </p>
                 <button
                   type="button"
-                  onClick={() => void requestToSpeak()}
+                  onClick={() => void updateSpeakerRequest(latestOwnSpeakerRequest.id, "withdraw")}
                   disabled={actionBusy !== null}
-                  className="mt-3 rounded-full bg-indigo-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  className="mt-3 w-full rounded-xl border border-indigo-200 bg-white py-2 text-[11px] font-bold text-indigo-600 hover:bg-indigo-50 transition"
                 >
-                  {actionBusy === "request-speaker" ? "Sending..." : "Request to speak"}
+                  {latestOwnSpeakerRequest.status === "approved" ? "Leave Speaker Mode" : "Cancel Request"}
                 </button>
               </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void requestToSpeak()}
+                disabled={actionBusy !== null}
+                className="w-full flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-[0.98] transition disabled:opacity-50"
+              >
+                Request to speak
+              </button>
             )}
+            
+            <button
+               type="button"
+               onClick={() => router.push(backHref)}
+               className="mt-6 w-full inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50"
+            >
+               Back to series
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => router.push(backHref)}
-            className="mt-6 inline-flex items-center gap-2 rounded-full border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-          >
-            Back to series
-          </button>
         </aside>
       </div>
     </div>
