@@ -31,7 +31,9 @@ const sourceLabels: Record<PerformanceAuditSourceKind, string> = {
 
 function matchesExamIds(examIds: number[] | undefined | null, examId: number | null): boolean {
   if (!examId) return true;
-  return Array.isArray(examIds) && examIds.includes(examId);
+  // An empty exam_ids array means the item is available to all exams
+  if (!Array.isArray(examIds) || examIds.length === 0) return true;
+  return examIds.includes(examId);
 }
 
 function formatPercentage(value: number): string {

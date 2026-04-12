@@ -330,7 +330,9 @@ function parseSeriesId(collection: PremiumCollection | null): number {
 
 function matchesExamIds(examIds: number[] | undefined | null, examId: number | null): boolean {
   if (!examId) return true;
-  return Array.isArray(examIds) && examIds.includes(examId);
+  // An empty exam_ids array means the item is available to all exams
+  if (!Array.isArray(examIds) || examIds.length === 0) return true;
+  return examIds.includes(examId);
 }
 
 const PRELIMS_COLLECTION_MODES = new Set([
@@ -761,7 +763,7 @@ function LearnerHome({ user }: { user: unknown }) {
       {/* 2. Primary Ongoing Activities (Shown if they exist) */}
       {!isNewUser && (
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <div className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+          <div className="min-w-0 rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Programs</p>
@@ -778,7 +780,7 @@ function LearnerHome({ user }: { user: unknown }) {
                   href={`/programs/${series.series_id}`}
                   className="flex flex-col items-start gap-4 rounded-[26px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[linear-gradient(180deg,#ffffff_0%,#f8faff_100%)] dark:bg-[linear-gradient(180deg,#0b1120_0%,#091124_100%)] p-4 transition hover:-translate-y-0.5 hover:shadow-[0_16px_32px_rgba(15,23,42,0.06)] sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1 w-full">
                     <div className={`mb-2 h-1.5 w-16 rounded-full ${String(series.series_kind || "").toLowerCase() === "mains" ? "bg-[#1f9c57]" : "bg-[#f59e0b]"}`} />
                     <p className="truncate text-[18px] font-bold tracking-[-0.02em] text-[#141b2d] dark:text-white">{series.title}</p>
                     <p className="mt-1 text-[13px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">
@@ -799,7 +801,7 @@ function LearnerHome({ user }: { user: unknown }) {
             </div>
           </div>
 
-          <div className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+          <div className="min-w-0 rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Attempts</p>
@@ -816,7 +818,7 @@ function LearnerHome({ user }: { user: unknown }) {
                   href={item.href}
                   className="flex flex-col items-start gap-3 rounded-[22px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[linear-gradient(180deg,#ffffff_0%,#f8faff_100%)] dark:bg-[linear-gradient(180deg,#0b1120_0%,#091124_100%)] px-4 py-4 transition hover:border-[#bdd1ff] sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1 w-full">
                     <p className="truncate text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.title}</p>
                     <p className="mt-1 text-[12px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{item.subtitle}</p>
                   </div>
@@ -837,7 +839,7 @@ function LearnerHome({ user }: { user: unknown }) {
 
       {/* 3. AI Tools and Support Links */}
       <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <div className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+        <div className="min-w-0 rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Quick Links</p>
@@ -854,7 +856,7 @@ function LearnerHome({ user }: { user: unknown }) {
                 <div className="inline-flex rounded-[14px] bg-[#eef4ff] dark:bg-[#16213e] p-3 text-[#1739ac]">
                   <item.icon className="h-4 w-4" />
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1 w-full">
                   <p className="text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.label}</p>
                   <p className="mt-1 text-[12px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{item.note}</p>
                 </div>
@@ -863,7 +865,7 @@ function LearnerHome({ user }: { user: unknown }) {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-[30px] bg-[linear-gradient(140deg,#0a1a54_0%,#163fa4_62%,#1f56cf_100%)] p-5 text-white shadow-[0_22px_46px_rgba(9,26,74,0.18)]">
+        <div className="min-w-0 overflow-hidden rounded-[30px] bg-[linear-gradient(140deg,#0a1a54_0%,#163fa4_62%,#1f56cf_100%)] p-5 text-white shadow-[0_22px_46px_rgba(9,26,74,0.18)]">
           <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-white/10 dark:bg-[#0b1120]/6 px-5 py-5">
             <div className="absolute right-[-2rem] top-[-2rem] h-28 w-28 rounded-full bg-white/10 dark:bg-[#0b1120]/10" />
             <div className="absolute bottom-[-3rem] left-[-2rem] h-28 w-28 rounded-full bg-white/10 dark:bg-[#0b1120]/10" />
@@ -907,7 +909,7 @@ function LearnerHome({ user }: { user: unknown }) {
       {/* 4. Mentorship Overview and Yearly Summary */}
       {!isNewUser && (
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <div className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[linear-gradient(180deg,#f3f6ff_0%,#eef3ff_100%)] dark:bg-[linear-gradient(180deg,#121a30_0%,#0d1426_100%)] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+          <div className="min-w-0 rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-[linear-gradient(180deg,#f3f6ff_0%,#eef3ff_100%)] dark:bg-[linear-gradient(180deg,#121a30_0%,#0d1426_100%)] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Mentorship Status</p>
@@ -924,7 +926,7 @@ function LearnerHome({ user }: { user: unknown }) {
                   href={item.href}
                   className="flex flex-col items-start gap-3 rounded-[22px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] px-4 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_32px_rgba(15,23,42,0.08)] sm:flex-row sm:items-start sm:justify-between"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1 w-full">
                     <p className="truncate text-[15px] font-semibold tracking-[-0.02em] text-[#182033]">{item.title}</p>
                     <p className="mt-1 text-[12px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{item.meta}</p>
                   </div>
@@ -942,7 +944,7 @@ function LearnerHome({ user }: { user: unknown }) {
             </div>
           </div>
 
-          <div className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+          <div className="min-w-0 rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Yearly Overview</p>
@@ -978,7 +980,7 @@ function LearnerHome({ user }: { user: unknown }) {
       )}
 
       {/* 5. Recommended Programs & Discovery Phase */}
-      <section className="rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+      <section className="min-w-0 rounded-[30px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{isNewUser ? "Discovery" : "Suggested Next Step"}</p>
@@ -1165,7 +1167,7 @@ function MinimalCreatorHome({
       ) : null}
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="rounded-[28px] border border-slate-200 bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+        <div className="min-w-0 rounded-[28px] border border-slate-200 bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Latest Requests</p>
@@ -1181,7 +1183,7 @@ function MinimalCreatorHome({
             {kind === "mains_mentor"
               ? newRequests.map((request) => (
                 <article key={request.id} className="flex flex-col items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1 w-full">
                     <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{learnerNameFromRequest(request)}</p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#94a3b8]">
                       {formatRelativeDate(request.requested_at)} · {String(request.service_type || "").replaceAll("_", " ")}
@@ -1194,7 +1196,7 @@ function MinimalCreatorHome({
               ))
               : snapshot.series.slice(0, 4).map((series) => (
                 <article key={series.id} className="flex flex-col items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1 w-full">
                     <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{series.title}</p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#94a3b8]">
                       {Number(series.test_count || 0)} tests · {series.is_active ? "active" : "archived"}
@@ -1218,7 +1220,7 @@ function MinimalCreatorHome({
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <div className="rounded-[28px] border border-slate-200 bg-white dark:bg-[#0b1120] p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Quick Actions</p>
             <div className="mt-4 grid gap-3">
