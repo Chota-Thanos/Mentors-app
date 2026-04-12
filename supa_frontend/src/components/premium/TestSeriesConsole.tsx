@@ -696,6 +696,28 @@ export default function TestSeriesConsole() {
                           <Link href={`/programs/${series.id}`} className="inline-flex items-center rounded-xl border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-3 py-2 text-[11px] font-semibold text-[#334155] dark:text-gray-200">
                           Detail
                         </Link>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingSeriesId(series.id);
+                            setSeriesForm({
+                              title: series.title,
+                              description: series.description,
+                              cover_image_url: series.cover_image_url,
+                              series_kind: series.series_kind,
+                              access_type: series.access_type,
+                              price: series.price,
+                              exam_ids: series.exam_ids,
+                              is_public: series.is_public,
+                              is_active: series.is_active,
+                              meta: series.meta || {},
+                            });
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="inline-flex items-center rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700"
+                        >
+                          Edit
+                        </button>
                         <Link href={`/programs/${series.id}/manage`} className="inline-flex items-center rounded-xl border border-indigo-300 bg-indigo-50 px-3 py-2 text-[11px] font-semibold text-indigo-700">
                           Manage
                         </Link>

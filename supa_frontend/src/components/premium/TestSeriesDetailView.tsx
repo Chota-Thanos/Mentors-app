@@ -607,11 +607,11 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                 : null;
               return (
                 <article key={entry.entry_key} className="rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
+                  <div className="flex flex-col gap-3">
+                    <div className="min-w-0">
                       <p className="text-base font-semibold text-[#141b2d] dark:text-white">{test.title}</p>
-                      <p className="text-xs text-[#6c7590] dark:text-[#94a3b8]">{richTextToPlainText(test.description || "") || "No description"}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#6c7590] dark:text-[#94a3b8]">
+                      <p className="text-xs text-[#6c7590] dark:text-[#94a3b8] mt-0.5">{richTextToPlainText(test.description || "") || "No description"}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[#6c7590] dark:text-[#94a3b8]">
                         <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5">
                           <BookOpenCheck className="h-3.5 w-3.5" />
                           {test.test_label}
@@ -644,11 +644,11 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {canOpenTest ? (
-                        <Link href={testStartHref} className="rounded border border-indigo-300 bg-white dark:bg-[#0b1120] px-2.5 py-1.5 text-xs font-semibold text-indigo-700">
+                        <Link href={testStartHref} className="w-full rounded border border-indigo-300 bg-white dark:bg-[#0b1120] px-2.5 py-2 text-center text-xs font-semibold text-indigo-700 sm:w-auto">
                           {test.test_kind === "mains" ? "Open Test" : "Start Test"}
                         </Link>
                       ) : (
-                        <span className="rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800">
+                        <span className="w-full rounded border border-amber-300 bg-amber-50 px-2.5 py-2 text-center text-xs font-semibold text-amber-800 sm:w-auto">
                           Access this program to unlock
                         </span>
                       )}
@@ -686,11 +686,11 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
             const canOpenResource = Boolean(hasSeriesAccess && item.resource_url);
             return (
               <article key={entry.entry_key} className="rounded-lg border border-[#dce3fb] dark:border-[#1e2a4a] bg-[#f8faff] dark:bg-[#0f172a] p-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
+                <div className="flex flex-col gap-3">
+                  <div className="min-w-0">
                     <p className="text-base font-semibold text-[#141b2d] dark:text-white">{item.title}</p>
-                    <p className="text-xs text-[#6c7590] dark:text-[#94a3b8]">{richTextToPlainText(item.description || "") || (isPdf ? "PDF handout" : "Scheduled lecture")}</p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#6c7590] dark:text-[#94a3b8]">
+                    <p className="text-xs text-[#6c7590] dark:text-[#94a3b8] mt-0.5">{richTextToPlainText(item.description || "") || (isPdf ? "PDF handout" : "Scheduled lecture")}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[#6c7590] dark:text-[#94a3b8]">
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold ${isPdf ? "bg-sky-100 text-sky-800" : "bg-violet-100 text-violet-800"}`}>
                         {isPdf ? "PDF Resource" : "Lecture Session"}
                       </span>
@@ -715,16 +715,16 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
                         href={item.resource_url || "#"}
                         target="_blank"
                         rel="noreferrer"
-                        className={`rounded border bg-white dark:bg-[#0b1120] px-2.5 py-1.5 text-xs font-semibold ${isPdf ? "border-sky-300 text-sky-700" : "border-violet-300 text-violet-700"}`}
+                        className={`w-full rounded border bg-white dark:bg-[#0b1120] px-2.5 py-2 text-center text-xs font-semibold sm:w-auto ${isPdf ? "border-sky-300 text-sky-700" : "border-violet-300 text-violet-700"}`}
                       >
                         {isPdf ? "Open PDF" : "Open Lecture Link"}
                       </a>
                     ) : hasSeriesAccess ? (
-                      <span className="rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-1.5 text-xs font-semibold text-[#636b86] dark:text-gray-300">
+                      <span className="w-full rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2.5 py-2 text-center text-xs font-semibold text-[#636b86] dark:text-gray-300 sm:w-auto">
                         {isPdf ? "PDF link pending" : "Lecture link pending"}
                       </span>
                     ) : (
-                      <span className="rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800">
+                      <span className="w-full rounded border border-amber-300 bg-amber-50 px-2.5 py-2 text-center text-xs font-semibold text-amber-800 sm:w-auto">
                         Access this program to unlock
                       </span>
                     )}

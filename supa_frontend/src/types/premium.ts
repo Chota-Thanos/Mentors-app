@@ -1291,7 +1291,7 @@ export interface MainsCopyMark {
   updated_at?: string | null;
 }
 
-export type CopySubmissionMode = "pdf" | "question_wise" | "hybrid";
+export type CopySubmissionMode = "pdf" | "question_wise" | "digital_text" | "hybrid";
 export type CopySubmissionStatus = "submitted" | "eta_declared" | "under_review" | "checked";
 
 export interface MainsCopyQuestionResponse {
@@ -1301,6 +1301,7 @@ export interface MainsCopyQuestionResponse {
   word_limit?: number | null;
   max_marks?: number | null;
   answer_image_urls: string[];
+  answer_text?: string | null;
 }
 
 export interface MainsCopySubmission {
@@ -1354,6 +1355,7 @@ export interface MainsCopyQuestionResponsePayload {
   question_item_id?: number;
   question_number?: number;
   answer_image_urls: string[];
+  answer_text?: string;
 }
 
 export interface MainsCheckedCopyPayload {

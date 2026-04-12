@@ -1512,6 +1512,7 @@ class MainsCopySubmissionQuestionResponseCreate(BaseModel):
     question_item_id: Optional[int] = None
     question_number: Optional[int] = None
     answer_image_urls: List[str] = Field(default_factory=list)
+    answer_text: Optional[str] = None
 
 
 class MainsCopySubmissionQuestionResponse(MainsCopySubmissionQuestionResponseCreate):

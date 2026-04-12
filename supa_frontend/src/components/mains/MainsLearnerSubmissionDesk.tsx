@@ -128,8 +128,9 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [acceptingSlotId, setAcceptingSlotId] = useState<number | null>(null);
   const [requestingMentorshipSubmissionId, setRequestingMentorshipSubmissionId] = useState<number | null>(null);
-  const [activeSection, setActiveSection] = useState<MainsTestSectionKey>("question_paper");
-  const [submissionMode, setSubmissionMode] = useState<"pdf" | "question_wise">("pdf");
+  const [evaluationOpen, setEvaluationOpen] = useState(true);
+  const [mentorshipOpen, setMentorshipOpen] = useState(false);
+  const [submissionMode, setSubmissionMode] = useState<"pdf" | "question_wise" | "digital_text">("pdf");
   const [answerPdfUrl, setAnswerPdfUrl] = useState("");
   const [submissionNote, setSubmissionNote] = useState("");
   const [mentorshipNote, setMentorshipNote] = useState("");
@@ -137,6 +138,7 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
   const [questionImageUrlsByQuestion, setQuestionImageUrlsByQuestion] = useState<Record<string, string[]>>(
     buildQuestionImageDrafts(payload.questions),
   );
+  const [questionTextDraftsByQuestion, setQuestionTextDraftsByQuestion] = useState<Record<string, string>>({});
 
   const refreshSubmissions = useCallback(async () => {
     if (!payload.series_id || !isAuthenticated) {
@@ -234,24 +236,39 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
     }
 
     const questionResponses: MainsCopyQuestionResponsePayload[] = [];
-    for (const question of payload.questions) {
-      const urls = (questionImageUrlsByQuestion[questionKey(question)] || [])
-        .map((item) => item.trim())
-        .filter(Boolean);
-      if (urls.length === 0) continue;
-      questionResponses.push({
-        question_item_id: question.content_item_id,
-        question_number: question.question_number,
-        answer_image_urls: urls,
-      });
+    if (submissionMode === "digital_text") {
+      for (const question of payload.questions) {
+        const text = (questionTextDraftsByQuestion[questionKey(question)] || "").trim();
+        if (text) {
+          questionResponses.push({
+            question_item_id: question.content_item_id,
+            question_number: question.question_number,
+            answer_image_urls: [],
+            answer_text: text,
+          });
+        }
+      }
+    } else {
+      for (const question of payload.questions) {
+        const urls = (questionImageUrlsByQuestion[questionKey(question)] || [])
+          .map((item) => item.trim())
+          .filter(Boolean);
+        if (urls.length > 0) {
+          questionResponses.push({
+            question_item_id: question.content_item_id,
+            question_number: question.question_number,
+            answer_image_urls: urls,
+          });
+        }
+      }
     }
 
     if (submissionMode === "pdf" && !answerPdfUrl.trim()) {
       toast.error("Answer PDF URL is required.");
       return;
     }
-    if (submissionMode === "question_wise" && questionResponses.length === 0) {
-      toast.error("Attach at least one answer image.");
+    if ((submissionMode === "question_wise" || submissionMode === "digital_text") && questionResponses.length === 0) {
+      toast.error(submissionMode === "digital_text" ? "Enter text for at least one answer." : "Attach at least one answer image.");
       return;
     }
 
@@ -259,13 +276,15 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
     try {
       await premiumApi.post(`/tests/${collectionId}/copy-submissions`, {
         answer_pdf_url: submissionMode === "pdf" ? answerPdfUrl.trim() : undefined,
-        question_responses: submissionMode === "question_wise" ? questionResponses : undefined,
+        question_responses: (submissionMode === "question_wise" || submissionMode === "digital_text") ? questionResponses : undefined,
         note: submissionNote.trim() || undefined,
+        submission_mode: submissionMode,
       });
       toast.success("Mains submission recorded.");
       setAnswerPdfUrl("");
       setSubmissionNote("");
       setQuestionImageUrlsByQuestion(buildQuestionImageDrafts(payload.questions));
+      setQuestionTextDraftsByQuestion({});
       await refreshSubmissions();
     } catch (error: unknown) {
       toast.error("Failed to submit mains answers", { description: toError(error) });
@@ -304,7 +323,11 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
   );
 
   useEffect(() => {
-    setActiveSection(flowSummary.activeSection);
+    if (flowSummary.activeSection === "evaluation") {
+      setEvaluationOpen(true);
+    } else if (flowSummary.activeSection === "mentorship") {
+      setMentorshipOpen(true);
+    }
   }, [flowSummary.activeSection]);
 
   const latestSubmission = flowSummary.latestSubmission;
@@ -377,65 +400,74 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
     }
   };
 
-  const renderSectionToggle = (sectionKey: MainsTestSectionKey) => {
+  const renderStackedSection = (
+    sectionKey: MainsTestSectionKey,
+    titleOverride: string,
+    isOpen: boolean,
+    toggleOpen: (() => void) | null,
+    children: React.ReactNode
+  ) => {
     const section = flowSummary.sections[sectionKey];
-    const isOpen = activeSection === sectionKey;
     const tone = stageToneClasses[section.tone];
+    
     return (
-      <button
-        type="button"
-        onClick={() => setActiveSection(sectionKey)}
-        className={`w-full rounded-2xl border-2 px-5 py-4 text-left transition ${tone.toggle} ${isOpen ? "shadow-md ring-2 ring-slate-200/70" : "shadow-sm hover:shadow-md"}`}
-      >
-        <div className="flex items-center gap-4">
-          <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-base font-black ${tone.icon}`}>
-            {stageNumbers[sectionKey]}
-          </span>
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-[0.22em]">{section.label}</span>
-              <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${tone.badge}`}>{section.status}</span>
-              {isOpen ? (
-                <span className="inline-flex rounded-full border border-white/70 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                  Open
-                </span>
-              ) : null}
+      <div className={`overflow-hidden rounded-2xl border-2 transition-all duration-300 shadow-sm ${tone.body} border-slate-200 bg-white`}>
+        <div
+          onClick={toggleOpen || undefined}
+          className={`w-full px-5 py-4 text-left ${toggleOpen ? `${tone.toggle} hover:bg-slate-50 cursor-pointer` : "bg-white"}`}
+        >
+          <div className="flex w-full items-center justify-between">
+            <div className="flex items-center gap-4">
+              <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-base font-black ${tone.icon}`}>
+                {stageNumbers[sectionKey]}
+              </span>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[14px] font-bold uppercase tracking-wide text-slate-800">{titleOverride}</span>
+                  <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${tone.badge}`}>{section.status}</span>
+                </div>
+                <p className="text-sm leading-6">{section.detail}</p>
+              </div>
             </div>
-            <p className="text-sm leading-6">{section.detail}</p>
+            {toggleOpen ? (
+              <span className={`ml-3 inline-flex shrink-0 rounded-full border p-2 ${tone.icon}`}>
+                {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </span>
+            ) : null}
           </div>
         </div>
-        <span className={`ml-3 inline-flex shrink-0 rounded-full border p-2 ${tone.icon}`}>
-          {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </span>
-      </button>
+        {isOpen && (
+          <div className="border-t-2 border-dashed border-slate-200 p-5 bg-white">
+            {children}
+          </div>
+        )}
+      </div>
     );
   };
 
   return (
-    <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
-      <div>
-        <h3 className="text-lg font-semibold text-slate-900">Mains Paper Flow</h3>
-        <p className="text-sm text-slate-500">Question paper, evaluation, and mentorship stay inside the same learner desk.</p>
-        <div className={`mt-3 rounded-2xl border px-4 py-3 ${stageToneClasses[activeSectionSummary.tone].summary}`}>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-[0.22em]">Active Status</span>
-            <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${stageToneClasses[activeSectionSummary.tone].badge}`}>
-              {activeSectionSummary.label}
-            </span>
-            <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${stageToneClasses[activeSectionSummary.tone].badge}`}>
-              {flowSummary.overallStatus}
-            </span>
+    <section className="space-y-6">
+      <div className={`rounded-xl border px-5 py-4 shadow-sm ${stageToneClasses[flowSummary.sections[flowSummary.activeSection].tone].body} border-slate-200`}>
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Present Step</span>
+            <div className="mt-1 flex items-center gap-2">
+              <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold shadow-sm ${stageToneClasses[flowSummary.sections[flowSummary.activeSection].tone].badge}`}>
+                {flowSummary.sections[flowSummary.activeSection].label}
+              </span>
+              <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold shadow-sm ${stageToneClasses[flowSummary.sections[flowSummary.activeSection].tone].badge}`}>
+                Status: {flowSummary.overallStatus}
+              </span>
+            </div>
           </div>
-          <p className="mt-2 text-sm leading-6">{activeSectionSummary.detail}</p>
         </div>
       </div>
 
-      <div className="space-y-3">
-        {renderSectionToggle("question_paper")}
-        {activeSection === "question_paper" ? (
-          <div className={`space-y-4 rounded-2xl border p-4 ${stageToneClasses[flowSummary.sections.question_paper.tone].body}`}>
+      <div className="space-y-4">
+        {renderStackedSection("question_paper", "Step 1: Read Question Paper", true, null, (
+          <div className="space-y-4">
             <p className="text-sm text-slate-600">
-              Read the full paper here first. The evaluation section is where you submit one PDF or question-wise answer images.
+              Read the full paper here. Write and submit your answers in the evaluation section below.
             </p>
             <div className="space-y-4">
               {payload.questions.map((question) => (
@@ -450,11 +482,10 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
               ))}
             </div>
           </div>
-        ) : null}
+        ))}
 
-        {renderSectionToggle("evaluation")}
-        {activeSection === "evaluation" ? (
-          <div className={`space-y-4 rounded-2xl border p-4 ${stageToneClasses[flowSummary.sections.evaluation.tone].body}`}>
+        {renderStackedSection("evaluation", "Step 2: Submit Your Answers", evaluationOpen, () => setEvaluationOpen(!evaluationOpen), (
+          <div className="space-y-4">
             {!isAuthenticated ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                 Sign in to submit your answers and track mentor evaluation.
@@ -466,6 +497,13 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
             ) : (
               <>
                 <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+                  <button
+                    type="button"
+                    onClick={() => setSubmissionMode("digital_text")}
+                    className={`rounded px-3 py-1.5 text-xs font-semibold ${submissionMode === "digital_text" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600"}`}
+                  >
+                    Digital Text Input
+                  </button>
                   <button
                     type="button"
                     onClick={() => setSubmissionMode("pdf")}
@@ -491,6 +529,29 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
                       className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                       placeholder="Paste the uploaded PDF URL"
                     />
+                  </div>
+                ) : submissionMode === "digital_text" ? (
+                  <div className="space-y-4">
+                    {payload.questions.map((question) => {
+                      const textDraft = questionTextDraftsByQuestion[questionKey(question)] || "";
+                      return (
+                        <div key={`text-${questionKey(question)}`} className="rounded-xl border border-slate-200 bg-white p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-900">Q{question.question_number}</p>
+                              <p className="text-xs text-slate-500">{question.max_marks} marks | {question.word_limit} words</p>
+                            </div>
+                          </div>
+                          <p className="mt-2 text-sm text-slate-700">{question.question_text}</p>
+                          <textarea
+                            value={textDraft}
+                            onChange={(event) => setQuestionTextDraftsByQuestion((prev) => ({ ...prev, [questionKey(question)]: event.target.value }))}
+                            className="mt-4 min-h-[160px] w-full rounded-lg border border-indigo-200 bg-indigo-50/30 px-4 py-3 text-sm text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            placeholder="Type your answer here..."
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -655,14 +716,19 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
                             <p className="text-xs font-semibold text-slate-800">
                               Q{response.question_number || "?"} {response.question_text ? `| ${response.question_text}` : ""}
                             </p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {response.answer_image_urls.map((url, index) => (
-                                <a key={`${url}-${index}`} href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700">
-                                  <ImagePlus className="h-3.5 w-3.5" />
-                                  Answer Image {index + 1}
-                                </a>
-                              ))}
-                            </div>
+                            {response.answer_text ? (
+                              <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">{response.answer_text}</p>
+                            ) : null}
+                            {response.answer_image_urls && response.answer_image_urls.length > 0 ? (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {response.answer_image_urls.map((url, index) => (
+                                  <a key={`${url}-${index}`} href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700">
+                                    <ImagePlus className="h-3.5 w-3.5" />
+                                    Answer Image {index + 1}
+                                  </a>
+                                ))}
+                              </div>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -689,11 +755,10 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
               {submissions.length === 0 ? <p className="text-sm text-slate-500">No submissions yet for this mains paper.</p> : null}
             </div>
           </div>
-        ) : null}
+        ))}
 
-        {renderSectionToggle("mentorship")}
-        {activeSection === "mentorship" ? (
-          <div className={`space-y-4 rounded-2xl border p-4 ${stageToneClasses[flowSummary.sections.mentorship.tone].body}`}>
+        {renderStackedSection("mentorship", "Step 3: Mentorship", mentorshipOpen, () => setMentorshipOpen(!mentorshipOpen), (
+          <div className="space-y-4">
             {!isAuthenticated ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                 Sign in to request mentorship after evaluation.
@@ -825,7 +890,7 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
               </div>
             )}
           </div>
-        ) : null}
+        ))}
       </div>
     </section>
   );

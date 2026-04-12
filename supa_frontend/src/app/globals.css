@@ -12,10 +12,12 @@
 @layer base {
   html {
     background: var(--app-canvas);
+    overflow-x: hidden;
   }
 
   body {
     font-family: var(--font-sans);
+    overflow-x: hidden;
     background:
       radial-gradient(circle at top right, rgba(232, 227, 255, 0.95), transparent 28%),
       radial-gradient(circle at bottom left, rgba(141, 238, 224, 0.42), transparent 24%),

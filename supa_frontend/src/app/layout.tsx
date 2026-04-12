@@ -5,6 +5,14 @@ import { Toaster } from "@/components/ui/toaster"
 import { AuthProvider } from "@/context/AuthContext"
 import { ExamProvider } from "@/context/ExamContext"
 import "./globals.css";
+import type { Viewport } from "next";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
 
 const manrope = Manrope({
   subsets: ["latin"],

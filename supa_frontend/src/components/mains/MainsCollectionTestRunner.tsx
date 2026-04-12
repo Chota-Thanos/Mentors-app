@@ -99,11 +99,6 @@ export default function MainsCollectionTestRunner({
               {embedded ? "Mains Paper Flow" : "Mains Writing Desk"}
             </p>
             <h2 className="text-2xl font-bold text-slate-900">{payload.collection_title}</h2>
-            <p className="max-w-3xl text-sm text-slate-600">
-              {embedded
-                ? "This test page now carries the full learner flow. Read the complete paper, submit one combined PDF or question-wise answer photos, then track evaluation and mentorship here."
-                : "Read the complete paper here, then submit one combined PDF or question-wise answer photos. Learners do not see answer approaches or model answers on this desk."}
-            </p>
             <div className="flex flex-wrap items-center gap-3 text-xs">
               {payload.series_id ? (
                 <Link href={`/programs/${payload.series_id}`} className="inline-flex items-center gap-1 font-semibold text-indigo-700 hover:text-indigo-900">
@@ -132,7 +127,6 @@ export default function MainsCollectionTestRunner({
           <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6">
             <div>
               <h3 className="text-lg font-semibold text-slate-900">Question Paper</h3>
-              <p className="text-sm text-slate-500">All questions, marks, and word limits are visible in one place.</p>
             </div>
             <div className="space-y-4">
               {payload.questions.map((question) => (

@@ -14,7 +14,7 @@ export default async function TestSeriesDetailPage({ params }: PageProps) {
 
   return (
     <AppLayout>
-      <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
+      <div className="p-4 md:p-6">
         <TestSeriesDetailView seriesId={seriesId} />
       </div>
     </AppLayout>

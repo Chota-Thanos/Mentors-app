@@ -864,9 +864,9 @@ function LearnerHome({ user }: { user: unknown }) {
         </div>
 
         <div className="overflow-hidden rounded-[30px] bg-[linear-gradient(140deg,#0a1a54_0%,#163fa4_62%,#1f56cf_100%)] p-5 text-white shadow-[0_22px_46px_rgba(9,26,74,0.18)]">
-          <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-white dark:bg-[#0b1120]/6 px-5 py-5">
-            <div className="absolute right-[-2rem] top-[-2rem] h-28 w-28 rounded-full bg-white dark:bg-[#0b1120]/10" />
-            <div className="absolute bottom-[-3rem] left-[-2rem] h-28 w-28 rounded-full bg-white dark:bg-[#0b1120]/10" />
+          <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-white/10 dark:bg-[#0b1120]/6 px-5 py-5">
+            <div className="absolute right-[-2rem] top-[-2rem] h-28 w-28 rounded-full bg-white/10 dark:bg-[#0b1120]/10" />
+            <div className="absolute bottom-[-3rem] left-[-2rem] h-28 w-28 rounded-full bg-white/10 dark:bg-[#0b1120]/10" />
             <div className="relative flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
               <div className="max-w-xl">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">AI Workspace</p>
@@ -875,7 +875,7 @@ function LearnerHome({ user }: { user: unknown }) {
                   Move between GK, Maths, Passage, and Mains AI tools from one surface and continue wherever you left off.
                 </p>
               </div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-white dark:bg-[#0b1120]/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/80">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 dark:bg-[#0b1120]/12 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/80">
                 <Sparkles className="h-3.5 w-3.5" />
                 Active AI Systems
               </div>
@@ -885,13 +885,13 @@ function LearnerHome({ user }: { user: unknown }) {
                 <Link
                   key={system.href + system.label}
                   href={system.href}
-                  className="rounded-[22px] border border-white/12 bg-white dark:bg-[#0b1120]/8 px-4 py-4 transition hover:bg-white dark:bg-[#0b1120]/12"
+                  className="rounded-[22px] border border-white/12 bg-white/5 dark:bg-[#0b1120]/8 px-4 py-4 transition hover:bg-white/10 dark:bg-[#0b1120]/12"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="inline-flex rounded-[14px] bg-white dark:bg-[#0b1120]/12 p-3 text-white">
+                    <div className="inline-flex rounded-[14px] bg-white/10 dark:bg-[#0b1120]/12 p-3 text-white">
                       <system.icon className="h-4 w-4" />
                     </div>
-                    <span className="rounded-full border border-white/15 bg-white dark:bg-[#0b1120]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/85">
+                    <span className="rounded-full border border-white/15 bg-white/10 dark:bg-[#0b1120]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/85">
                       {system.status}
                     </span>
                   </div>
@@ -1131,7 +1131,7 @@ function MinimalCreatorHome({
             </div>
             <div>
               <h1 className="max-w-3xl font-sans text-[30px] font-extrabold leading-[1.05] tracking-[-0.04em] text-[#1235ae] dark:text-[#a5bdf8] sm:text-4xl">{copy.title}</h1>
-              <p className="mt-2 max-w-2xl text-[14px] leading-6 text-slate-600 sm:text-[15px] sm:leading-7">{copy.subtitle}</p>
+              <p className="mt-2 max-w-2xl text-[14px] leading-6 text-slate-600 dark:text-[#94a3b8] sm:text-[15px] sm:leading-7">{copy.subtitle}</p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <Link href={copy.primaryHref} className="inline-flex items-center justify-center gap-2 rounded-full bg-[#173aa9] px-5 py-3 text-[13px] font-semibold text-white shadow-[0_15px_28px_rgba(23,58,169,0.24)] transition hover:bg-[#15328f]">
@@ -1182,8 +1182,8 @@ function MinimalCreatorHome({
               ? newRequests.map((request) => (
                 <article key={request.id} className="flex flex-col items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-900">{learnerNameFromRequest(request)}</p>
-                    <p className="mt-1 text-xs text-slate-500">
+                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{learnerNameFromRequest(request)}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#94a3b8]">
                       {formatRelativeDate(request.requested_at)} · {String(request.service_type || "").replaceAll("_", " ")}
                     </p>
                   </div>
@@ -1195,8 +1195,8 @@ function MinimalCreatorHome({
               : snapshot.series.slice(0, 4).map((series) => (
                 <article key={series.id} className="flex flex-col items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-900">{series.title}</p>
-                    <p className="mt-1 text-xs text-slate-500">
+                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{series.title}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#94a3b8]">
                       {Number(series.test_count || 0)} tests · {series.is_active ? "active" : "archived"}
                     </p>
                   </div>
@@ -1229,8 +1229,8 @@ function MinimalCreatorHome({
                       <action.icon className="h-4 w-4" />
                     </div>
                     <div>
-                      <p className="text-sm font-bold text-[#091a4a]">{action.label}</p>
-                      <p className="text-xs text-slate-500">{action.description}</p>
+                      <p className="text-sm font-bold text-[#091a4a] dark:text-white">{action.label}</p>
+                      <p className="text-xs text-slate-500 dark:text-[#94a3b8]">{action.description}</p>
                     </div>
                   </div>
                   <ArrowRight className="h-4 w-4 text-slate-400 transition group-hover:translate-x-1" />
@@ -1243,9 +1243,9 @@ function MinimalCreatorHome({
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Programs</p>
             <div className="mt-4 space-y-3">
               {snapshot.series.slice(0, 3).map((series) => (
-                <Link key={series.id} href={`/programs/${series.id}/manage`} className="block rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3 transition hover:border-slate-300 hover:bg-slate-50">
-                  <p className="truncate text-sm font-bold text-slate-900">{series.title}</p>
-                  <p className="mt-1 text-xs text-slate-500">
+                <Link key={series.id} href={`/programs/${series.id}/manage`} className="block rounded-[22px] border border-slate-200 dark:border-[#1e2a4a] bg-slate-50/80 dark:bg-[#0b1120] px-4 py-3 transition hover:border-slate-300 dark:hover:border-[#2a3c6b] hover:bg-slate-50 dark:hover:bg-[#0f172a]">
+                  <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{series.title}</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#94a3b8]">
                     {Number(series.test_count || 0)} tests · {series.is_active ? "active" : "archived"}
                   </p>
                 </Link>
@@ -1284,7 +1284,9 @@ export default function Home() {
   if (kind !== "learner") {
     return (
       <AppLayout>
-        <MinimalCreatorHome kind={kind} copy={copy} actions={quickActions} />
+        <div className="p-4 md:p-6">
+          <MinimalCreatorHome kind={kind} copy={copy} actions={quickActions} />
+        </div>
       </AppLayout>
     );
   }
@@ -1292,7 +1294,9 @@ export default function Home() {
   if (kind === "learner" && isAuthenticated) {
     return (
       <AppLayout>
-        <LearnerHome user={user} />
+        <div className="p-4 md:p-6">
+          <LearnerHome user={user} />
+        </div>
       </AppLayout>
     );
   }

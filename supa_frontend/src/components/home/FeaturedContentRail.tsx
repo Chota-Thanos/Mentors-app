@@ -94,8 +94,8 @@ function SeriesCard({
   const accessLine = series.access_type === "free" || Number(series.price || 0) <= 0 ? "Free" : String(series.access_type || "").toLowerCase();
 
   return (
-    <article className="min-w-[280px] max-w-[280px] snap-start rounded-[24px] border border-[#dce3fb] bg-white p-4 shadow-[0_16px_34px_rgba(15,23,42,0.05)]">
-      <Link href={`/programs/${series.id}`} className="block overflow-hidden rounded-[18px] border border-[#e3e8fb] bg-[#eef3ff]">
+    <article className="min-w-[280px] max-w-[280px] snap-start rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4 shadow-[0_16px_34px_rgba(15,23,42,0.05)]">
+      <Link href={`/programs/${series.id}`} className="block overflow-hidden rounded-[18px] border border-[#e3e8fb] dark:border-[#1e2a4a] bg-[#eef3ff] dark:bg-[#0f172a]">
         {cover ? (
           <Image
             src={cover}
@@ -106,12 +106,12 @@ function SeriesCard({
             className="h-[168px] w-full object-cover"
           />
         ) : (
-          <div className={`flex h-[168px] items-center justify-center bg-[linear-gradient(135deg,${mode === "mains" ? "#f6ead7,#fff7ef" : "#eef3ff,#ffffff"})]`}>
+          <div className={`flex h-[168px] items-center justify-center ${mode === "mains" ? "bg-[linear-gradient(135deg,#f6ead7,#fff7ef)] dark:bg-[linear-gradient(135deg,#2d2315,#1a130c)]" : "bg-[linear-gradient(135deg,#eef3ff,#ffffff)] dark:bg-[linear-gradient(135deg,#0a1020,#16213e)]"}`}>
             <div className="text-center">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5f7aa9]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5f7aa9] dark:text-[#a5bdf8]">
                 {mode === "mains" ? "Mains" : "Prelims"}
               </p>
-              <p className="mt-2 text-[14px] font-semibold text-[#182033]">{series.test_count || 0} tests</p>
+              <p className="mt-2 text-[14px] font-semibold text-[#182033] dark:text-white">{series.test_count || 0} tests</p>
             </div>
           </div>
         )}
@@ -121,24 +121,24 @@ function SeriesCard({
         {eyebrow ? (
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#5f7aa9]">{eyebrow}</p>
         ) : null}
-        <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#182033]">{series.title}</p>
-        <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">{providerName}</p>
-        <p className="mt-2 text-[12px] leading-6 text-[#6c7590]">{textExcerpt(series.description, "Structured preparation track.")}</p>
+        <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#182033] dark:text-white">{series.title}</p>
+        <p className="mt-1 text-[12px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{providerName}</p>
+        <p className="mt-2 text-[12px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{textExcerpt(series.description, "Structured preparation track.")}</p>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#1739ac]">
+        <span className="rounded-full bg-[#eef4ff] dark:bg-[#16213e] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#1739ac] dark:text-[#8ea9ff]">
           {accessLine}
         </span>
         {categoryLine ? (
-          <span className="rounded-full bg-[#f5f7fc] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#65708f]">
+          <span className="rounded-full bg-[#f5f7fc] dark:bg-[#0f172a] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#65708f] dark:text-[#94a3b8]">
             {categoryLine}
           </span>
         ) : null}
       </div>
 
       <div className="mt-5 flex items-center justify-between gap-3">
-        <p className="text-[15px] font-semibold text-[#091a4a]">{formatListingPrice(series.price)}</p>
+        <p className="text-[15px] font-semibold text-[#091a4a] dark:text-white">{formatListingPrice(series.price)}</p>
         <Link
           href={`/programs/${series.id}`}
           className="inline-flex items-center gap-1 rounded-full bg-[#173aa9] px-4 py-2 text-[12px] font-semibold text-white"
@@ -157,8 +157,8 @@ function MentorCard({ mentor, eyebrow }: { mentor: ProfessionalProfile; eyebrow?
   const fee = mentorPriceLabel(mentor);
 
   return (
-    <article className="min-w-[280px] max-w-[280px] snap-start rounded-[24px] border border-[#dce3fb] bg-white p-4 shadow-[0_16px_34px_rgba(15,23,42,0.05)]">
-      <div className="relative overflow-hidden rounded-[18px] border border-[#e3e8fb] bg-[#eef3ff]">
+    <article className="min-w-[280px] max-w-[280px] snap-start rounded-[24px] border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] p-4 shadow-[0_16px_34px_rgba(15,23,42,0.05)]">
+      <div className="relative overflow-hidden rounded-[18px] border border-[#e3e8fb] dark:border-[#1e2a4a] bg-[#eef3ff] dark:bg-[#0f172a]">
         {mentor.profile_image_url ? (
           <Image
             src={mentor.profile_image_url}
@@ -169,7 +169,7 @@ function MentorCard({ mentor, eyebrow }: { mentor: ProfessionalProfile; eyebrow?
             className="h-[168px] w-full object-cover"
           />
         ) : (
-          <div className="flex h-[168px] items-center justify-center bg-[linear-gradient(135deg,#e0e0ff_0%,#8df5e4_100%)] text-[34px] font-black text-[#000666]">
+          <div className="flex h-[168px] items-center justify-center bg-[linear-gradient(135deg,#e0e0ff_0%,#8df5e4_100%)] dark:bg-[linear-gradient(135deg,#131a3d_0%,#0e453c_100%)] text-[34px] font-black text-[#000666] dark:text-[#8df5e4]">
             {initialsFromLabel(mentor.display_name)}
           </div>
         )}
@@ -182,27 +182,27 @@ function MentorCard({ mentor, eyebrow }: { mentor: ProfessionalProfile; eyebrow?
         {eyebrow ? (
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#5f7aa9]">{eyebrow}</p>
         ) : null}
-        <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#182033]">{mentor.display_name}</p>
-        <p className="mt-1 text-[12px] leading-6 text-[#6c7590]">{mentor.headline || "Mentor"}</p>
-        <p className="mt-2 text-[12px] leading-6 text-[#6c7590]">{textExcerpt(mentor.bio, "Structured mentorship for UPSC aspirants.")}</p>
+        <p className="text-[18px] font-semibold tracking-[-0.03em] text-[#182033] dark:text-white">{mentor.display_name}</p>
+        <p className="mt-1 text-[12px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{mentor.headline || "Mentor"}</p>
+        <p className="mt-2 text-[12px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{textExcerpt(mentor.bio, "Structured mentorship for UPSC aspirants.")}</p>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
         {review.total > 0 ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-[#fff1cf] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7c5500]">
+          <span className="inline-flex items-center gap-1 rounded-full bg-[#fff1cf] dark:bg-[#2b1f02] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7c5500] dark:text-[#e4a81d]">
             <Star className="h-3 w-3 fill-current" />
             {review.average.toFixed(1)}
           </span>
         ) : null}
         {mentor.specialization_tags.slice(0, 1).map((tag) => (
-          <span key={`${mentor.user_id}-${tag}`} className="rounded-full bg-[#eef4ff] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#1739ac]">
+          <span key={`${mentor.user_id}-${tag}`} className="rounded-full bg-[#eef4ff] dark:bg-[#16213e] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#1739ac] dark:text-[#8ea9ff]">
             {tag}
           </span>
         ))}
       </div>
 
       <div className="mt-5 flex items-center justify-between gap-3">
-        <p className="text-[13px] font-semibold text-[#091a4a]">{fee ? `Starts ${fee}` : "Request first"}</p>
+        <p className="text-[13px] font-semibold text-[#091a4a] dark:text-white">{fee ? `Starts ${fee}` : "Request first"}</p>
         <Link
           href={`/profiles/${mentor.user_id}`}
           className="inline-flex items-center gap-1 rounded-full bg-[#173aa9] px-4 py-2 text-[12px] font-semibold text-white"
@@ -292,10 +292,10 @@ export default function FeaturedContentRail({
     <section className={className}>
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h3 className="text-[22px] font-black tracking-tight text-[#091a4a]">{title}</h3>
-          {subtitle ? <p className="mt-1 text-[13px] leading-6 text-[#6c7590]">{subtitle}</p> : null}
+          <h3 className="text-[22px] font-black tracking-tight text-[#091a4a] dark:text-[#a5bdf8]">{title}</h3>
+          {subtitle ? <p className="mt-1 text-[13px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{subtitle}</p> : null}
         </div>
-        <Link href={browseHref} className="shrink-0 text-[13px] font-semibold text-[#1739ac]">
+        <Link href={browseHref} className="shrink-0 text-[13px] font-semibold text-[#1739ac] dark:text-[#8ea9ff]">
           Browse all
         </Link>
       </div>
@@ -391,10 +391,10 @@ export function FeaturedMixedRail({
     <section className={className}>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h3 className="text-[22px] font-black tracking-tight text-[#091a4a]">{title}</h3>
-          {subtitle ? <p className="mt-1 text-[13px] leading-6 text-[#6c7590]">{subtitle}</p> : null}
+          <h3 className="text-[22px] font-black tracking-tight text-[#091a4a] dark:text-[#a5bdf8]">{title}</h3>
+          {subtitle ? <p className="mt-1 text-[13px] leading-6 text-[#6c7590] dark:text-[#94a3b8]">{subtitle}</p> : null}
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-[12px] font-semibold text-[#1739ac]">
+        <div className="flex flex-wrap items-center gap-3 text-[12px] font-semibold text-[#1739ac] dark:text-[#8ea9ff]">
           <Link href="/programs/prelims">Prelims</Link>
           <Link href="/programs/mains">Mains</Link>
           <Link href="/mentors/discover">Mentors</Link>
