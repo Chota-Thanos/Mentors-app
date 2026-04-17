@@ -1,6 +1,5 @@
 "use client";
 
-import axios from "axios";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowUpRight, BookOpen, CalendarDays, ClipboardCheck, FileQuestion, FileText, LayoutList, LineChart, Loader2, MessageSquareWarning, PencilLine, PlayCircle, Plus, RefreshCcw, Trash2, Users, Video } from "lucide-react";
@@ -12,9 +11,10 @@ import DiscussionConfigEditor from "@/components/premium/DiscussionConfigEditor"
 import UserLifecycleBoard from "@/components/premium/UserLifecycleBoard";
 import HistoryBackButton from "@/components/ui/HistoryBackButton";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { isAdminLike, isMentorLike, isModeratorLike, isProviderLike } from "@/lib/accessControl";
-import { premiumApi } from "@/lib/premiumApi";
-import { richTextToPlainText, toNullableRichText } from "@/lib/richText";
+import { createClient } from "@/lib/supabase/client";
+import { richTextToPlainText } from "@/lib/richText";
 import { getDiscussionDraftFromMeta, mergeDiscussionIntoMeta } from "@/lib/testSeriesDiscussion";
 import { lifecycleCompletionPercent, type UserLifecycleMetrics } from "@/lib/testSeriesLifecycle";
 import RichTextField from "@/components/ui/RichTextField";
@@ -61,9 +61,10 @@ type CurriculumEntry =
     };
 
 const toError = (error: unknown): string => {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as any).message);
+  }
+  return String(error || "Unknown error");
 };
 
 const parseMentorIds = (raw: string): string[] => {
@@ -168,6 +169,7 @@ const emptyProgramItemForm: TestSeriesProgramItemCreatePayload = {
 
 export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewProps) {
   const { user, loading, isAuthenticated } = useAuth();
+  const { profileId } = useProfile();
   const providerLike = useMemo(() => isProviderLike(user), [user]);
   const mentorLike = useMemo(() => isMentorLike(user), [user]);
   const moderatorLike = useMemo(() => isModeratorLike(user), [user]);
@@ -330,8 +332,12 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
 
   const loadTestSubmissions = async (testId: number): Promise<MainsCopySubmission[]> => {
     try {
-      const response = await premiumApi.get<MainsCopySubmission[]>(`/tests/${testId}/copy-submissions`);
-      return Array.isArray(response.data) ? response.data : [];
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("mains_test_copy_submissions")
+        .select("*")
+        .eq("collection_id", testId);
+      return (data || []).map(row => ({ ...row, user_id: String(row.user_id) })) as any;
     } catch {
       return [];
     }
@@ -340,22 +346,97 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   const loadPage = async () => {
     setBusy(true);
     try {
-      const [seriesResponse, testsResponse, programItemsResponse] = await Promise.all([
-        premiumApi.get<TestSeries>(`/programs/${seriesId}`),
-        premiumApi.get<TestSeriesTest[]>(`/programs/${seriesId}/tests`, { params: { include_inactive: true } }),
-        premiumApi.get<TestSeriesProgramItem[]>(`/programs/${seriesId}/program-items`, { params: { include_inactive: true } }),
-      ]);
+      const supabase = createClient();
+      const numSeriesId = Number(seriesId);
 
-      const nextSeries = seriesResponse.data;
-      const nextTests = Array.isArray(testsResponse.data) ? testsResponse.data : [];
-      const nextProgramItems = Array.isArray(programItemsResponse.data) ? programItemsResponse.data : [];
-      const nextMeta =
-        nextSeries.meta && typeof nextSeries.meta === "object"
-          ? (nextSeries.meta as Record<string, unknown>)
-          : {};
+      // 1. Fetch Series Detail
+      const { data: seriesData, error: seriesError } = await supabase
+        .from("test_series")
+        .select("*")
+        .eq("id", numSeriesId)
+        .single();
+        
+      if (seriesError) throw seriesError;
+      if (!seriesData) throw new Error("Series not found");
+
+      // 2. Fetch Curriculum (program_units and steps)
+      const { data: unitsData, error: unitsError } = await supabase
+        .from("program_units")
+        .select(`
+          *,
+          steps:program_unit_steps(
+            *,
+            collection:premium_collections(*)
+          )
+        `)
+        .eq("series_id", numSeriesId)
+        .order("display_order", { ascending: true });
+
+      if (unitsError) throw unitsError;
+
+      const nextTests: TestSeriesTest[] = [];
+      const nextProgramItems: TestSeriesProgramItem[] = [];
+
+      (unitsData || []).forEach(unit => {
+        unit.steps?.forEach((step: any) => {
+          if (step.step_type === "test" && step.collection) {
+            nextTests.push({
+              id: step.collection.id,
+              series_id: numSeriesId,
+              title: step.title || step.collection.name,
+              description: step.description || step.collection.description,
+              test_kind: step.collection.collection_type === "mains" ? "mains" : "prelims",
+              test_label: (step.collection.collection_type || "").toUpperCase(),
+              series_order: step.display_order,
+              question_count: 0, // Will be fetched via RPC or meta if needed
+              is_public: step.collection.is_public,
+              is_active: step.collection.is_active,
+              is_premium: step.collection.is_paid,
+              price: Number(step.collection.price || 0),
+              is_finalized: step.collection.is_finalized,
+              meta: step.meta || {},
+              exam_ids: [],
+              created_at: step.created_at,
+            });
+          } else {
+            nextProgramItems.push({
+              id: step.id,
+              series_id: numSeriesId,
+              item_type: step.step_type === "live_lecture" ? "lecture" : "pdf",
+              title: step.title,
+              description: step.description,
+              resource_url: step.resource_url,
+              scheduled_for: step.scheduled_for,
+              duration_minutes: step.duration_minutes,
+              series_order: step.display_order,
+              is_active: step.is_active,
+              meta: step.meta || {},
+              created_at: step.created_at,
+            });
+          }
+        });
+      });
+
+      const nextSeries: TestSeries = {
+        ...seriesData,
+        id: seriesData.id,
+        title: seriesData.name,
+        description: seriesData.description,
+        cover_image_url: seriesData.cover_image_url,
+        series_kind: seriesData.series_kind,
+        access_type: seriesData.is_paid ? "paid" : "free",
+        price: Number(seriesData.price || 0),
+        is_public: seriesData.is_public,
+        is_active: seriesData.is_active,
+        provider_user_id: String(seriesData.creator_id),
+        meta: seriesData.meta || {},
+        exam_ids: [],
+      } as any;
+
       setSeries(nextSeries);
       setTests(nextTests);
       setProgramItems(nextProgramItems);
+      
       setSeriesForm({
         title: nextSeries.title,
         description: nextSeries.description || "",
@@ -365,13 +446,12 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
         price: Number(nextSeries.price || 0),
         is_public: nextSeries.is_public,
         is_active: nextSeries.is_active,
-        exam_ids: Array.isArray(nextSeries.exam_ids) ? nextSeries.exam_ids : [],
-        meta: nextMeta,
+        exam_ids: Array.isArray(seriesData.exam_ids) ? seriesData.exam_ids : [],
+        meta: seriesData.meta || {},
       });
-      setMentorUserIdsText(parseMentorIdsFromMeta(nextMeta).join(", "));
+      setMentorUserIdsText(parseMentorIdsFromMeta(seriesData.meta || {}).join(", "));
 
-      const managerScope =
-        adminLike || moderatorLike || mentorLike || (providerLike && nextSeries.provider_user_id === currentUserId);
+      const managerScope = adminLike || moderatorLike || mentorLike || (providerLike && String(seriesData.creator_id) === String(currentUserId));
       if (!managerScope) {
         setEnrollments([]);
         setRequests([]);
@@ -380,42 +460,43 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
         return;
       }
 
-      const enrollmentsResponse = await premiumApi.get<TestSeriesEnrollment[]>(`/programs/${seriesId}/enrollments`);
-      setEnrollments(Array.isArray(enrollmentsResponse.data) ? enrollmentsResponse.data : []);
+      // 3. Fetch Analytics/Lifecycle Data
+      const [enrollRes, requestsRes, sessionsRes, submissionsRes] = await Promise.all([
+        supabase.from("user_content_access").select("*").eq("test_series_id", numSeriesId).eq("is_active", true),
+        supabase.from("mentorship_requests").select("*").eq("series_id", numSeriesId),
+        supabase.from("mentorship_sessions").select("*").eq("mentor_id", seriesData.creator_id),
+        supabase.from("mains_test_copy_submissions").select("*").eq("series_id", numSeriesId),
+      ]);
 
-      const rawNextSeriesKind = String(nextSeries.series_kind || "").trim().toLowerCase();
-      const nextSeriesKind = rawNextSeriesKind === "prelims" ? "quiz" : rawNextSeriesKind;
-      const mentorshipEnabledForSeries = canAccessMentorshipProviderScope && nextSeriesKind !== "quiz";
-      if (mentorshipEnabledForSeries) {
-        const [requestsResponse, sessionsResponse] = await Promise.all([
-          premiumApi.get<MentorshipRequest[]>("/mentorship/requests", { params: { scope: "provider" } }),
-          premiumApi.get<MentorshipSession[]>("/mentorship/sessions", { params: { scope: "provider" } }),
-        ]);
-        setRequests(Array.isArray(requestsResponse.data) ? requestsResponse.data : []);
-        setSessions(Array.isArray(sessionsResponse.data) ? sessionsResponse.data : []);
-      } else {
-        setRequests([]);
-        setSessions([]);
-      }
+      setEnrollments((enrollRes.data || []).map(a => ({
+        id: a.id,
+        series_id: a.test_series_id,
+        user_id: String(a.user_id),
+        status: "active",
+        created_at: a.granted_at,
+      })) as any);
+
+      setRequests((requestsRes.data || []).map(r => ({ ...r, user_id: String(r.user_id), mentor_id: String(r.mentor_id) })) as any);
+      setSessions((sessionsRes.data || []).map(s => ({ ...s, user_id: String(s.user_id), mentor_id: String(s.mentor_id) })) as any);
+      
+      const subMap: Record<string, MainsCopySubmission[]> = {};
+      (submissionsRes.data || []).forEach(sub => {
+        const tid = String(sub.collection_id || sub.test_collection_id || "");
+        if (tid) {
+          if (!subMap[tid]) subMap[tid] = [];
+          subMap[tid].push({ ...sub, user_id: String(sub.user_id) } as any);
+        }
+      });
+      setCopyByTest(subMap);
 
       const mains = nextTests.filter((row) => row.test_kind === "mains");
-      const submissionsEntries = await Promise.all(
-        mains.map(async (row) => [String(row.id), await loadTestSubmissions(row.id)] as const),
-      );
-      setCopyByTest(Object.fromEntries(submissionsEntries));
       setFocusedTestId((prev) => {
         if (prev && mains.some((row) => row.id === prev)) return prev;
         return mains[0]?.id || null;
       });
+
     } catch (error: unknown) {
-      toast.error("Failed to load manage view", { description: toError(error) });
-      setSeries(null);
-      setTests([]);
-      setProgramItems([]);
-      setEnrollments([]);
-      setRequests([]);
-      setSessions([]);
-      setCopyByTest({});
+      toast.error("Failed to load management workspace", { description: toError(error) });
     } finally {
       setBusy(false);
     }
@@ -516,7 +597,8 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   const learnerDirectory = useMemo(() => {
     const output = new Map<string, string>();
     for (const row of seriesRequests) {
-      if (!output.has(row.user_id)) output.set(row.user_id, learnerLabelFromRequest(row));
+      const uId = String(row.user_id);
+      if (!output.has(uId)) output.set(uId, learnerLabelFromRequest(row));
     }
     return output;
   }, [seriesRequests]);
@@ -524,19 +606,19 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   const lifecycleRows = useMemo((): LifecycleRow[] => {
     const userIds = new Set<string>();
     for (const row of enrollments) {
-      if (row.status === "active") userIds.add(row.user_id);
+      if (row.status === "active") userIds.add(String(row.user_id));
     }
-    for (const row of allSubmissions) userIds.add(row.user_id);
-    for (const row of seriesRequests) userIds.add(row.user_id);
-    for (const row of seriesSessions) userIds.add(row.user_id);
+    for (const row of allSubmissions) userIds.add(String(row.user_id));
+    for (const row of seriesRequests) userIds.add(String(row.user_id));
+    for (const row of seriesSessions) userIds.add(String(row.user_id));
 
     const out: LifecycleRow[] = [];
     for (const userId of userIds) {
-      const userSubmissions = allSubmissions.filter((row) => row.user_id === userId);
-      const userRequests = seriesRequests.filter((row) => row.user_id === userId);
-      const userSessions = seriesSessions.filter((row) => row.user_id === userId);
+      const userSubmissions = allSubmissions.filter((row) => String(row.user_id) === userId);
+      const userRequests = seriesRequests.filter((row) => String(row.user_id) === userId);
+      const userSessions = seriesSessions.filter((row) => String(row.user_id) === userId);
       const metrics: UserLifecycleMetrics = {
-        enrolled: enrollments.some((row) => row.user_id === userId && row.status === "active"),
+        enrolled: enrollments.some((row) => String(row.user_id) === userId && row.status === "active"),
         attempted_tests: new Set(userSubmissions.map((row) => row.test_collection_id)).size,
         copy_submissions: userSubmissions.length,
         copy_checked: userSubmissions.filter((row) => row.status === "checked").length,
@@ -627,7 +709,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   };
 
   const saveSeries = async (): Promise<boolean> => {
-    if (!series) return false;
+    if (!series || !profileId) return false;
     const title = String(seriesForm.title || "").trim();
     if (!title) {
       toast.error("Series title is required");
@@ -639,13 +721,27 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
       mentor_user_id: selectedMentorIds.length > 0 ? selectedMentorIds[0] : null,
     };
     try {
-      await premiumApi.put(`/programs/${series.id}`, {
-        ...seriesForm,
-        title,
-        description: toNullableRichText(seriesForm.description || ""),
-        exam_ids: seriesExamIds,
+      const supabase = createClient();
+      await supabase.from("test_series").update({
+        name: title,
+        description: seriesForm.description || null,
+        cover_image_url: seriesForm.cover_image_url || null,
+        series_kind: seriesForm.series_kind,
+        is_paid: seriesForm.access_type === "paid",
+        price: Number(seriesForm.price || 0),
+        is_public: seriesForm.is_public,
+        is_active: seriesForm.is_active,
         meta: mergedMeta,
-      });
+      }).eq("id", seriesId);
+
+      // Update exams
+      await supabase.from("test_series_exams").delete().eq("test_series_id", seriesId);
+      if (seriesExamIds.length > 0) {
+        await supabase.from("test_series_exams").insert(
+          seriesExamIds.map(exam_id => ({ test_series_id: seriesId, exam_id }))
+        );
+      }
+
       toast.success("Series updated");
       await loadPage();
       return true;
@@ -662,9 +758,10 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
 
   const archiveSeries = async () => {
     if (!series) return;
-    if (!window.confirm("Archive this programs?")) return;
+    if (!window.confirm("Archive this program?")) return;
     try {
-      await premiumApi.delete(`/programs/${series.id}`);
+      const supabase = createClient();
+      await supabase.from("test_series").update({ is_active: false }).eq("id", seriesId);
       toast.success("Series archived");
       await loadPage();
     } catch (error: unknown) {
@@ -673,35 +770,73 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   };
 
   const saveTest = async () => {
-    if (savingTest) return;
+    if (savingTest || !profileId) return;
     const title = String(testForm.title || "").trim();
     if (!title) {
       toast.error("Test title is required");
       return;
     }
-    if (!allowedTestKindOptions.some((item) => item.value === testForm.test_kind)) {
-      toast.error("Selected test type is not allowed for this series and role.");
-      return;
-    }
     setSavingTest(true);
     try {
+      const supabase = createClient();
       if (editingTestId) {
-        await premiumApi.put(`/tests/${editingTestId}`, {
-          ...testForm,
+        // 1. Update Collection
+        await supabase.from("premium_collections").update({
+          name: title,
+          description: testForm.description || null,
+          collection_type: testForm.test_kind === "mains" ? "mains" : "prelims",
+          is_paid: testForm.is_premium,
+          price: Number(testForm.price || 0),
+          is_public: testForm.is_public,
+          is_finalized: testForm.is_finalized,
+          image_url: testForm.thumbnail_url || null,
+          meta: testForm.meta || {},
+        }).eq("id", editingTestId);
+
+        // 2. Update Step
+        await supabase.from("program_unit_steps").update({
           title,
-          description: toNullableRichText(testForm.description || ""),
-          exam_ids: testExamIds,
-        });
-        toast.success("Test updated");
+          display_order: testForm.series_order,
+        }).eq("collection_id", editingTestId);
+
       } else {
-        await premiumApi.post(`/programs/${seriesId}/tests`, {
-          ...testForm,
+        // 1. Create Collection
+        const { data: coll, error: collErr } = await supabase.from("premium_collections").insert({
+          name: title,
+          description: testForm.description || null,
+          collection_type: testForm.test_kind === "mains" ? "mains" : "prelims",
+          is_paid: testForm.is_premium,
+          price: Number(testForm.price || 0),
+          is_public: testForm.is_public,
+          is_finalized: testForm.is_finalized,
+          image_url: testForm.thumbnail_url || null,
+          creator_id: profileId,
+          meta: testForm.meta || {},
+        }).select().single();
+
+        if (collErr) throw collErr;
+
+        // 2. Add to Program (create unit if needed)
+        let { data: unit } = await supabase.from("program_units").select("id").eq("series_id", seriesId).limit(1).maybeSingle();
+        if (!unit) {
+          const { data: newUnit, error: unitErr } = await supabase.from("program_units").insert({
+            series_id: seriesId,
+            title: "Main Curriculum",
+          }).select().single();
+          if (unitErr) throw unitErr;
+          unit = newUnit;
+        }
+
+        await supabase.from("program_unit_steps").insert({
+          unit_id: unit!.id,
+          step_type: "test",
           title,
-          description: toNullableRichText(testForm.description || ""),
-          exam_ids: testExamIds,
+          collection_id: coll!.id,
+          display_order: testForm.series_order,
         });
-        toast.success("Test created");
       }
+
+      toast.success(editingTestId ? "Test updated" : "Test created");
       setEditingTestId(null);
       setTestForm(emptyTestForm);
       setTestModalOpen(false);
@@ -714,41 +849,45 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   };
 
   const saveProgramItem = async () => {
-    if (savingProgramItem) return;
+    if (savingProgramItem || !profileId) return;
     const title = String(programItemForm.title || "").trim();
     if (!title) {
       toast.error("Program item title is required");
       return;
     }
-    if (programItemForm.item_type === "pdf" && !String(programItemForm.resource_url || "").trim()) {
-      toast.error("PDF items require a resource URL");
-      return;
-    }
-    if (programItemForm.item_type === "lecture" && !String(programItemForm.scheduled_for || "").trim()) {
-      toast.error("Please set a scheduled date and time for the lecture.");
-      return;
-    }
-
-    const payload: TestSeriesProgramItemUpdatePayload = {
-      item_type: programItemForm.item_type,
-      title,
-      description: toNullableRichText(programItemForm.description || ""),
-      series_order: programItemForm.series_order,
-      duration_minutes: programItemForm.duration_minutes,
-      resource_url: String(programItemForm.resource_url || "").trim() || undefined,
-      scheduled_for: String(programItemForm.scheduled_for || "").trim() || undefined,
-      cover_image_url: String(programItemForm.cover_image_url || "").trim() || undefined,
-      is_active: programItemForm.is_active,
-      meta: programItemForm.meta,
-    };
-
     setSavingProgramItem(true);
     try {
+      const supabase = createClient();
+      const payload = {
+        title,
+        description: programItemForm.description || null,
+        display_order: programItemForm.series_order,
+        duration_minutes: programItemForm.duration_minutes,
+        resource_url: programItemForm.resource_url || null,
+        scheduled_for: programItemForm.scheduled_for || null,
+        is_active: programItemForm.is_active,
+        meta: programItemForm.meta || {},
+        step_type: programItemForm.item_type === "lecture" ? "live_lecture" : "pdf",
+      };
+
       if (editingProgramItemId) {
-        await premiumApi.put(`/programs/program-items/${editingProgramItemId}`, payload);
+        await supabase.from("program_unit_steps").update(payload).eq("id", editingProgramItemId);
         toast.success("Program item updated");
       } else {
-        await premiumApi.post(`/programs/${seriesId}/program-items`, payload);
+        // Find or create unit
+        let { data: unit } = await supabase.from("program_units").select("id").eq("series_id", seriesId).limit(1).maybeSingle();
+        if (!unit) {
+          const { data: newUnit } = await supabase.from("program_units").insert({
+            series_id: seriesId,
+            title: "Main Curriculum",
+          }).select().single();
+          unit = newUnit;
+        }
+
+        await supabase.from("program_unit_steps").insert({
+          ...payload,
+          unit_id: unit!.id,
+        });
         toast.success("Program item added");
       }
       setEditingProgramItemId(null);
@@ -820,7 +959,9 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   const archiveTest = async (testId: number) => {
     if (!window.confirm("Are you sure you want to delete this test? This will remove it from the curriculum.")) return;
     try {
-      await premiumApi.delete(`/tests/${testId}`, { params: { hard_delete: true } });
+      const supabase = createClient();
+      // We only remove the step, not the collection usually, but for hard delete we can do both
+      await supabase.from("program_unit_steps").delete().eq("collection_id", testId);
       toast.success("Test removed from curriculum");
       await loadPage();
     } catch (error: unknown) {
@@ -831,7 +972,8 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   const archiveProgramItem = async (itemId: number) => {
     if (!window.confirm("Are you sure you want to delete this item?")) return;
     try {
-      await premiumApi.delete(`/programs/program-items/${itemId}`, { params: { hard_delete: true } });
+      const supabase = createClient();
+      await supabase.from("program_unit_steps").delete().eq("id", itemId);
       toast.success("Item removed from curriculum");
       await loadPage();
     } catch (error: unknown) {
@@ -841,8 +983,23 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
 
   const refreshFocusedSubmissions = async () => {
     if (!focusedTestId) return;
-    const rows = await loadTestSubmissions(focusedTestId);
-    setCopyByTest((prev) => ({ ...prev, [String(focusedTestId)]: rows }));
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("mains_test_copy_submissions")
+        .select("*")
+        .eq("series_id", seriesId)
+        .eq("collection_id", focusedTestId);
+      
+      if (data) {
+        setCopyByTest((prev) => ({ 
+          ...prev, 
+          [String(focusedTestId)]: data.map(sub => ({ ...sub, user_id: String(sub.user_id) })) as any 
+        }));
+      }
+    } catch (err) {
+      toast.error("Failed to refresh submissions");
+    }
   };
 
   if (loading || busy) {
@@ -1463,9 +1620,10 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
                                                     try {
                                                         const currentMeta = (item.meta || {}) as Record<string, any>;
                                                         if (!currentMeta.is_live) {
-                                                            await premiumApi.put(`/programs/program-items/${item.id}`, {
+                                                            const supabase = createClient();
+                                                            await supabase.from("program_unit_steps").update({
                                                                 meta: { ...currentMeta, is_live: true }
-                                                            });
+                                                            }).eq("id", item.id);
                                                         }
                                                         window.location.assign(`/discussion/lecture/${item.id}?seriesId=${seriesId}&autojoin=1`);
                                                     } catch (err: any) {
@@ -1527,7 +1685,6 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
           </div>
         </div>
       </div>
-      {modals}
       </>
     );
   }
@@ -1909,6 +2066,28 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
                                         </div>
                                     </div>
                                     <div className="flex items-start gap-2 shrink-0">
+                                        {item.item_type === "lecture" && (item.meta as any)?.delivery_mode === "live_zoom" && (
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    try {
+                                                        const currentMeta = (item.meta || {}) as Record<string, any>;
+                                                        if (!currentMeta.is_live) {
+                                                            const supabase = createClient();
+                                                            await supabase.from("program_unit_steps").update({
+                                                                meta: { ...currentMeta, is_live: true }
+                                                            }).eq("id", item.id);
+                                                        }
+                                                        window.location.assign(`/discussion/lecture/${item.id}?seriesId=${seriesId}&autojoin=1`);
+                                                    } catch (err: any) {
+                                                        toast.error("Failed to start live session");
+                                                    }
+                                                }}
+                                                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700 transition"
+                                            >
+                                                <Video className="h-3.5 w-3.5" /> Start Live
+                                            </button>
+                                        )}
                                         <button type="button" onClick={() => openEditProgramItemModal(item)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">
                                             <PencilLine className="h-3.5 w-3.5" /> Edit
                                         </button>

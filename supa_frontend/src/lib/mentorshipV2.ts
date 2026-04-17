@@ -26,11 +26,14 @@ export function normalizeMentorshipRequest(row: AnyRow): MentorshipRequest {
   const meta = asRecord(row.meta);
   const submissionId = asNumberOrNull(row.submission_id ?? meta.submission_id);
   const paymentAmount = Number(row.payment_amount ?? 0);
+  const userId = Number(row.user_id || 0);
+  const mentorId = Number(row.mentor_id || row.provider_user_id || 0);
 
   return {
     ...row,
-    user_id: String(row.user_id ?? ""),
-    provider_user_id: String(row.provider_user_id ?? row.mentor_id ?? ""),
+    user_id: userId,
+    mentor_id: mentorId,
+    provider_user_id: String(mentorId),
     submission_id: submissionId,
     test_collection_id: asNumberOrNull(row.test_collection_id ?? meta.test_collection_id),
     service_type:
@@ -50,10 +53,14 @@ export function normalizeMentorshipRequest(row: AnyRow): MentorshipRequest {
 }
 
 export function normalizeMentorshipSession(row: AnyRow): MentorshipSession {
+  const userId = Number(row.user_id || 0);
+  const mentorId = Number(row.mentor_id || row.provider_user_id || 0);
+
   return {
     ...row,
-    user_id: String(row.user_id ?? ""),
-    provider_user_id: String(row.provider_user_id ?? row.mentor_id ?? ""),
+    user_id: userId,
+    mentor_id: mentorId,
+    provider_user_id: String(mentorId),
     mode: row.mode === "call" ? "audio" : row.mode ?? "video",
     call_provider: row.call_provider ?? (row.meeting_link ? "custom" : "zoom_video_sdk"),
     join_available: row.join_available ?? ["scheduled", "live"].includes(String(row.status || "")),

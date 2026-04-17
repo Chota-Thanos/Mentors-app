@@ -109,10 +109,9 @@ export async function loadLearnerMentorshipOrders(
   }
 
   const mentorNameById: Record<string, string> = {};
-  for (const req of requests) {
-    const rawReq = req as unknown as any;
-    if (rawReq.mentor?.display_name) {
-      mentorNameById[String(req.provider_user_id)] = rawReq.mentor.display_name;
+  for (const raw of requestsData ?? []) {
+    if (raw.mentor?.display_name) {
+      mentorNameById[String(raw.mentor_id)] = raw.mentor.display_name;
     }
   }
 

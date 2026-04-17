@@ -141,7 +141,7 @@ async function fetchMentors(limit: number, examId?: number | null): Promise<Mapp
     bio: row.bio || "",
     specialization_tags: row.specialization_tags || [],
     credentials: (row.credentials || []).map((c: any) => c.title),
-    highlights: (row.highlights || []).map((h: any) => h.title),
+    highlights: (row.highlights || []).map((h: any) => typeof h === "string" ? h : h.label),
     exam_ids: [], // Mocking for now
     mentorship_price: 500, // Hardcoded fallback for now since not in new schema
     review_summary: { average_rating: 4.8, total_reviews: 12 },

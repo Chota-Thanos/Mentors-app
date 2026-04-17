@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { resolveMainsTestFlowSummary, type MainsTestSectionTone } from "@/lib/mainsTestFlow";
 import { isMentorLike, isModeratorLike, isProviderLike } from "@/lib/accessControl";
 import { premiumApi } from "@/lib/premiumApi";
@@ -31,6 +32,7 @@ import type {
   TestSeriesPaymentOrder,
   TestSeriesTest,
 } from "@/types/premium";
+import type { ProgramUnit, ProgramUnitStep } from "@/types/db";
 
 interface TestSeriesDetailViewProps {
   seriesId: number;
@@ -90,6 +92,7 @@ const mainsStatusToneClasses: Record<MainsTestSectionTone, string> = {
 
 export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewProps) {
   const { user, isAuthenticated, showLoginModal } = useAuth();
+  const { profileId } = useProfile();
   const searchParams = useSearchParams();
   const providerLike = useMemo(() => isProviderLike(user), [user]);
   const mentorLike = useMemo(() => isMentorLike(user), [user]);
@@ -108,8 +111,8 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
   const [expandedDiscussionKey, setExpandedDiscussionKey] = useState<string | null>(null);
   const autoBuyAttemptedRef = useRef(false);
 
-  const userId = String(user?.id || "").trim();
-  const isSeriesOwner = Boolean(userId && series?.provider_user_id === userId);
+  const currentProfileId = profileId ? String(profileId) : "";
+  const isSeriesOwner = Boolean(currentProfileId && series?.provider_user_id === currentProfileId);
   const canOpenManageView = Boolean(
     isAuthenticated
     && (
@@ -122,85 +125,133 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
   const loadBase = useCallback(async () => {
     setLoading(true);
     try {
-      const [seriesRes, testsRes, itemsRes] = await Promise.all([
-        premiumApi.get<TestSeries>(`/programs/${seriesId}`),
-        premiumApi.get<TestSeriesTest[]>(`/programs/${seriesId}/tests`),
-        premiumApi.get<TestSeriesProgramItem[]>(`/programs/${seriesId}/program-items`),
-      ]);
-      const nextSeries = seriesRes.data;
-      const nextTests = Array.isArray(testsRes.data) ? testsRes.data : [];
-      const nextProgramItems = Array.isArray(itemsRes.data) ? itemsRes.data : [];
-      setSeries(nextSeries);
-      setTests(nextTests);
-      setProgramItems(nextProgramItems);
+      const supabase = createClient();
+      
+      // 1. Fetch Series Detail
+      const { data: seriesData, error: seriesError } = await supabase
+        .from("test_series")
+        .select("*")
+        .eq("id", seriesId)
+        .single();
+        
+      if (seriesError) throw seriesError;
+      setSeries({
+        ...seriesData,
+        title: seriesData.name, // Adapter for 'name' -> 'title'
+        provider_user_id: seriesData.creator_id.toString(), // Adapter
+      } as any);
 
-      if (isAuthenticated) {
-        const enrollmentsPromise = premiumApi.get<TestSeriesEnrollment[]>("/programs/my/enrollments");
-        const nextIsMainsSeries = String(nextSeries?.series_kind || "").trim().toLowerCase() === "mains";
+      // 2. Fetch Units and Steps
+      const { data: unitsData, error: unitsError } = await supabase
+        .from("program_units")
+        .select(`
+          *,
+          steps:program_unit_steps(
+            *,
+            collection:premium_collections(*)
+          )
+        `)
+        .eq("series_id", seriesId)
+        .order("display_order", { ascending: true });
 
-        if (nextIsMainsSeries) {
-          const mainsTests = nextTests.filter((test) => test.test_kind === "mains");
-          const [enrollRes, requestsRes, sessionsRes, submissionsEntries] = await Promise.all([
-            enrollmentsPromise,
-            premiumApi.get<MentorshipRequest[]>("/mentorship/requests", { params: { scope: "me" } }),
-            premiumApi.get<MentorshipSession[]>("/mentorship/sessions", { params: { scope: "me" } }),
-            Promise.all(
-              mainsTests.map(async (test) => {
-                try {
-                  const response = await premiumApi.get<MainsCopySubmission[]>(`/tests/${test.id}/copy-submissions`);
-                  return [String(test.id), Array.isArray(response.data) ? response.data : []] as const;
-                } catch {
-                  return [String(test.id), []] as const;
-                }
-              }),
-            ),
+      if (unitsError) throw unitsError;
+
+      // Flatten units into tests and program items for the existing UI logic
+      const flatTests: TestSeriesTest[] = [];
+      const flatItems: TestSeriesProgramItem[] = [];
+
+      (unitsData as ProgramUnit[] || []).forEach(unit => {
+        unit.steps?.forEach((step: ProgramUnitStep) => {
+          if (step.step_type === "test" && step.collection) {
+            flatTests.push({
+              id: step.collection.id,
+              series_id: seriesId,
+              title: step.title || step.collection.name,
+              description: step.description || step.collection.description,
+              test_kind: step.collection.collection_type === "mains" ? "mains" : "prelims",
+              test_label: step.collection.collection_type.toUpperCase(),
+              series_order: step.display_order,
+              question_count: 0, // Would need count query
+              is_public: step.collection.is_public,
+              is_active: step.collection.is_active,
+              is_premium: step.collection.is_paid,
+              price: Number(step.collection.price || 0),
+              is_finalized: step.collection.is_finalized,
+              meta: step.meta || {},
+              exam_ids: [],
+              created_at: step.created_at,
+            });
+          } else {
+            flatItems.push({
+              id: step.id,
+              series_id: seriesId,
+              item_type: step.step_type === "live_lecture" ? "lecture" : "pdf",
+              title: step.title,
+              description: step.description,
+              resource_url: step.resource_url,
+              scheduled_for: step.scheduled_for,
+              duration_minutes: step.duration_minutes,
+              series_order: step.display_order,
+              is_active: step.is_active,
+              meta: step.meta as any,
+              created_at: step.created_at,
+            });
+          }
+        });
+      });
+
+      setTests(flatTests);
+      setProgramItems(flatItems);
+
+      if (isAuthenticated && profileId) {
+        // 3. Fetch Access / Enrollments
+        const { data: accessData } = await supabase
+          .from("user_content_access")
+          .select("*")
+          .eq("user_id", profileId) 
+          .eq("test_series_id", seriesId)
+          .eq("is_active", true);
+
+        setEnrollments((accessData || []).map(a => ({
+          id: a.id,
+          series_id: a.test_series_id,
+          user_id: a.user_id.toString(),
+          status: "active",
+          access_source: "direct",
+          created_at: a.granted_at,
+        })) as any);
+
+        if (seriesData.series_kind === "mains") {
+          // Fetch mentorship and submissions for mains
+          const testIds = flatTests.map(t => t.id);
+          const [requestsRes, sessionsRes, submissionsRes] = await Promise.all([
+            supabase.from("mentorship_requests").select("*").eq("series_id", seriesId),
+            supabase.from("mentorship_sessions").select("*").eq("mentor_id", seriesData.creator_id), // Approximated
+            testIds.length > 0 
+              ? supabase.from("mains_test_copy_submissions").select("*").in("series_id", [seriesId])
+              : Promise.resolve({ data: [] }),
           ]);
-          setEnrollments(Array.isArray(enrollRes.data) ? enrollRes.data : []);
-          setMentorshipRequests(Array.isArray(requestsRes.data) ? requestsRes.data : []);
-          setMentorshipSessions(Array.isArray(sessionsRes.data) ? sessionsRes.data : []);
-          setCopySubmissionsByTest(Object.fromEntries(submissionsEntries));
-          setQuizAttemptCountsByTest(null);
-        } else {
-          const prelimsTestIds = nextTests
-            .filter((test) => test.test_kind !== "mains" && Number.isFinite(test.id) && test.id > 0)
-            .map((test) => test.id);
-          const [enrollRes, attemptCountsRes] = await Promise.all([
-            enrollmentsPromise,
-            prelimsTestIds.length > 0
-              ? premiumApi
-                  .get<UserQuizAttemptCountsPayload>("/user/quiz-attempt-counts", {
-                    params: { collection_ids: prelimsTestIds.join(",") },
-                  })
-                  .catch(() => null)
-              : Promise.resolve({ data: { counts: {} } as UserQuizAttemptCountsPayload }),
-          ]);
-          setEnrollments(Array.isArray(enrollRes.data) ? enrollRes.data : []);
-          setMentorshipRequests([]);
-          setMentorshipSessions([]);
-          setCopySubmissionsByTest({});
-          setQuizAttemptCountsByTest(attemptCountsRes ? normalizeAttemptCounts(attemptCountsRes.data) : null);
+
+          setMentorshipRequests(requestsRes.data || [] as any);
+          setMentorshipSessions(sessionsRes.data || [] as any);
+          
+          const subMap: Record<string, MainsCopySubmission[]> = {};
+          (submissionsRes.data || []).forEach(sub => {
+             const tid = sub.collection_id?.toString() || sub.test_collection_id?.toString();
+             if (tid) {
+               if (!subMap[tid]) subMap[tid] = [];
+               subMap[tid].push(sub as any);
+             }
+          });
+          setCopySubmissionsByTest(subMap);
         }
-      } else {
-        setEnrollments([]);
-        setMentorshipRequests([]);
-        setMentorshipSessions([]);
-        setCopySubmissionsByTest({});
-        setQuizAttemptCountsByTest(null);
       }
     } catch (error: unknown) {
-      toast.error("Failed to load programs details", { description: toError(error) });
-      setSeries(null);
-      setTests([]);
-      setProgramItems([]);
-      setEnrollments([]);
-      setMentorshipRequests([]);
-      setMentorshipSessions([]);
-      setCopySubmissionsByTest({});
-      setQuizAttemptCountsByTest(null);
+      toast.error("Failed to load program details", { description: toError(error) });
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, seriesId]);
+  }, [isAuthenticated, user, seriesId]);
 
   useEffect(() => {
     void loadBase();
@@ -215,8 +266,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
         {
           event: "*",
           schema: "public",
-          table: "test_series_program_items",
-          filter: `series_id=eq.${seriesId}`,
+          table: "program_unit_steps",
         },
         () => {
           void loadBase();

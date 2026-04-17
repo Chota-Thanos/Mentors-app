@@ -311,15 +311,17 @@ function buildMentorLearnerRequestCards(
   seriesById: Map<number, TestSeries>,
   learnerDirectory: Map<string, MentorLearnerDirectoryEntry>,
 ): MentorLearnerRequestCard[] {
-  const grouped = new Map<string, MentorshipRequest[]>();
+  const grouped = new Map<number, MentorshipRequest[]>();
   for (const request of requests) {
-    const bucket = grouped.get(request.user_id) || [];
+    const userId = Number(request.user_id);
+    const bucket = grouped.get(userId) || [];
     bucket.push(request);
-    grouped.set(request.user_id, bucket);
+    grouped.set(userId, bucket);
   }
 
   return Array.from(grouped.entries())
-    .map(([userId, learnerRequests]) => {
+    .map(([numUserId, learnerRequests]) => {
+      const userId = String(numUserId);
       const rows = [...learnerRequests].sort(
         (left, right) => new Date(right.requested_at).getTime() - new Date(left.requested_at).getTime(),
       );
@@ -567,10 +569,11 @@ export default function DashboardPage() {
   const mentorLearnerDirectory = useMemo(() => {
     const map = new Map<string, MentorLearnerDirectoryEntry>();
     for (const request of mentorData?.requests ?? []) {
-      const existing = map.get(request.user_id);
+      const userIdStr = String(request.user_id);
+      const existing = map.get(userIdStr);
       const nextName = learnerNameFromRequest(request);
       const nextEmail = learnerEmailFromRequest(request);
-      map.set(request.user_id, {
+      map.set(userIdStr, {
         name: existing?.name || nextName,
         email: existing?.email || nextEmail,
       });
@@ -602,7 +605,7 @@ export default function DashboardPage() {
         .sort((left, right) => new Date(left.starts_at).getTime() - new Date(right.starts_at).getTime())
         .map((session) => {
           const request = mentorRequestById.get(session.request_id);
-          const learner = mentorLearnerDirectory.get(session.user_id);
+          const learner = mentorLearnerDirectory.get(String(session.user_id));
           const cycle = mentorCycleByRequestId.get(session.request_id);
           const series = request?.series_id ? mentorSeriesById.get(request.series_id) : null;
           const name = learner?.name || (request ? learnerNameFromRequest(request) : "Learner");
@@ -631,7 +634,7 @@ export default function DashboardPage() {
         )
         .map((session) => {
           const request = mentorRequestById.get(session.request_id);
-          const learner = mentorLearnerDirectory.get(session.user_id);
+          const learner = mentorLearnerDirectory.get(String(session.user_id));
           const cycle = mentorCycleByRequestId.get(session.request_id);
           const series = request?.series_id ? mentorSeriesById.get(request.series_id) : null;
           const name = learner?.name || (request ? learnerNameFromRequest(request) : "Learner");

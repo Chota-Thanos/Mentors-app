@@ -72,7 +72,10 @@ function matchesExamIds(examIds: number[] | undefined | null, examId: number | n
 
 function FeaturedMentorCard({ mentor }: { mentor: ProfessionalProfile }) {
   const review = reviewMeta(mentor);
-  const badge = mentor.credentials[0] || mentor.highlights[0] || mentor.specialization_tags[0] || "Verified Mentor";
+  
+  const firstHighlight = mentor.highlights?.[0];
+  const highlightLabel = typeof firstHighlight === "string" ? firstHighlight : firstHighlight?.label;
+  const badge = mentor.credentials?.[0] || highlightLabel || mentor.specialization_tags?.[0] || "Verified Mentor";
 
   return (
     <article className="group rounded-[30px] border border-[#dbe3f6] bg-white p-5 shadow-[0_18px_40px_rgba(16,31,74,0.06)] transition-transform duration-300 hover:-translate-y-1">
@@ -174,19 +177,24 @@ export default function MentorshipLandingView() {
 
         if (!active) return;
 
-        const mappedMentors = (data || []).map((row: any) => ({
-          user_id: String(row.id),
-          display_name: row.display_name || "Verified Mentor",
-          profile_image_url: row.avatar_url || "",
-          headline: Array.isArray(row.highlights) && row.highlights.length > 0 ? row.highlights[0] : "Verified Expert Mentor",
-          bio: row.bio || "",
-          specialization_tags: Array.isArray(row.highlights) ? row.highlights : [],
-          credentials: [],
-          highlights: Array.isArray(row.highlights) ? row.highlights : [],
-          experiences: [],
-          meta: typeof row.payout_details === "object" ? row.payout_details : {},
-          exam_ids: Array.isArray(row.creator_exam_ids) ? row.creator_exam_ids : [],
-        })) as unknown as ProfessionalProfile[];
+        const mappedMentors = (data || []).map((row: any) => {
+          const rawHighlights = Array.isArray(row.highlights) ? row.highlights : [];
+          const highlightLabels = rawHighlights.map((h: any) => typeof h === "string" ? h : h.label);
+          
+          return {
+            user_id: String(row.id),
+            display_name: row.display_name || "Verified Mentor",
+            profile_image_url: row.avatar_url || "",
+            headline: highlightLabels.length > 0 ? highlightLabels[0] : "Verified Expert Mentor",
+            bio: row.bio || "",
+            specialization_tags: highlightLabels,
+            credentials: [],
+            highlights: rawHighlights,
+            experiences: [],
+            meta: typeof row.payout_details === "object" ? row.payout_details : {},
+            exam_ids: Array.isArray(row.creator_exam_ids) ? row.creator_exam_ids : [],
+          };
+        }) as unknown as ProfessionalProfile[];
 
         setMentors(mappedMentors);
         setError(null);

@@ -1073,6 +1073,12 @@ export interface UserSubscriptionStatus {
 
 export type ProfessionalProfileRole = "provider" | "institute" | "mentor" | "creator";
 
+export interface ProfessionalHighlight {
+  label: string;
+  icon?: string;
+  description?: string;
+}
+
 export interface ProfessionalProfile {
   id: number;
   user_id: string;
@@ -1084,7 +1090,7 @@ export interface ProfessionalProfile {
   city?: string | null;
   profile_image_url?: string | null;
   is_verified: boolean;
-  highlights: string[];
+  highlights: ProfessionalHighlight[] | string[];
   credentials: string[];
   specialization_tags: string[];
   languages: string[];
@@ -1455,8 +1461,9 @@ export interface MentorshipRequestOfferSlotsPayload {
 
 export interface MentorshipRequest {
   id: number;
-  user_id: string;
-  provider_user_id: string;
+  user_id: number;
+  mentor_id: number;
+  provider_user_id?: string; // Legacy alias
   series_id?: number | null;
   test_collection_id?: number | null;
   submission_id?: number | null;
@@ -1523,8 +1530,9 @@ export interface MentorshipSession {
   id: number;
   request_id: number;
   slot_id?: number | null;
-  provider_user_id: string;
-  user_id: string;
+  mentor_id: number;
+  provider_user_id?: string; // Legacy alias
+  user_id: number;
   mode: MentorshipMode;
   call_provider: MentorshipCallProvider;
   starts_at: string;

@@ -388,7 +388,7 @@ function requestTypeLabel(request: MentorshipRequest): string {
 }
 
 function requestMetaLabel(request: MentorshipRequest, mentorMap: Record<string, string>): string {
-  const mentor = mentorMap[request.provider_user_id] || "Mentor";
+  const mentor = mentorMap[String(request.mentor_id)] || "Mentor";
   const status = String(request.status || "").replaceAll("_", " ");
   return `${mentor} · ${status}`;
 }
@@ -406,6 +406,7 @@ function dashboardRecommendationHref(plug: DashboardRecommendationPlug): string 
 
 function LearnerHome({ user }: { user: unknown }) {
   const { globalExamId } = useExamContext();
+  const { profileId } = useProfile();
   const [analytics, setAnalytics] = useState<DashboardAnalyticsPayload | null>(null);
   const [yearlySummary, setYearlySummary] = useState<YearlyAttemptSummaryPayload | null>(null);
   const [orders, setOrders] = useState<LearnerMentorshipOrdersData | null>(null);
@@ -415,10 +416,6 @@ function LearnerHome({ user }: { user: unknown }) {
   const [resultTab, setResultTab] = useState<"prelims" | "mains">("prelims");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const currentUserId =
-    user && typeof user === "object" && "id" in (user as Record<string, unknown>)
-      ? String((user as Record<string, unknown>).id || "").trim()
-      : "";
 
   useEffect(() => {
     let active = true;
@@ -430,14 +427,8 @@ function LearnerHome({ user }: { user: unknown }) {
         const { createClient } = await import("@/lib/supabase/client");
         const supabase = createClient();
         
-        // Use profile ID for data fetching. We get it from the user context passed as prop if available, 
-        // but typically it's best to fetch via session or assume currentUserId is our profileId (bigint passed).
-        // For now, we query based on the id provided.
-        const profileIdNum = parseInt(currentUserId, 10);
-        
-        if (isNaN(profileIdNum) || profileIdNum <= 0) {
-           throw new Error("Invalid User ID");
-        }
+        if (!profileId) return;
+        const profileIdNum = profileId;
 
         const [ordersRes, activeSeriesRes, attemptsRes, mainsRes] = await Promise.all([
           loadLearnerMentorshipOrders(profileIdNum),
@@ -556,7 +547,7 @@ function LearnerHome({ user }: { user: unknown }) {
     return () => {
       active = false;
     };
-  }, [currentUserId, globalExamId]);
+  }, [profileId, globalExamId]);
 
   useEffect(() => {
     let active = true;

@@ -247,8 +247,9 @@ export default function MentorshipChatView({
         {messages.map((message) => {
           const isSystem = message.sender_user_id === "system";
           const isMe = isProvider 
-            ? message.sender_user_id === request.provider_user_id
-            : message.sender_user_id === request.user_id;
+            ? message.sender_user_id === String(request.mentor_id)
+
+            : message.sender_user_id === String(request.user_id);
 
           if (isSystem) {
              return (

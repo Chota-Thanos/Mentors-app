@@ -246,12 +246,13 @@ export default function MentorDirectoryView() {
         if (availabilityFilter === "soon" && !status?.next_available_at) return false;
 
         if (!needle) return true;
+        const highlightLabels = row.highlights.map((h: any) => typeof h === "string" ? h : h.label);
         const haystack = [
           row.display_name,
           row.headline || "",
           row.city || "",
           row.specialization_tags.join(" "),
-          row.highlights.join(" "),
+          highlightLabels.join(" "),
           row.credentials.join(" "),
         ]
           .join(" ")

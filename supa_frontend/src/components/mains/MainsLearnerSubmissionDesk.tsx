@@ -172,7 +172,7 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
       setSessions(nextSessions);
 
       const providerIds = nextRequests
-        .map((request) => String(request.provider_user_id || "").trim())
+        .map((request) => String(request.mentor_id))
         .filter((value, index, array) => value && array.indexOf(value) === index);
       if (providerIds.length === 0) {
         setProviderSlotsByProviderId({});
@@ -181,7 +181,7 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
           providerIds.map(async (providerUserId) => {
             try {
               const response = await premiumApi.get<MentorshipSlot[]>("/mentorship/slots", {
-                params: { provider_user_id: providerUserId, only_available: false },
+                params: { mentor_id: providerUserId, only_available: false },
               });
               return [providerUserId, Array.isArray(response.data) ? response.data : []] as const;
             } catch {
@@ -348,7 +348,7 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
   const activeMentorshipRequest = latestOpenRequest || latestRequest;
   const latestSession = flowSummary.latestSession;
   const latestPublishedSlots = activeMentorshipRequest
-    ? (providerSlotsByProviderId[activeMentorshipRequest.provider_user_id] || []).filter(
+    ? (providerSlotsByProviderId[String(activeMentorshipRequest.mentor_id)] || []).filter(
         (slot) =>
           Boolean(slot.is_active) &&
           (slot.booked_count || 0) < (slot.max_bookings || 1) &&
@@ -356,7 +356,7 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
       )
     : [];
   const latestOfferedSlots = activeMentorshipRequest
-    ? offeredSlotsForRequest(activeMentorshipRequest, providerSlotsByProviderId[activeMentorshipRequest.provider_user_id] || [])
+    ? offeredSlotsForRequest(activeMentorshipRequest, providerSlotsByProviderId[String(activeMentorshipRequest.mentor_id)] || [])
     : [];
   const latestBookableSlots = activeMentorshipRequest
     ? activeMentorshipRequest.booking_open
@@ -633,11 +633,11 @@ export default function MainsLearnerSubmissionDesk({ collectionId, payload }: Ma
               {submissions.map((submission) => {
                 const linkedRequest = requestBySubmissionId[String(submission.id)] || null;
                 const linkedSession = linkedRequest ? sessionByRequestId[String(linkedRequest.id)] || null : null;
-                const offeredSlots = linkedRequest
-                  ? offeredSlotsForRequest(linkedRequest, providerSlotsByProviderId[linkedRequest.provider_user_id] || [])
-                  : [];
+                  const offeredSlots = linkedRequest
+                    ? offeredSlotsForRequest(linkedRequest, providerSlotsByProviderId[String(linkedRequest.mentor_id)] || [])
+                    : [];
                 const publishedSlots = linkedRequest
-                  ? (providerSlotsByProviderId[linkedRequest.provider_user_id] || []).filter(
+                  ? (providerSlotsByProviderId[String(linkedRequest.mentor_id)] || []).filter(
                       (slot) =>
                         Boolean(slot.is_active) &&
                         (slot.booked_count || 0) < (slot.max_bookings || 1) &&

@@ -328,9 +328,9 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
   const groupedQueue = useMemo(() => {
     const grouped = new Map<string, { latest: DerivedRequestRow; rows: DerivedRequestRow[] }>();
     for (const row of queue) {
-      const existing = grouped.get(row.request.user_id);
+      const existing = grouped.get(String(row.request.user_id));
       if (!existing) {
-        grouped.set(row.request.user_id, { latest: row, rows: [row] });
+        grouped.set(String(row.request.user_id), { latest: row, rows: [row] });
         continue;
       }
       existing.rows.push(row);
@@ -366,11 +366,11 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
   );
 
   const selectedRequestIdValue = selected?.request.id || null;
-  const selectedProviderUserId = selected?.request.provider_user_id || null;
+  const selectedMentorId = selected?.request.mentor_id || null;
   const selectedUnreadCount = selected ? requestUnreadCount(selected.request) : 0;
 
   useEffect(() => {
-    if (!selectedRequestIdValue || !selectedProviderUserId) {
+    if (!selectedRequestIdValue || !selectedMentorId) {
       setMessages([]);
       setSlots([]);
       return;
@@ -379,7 +379,7 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
     const supabase = createSupabaseClient();
     Promise.all([
       supabase.from("mentorship_messages").select("*").eq("request_id", selectedRequestIdValue).order("created_at", { ascending: true }),
-      supabase.from("mentorship_slots").select("*").eq("mentor_id", selectedProviderUserId),
+      supabase.from("mentorship_slots").select("*").eq("mentor_id", selectedMentorId),
     ]).then(([{ data: messageData }, { data: slotData }]) => {
       if (!active) return;
       setMessages((messageData || []).map((row) => normalizeMentorshipMessage(row as Record<string, unknown>)));
@@ -411,7 +411,7 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
     return () => {
       active = false;
     };
-  }, [selected, selectedProviderUserId, selectedRequestIdValue]);
+  }, [selected, selectedMentorId, selectedRequestIdValue, profileId]);
 
   useEffect(() => {
     const submission = selected?.submission;

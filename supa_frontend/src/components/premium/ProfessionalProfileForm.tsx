@@ -21,6 +21,7 @@ import RichTextField from "@/components/ui/RichTextField";
 import type {
   MentorshipCallProvider,
   PremiumExam,
+  ProfessionalHighlight,
   ProfessionalProfile,
   ProfessionalProfilePayload,
   ProfessionalProfileRole,
@@ -209,9 +210,14 @@ export default function ProfessionalProfileForm() {
         setProfileImageUrl(profile.profile_image_url || "");
         setContactUrl(profile.contact_url || "");
         setPublicEmail(profile.public_email || "");
+        const stringifyMixedList = (val?: string[] | ProfessionalHighlight[] | null): string => {
+          if (!val) return "";
+          return (val as any[]).map((item) => (typeof item === "string" ? item : item.label)).join("\n");
+        };
+
         setSpecializationTags(stringifyList(profile.specialization_tags));
         setLanguages(stringifyList(profile.languages));
-        setHighlights(stringifyList(profile.highlights));
+        setHighlights(stringifyMixedList(profile.highlights));
         setCredentials(stringifyList(profile.credentials));
         setIsPublic(profile.is_public);
         const meta = (profile.meta || {}) as Record<string, unknown>;

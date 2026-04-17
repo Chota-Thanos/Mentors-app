@@ -479,7 +479,7 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
             <div className="mt-4 max-h-[420px] space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-4">
               {messages.length ? messages.map((message) => {
                 const isSystem = message.sender_user_id === "system";
-                const isUser = message.sender_user_id === request.user_id;
+                const isUser = message.sender_user_id === String(request.user_id);
                 return (
                   <div key={`${message.id}-${message.created_at}`} className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
                     isSystem
