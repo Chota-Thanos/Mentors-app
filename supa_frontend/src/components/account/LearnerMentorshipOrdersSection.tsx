@@ -6,9 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import WorkflowProgressTrack from "@/components/premium/WorkflowProgressTrack";
+import { useProfile } from "@/context/ProfileContext";
 import { loadLearnerMentorshipOrders, type LearnerMentorshipOrdersData } from "@/lib/learnerMentorshipOrders";
-import { premiumApi } from "@/lib/premiumApi";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import type { MainsCopySubmission } from "@/types/premium";
 import {
   buildMentorshipWorkflowSteps,
   formatWorkflowDateTime,
@@ -20,9 +21,7 @@ import {
 import { requestOfferedSlotIds } from "@/lib/copyEvaluationFlow";
 
 function toError(error: unknown): string {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
 const statusTone = (label: string): string => {
@@ -63,13 +62,22 @@ export default function LearnerMentorshipOrdersSection() {
   const [filter, setFilter] = useState<LearnerFilter>("all");
   const [actionBusyId, setActionBusyId] = useState<number | null>(null);
 
+  const { profileId } = useProfile();
+
+  const reload = async (pid: number) => {
+    const resp = await loadLearnerMentorshipOrders(pid);
+    setData(resp);
+    return resp;
+  };
+
   useEffect(() => {
+    if (!profileId) return;
     let active = true;
 
     void (async () => {
       setBusy(true);
       try {
-        const response = await loadLearnerMentorshipOrders();
+        const response = await loadLearnerMentorshipOrders(profileId);
         if (!active) return;
         setData(response);
       } catch (error: unknown) {
@@ -84,7 +92,7 @@ export default function LearnerMentorshipOrdersSection() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [profileId]);
 
   useEffect(() => {
     const requestIds = (data?.requests || []).map((request) => request.id);
@@ -97,7 +105,7 @@ export default function LearnerMentorshipOrdersSection() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "mentorship_messages", filter },
         (payload) => {
-          const row = payload.new as { request_id?: number; sender_user_id?: string } | undefined;
+          const row = payload.new as { request_id?: number; sender_id?: number } | undefined;
           const requestId = Number(row?.request_id || 0);
           if (requestId <= 0) return;
           setData((current) => {
@@ -105,7 +113,7 @@ export default function LearnerMentorshipOrdersSection() {
             return {
               ...current,
               requests: current.requests.map((request) => {
-                if (request.id !== requestId || row?.sender_user_id === request.user_id || row?.sender_user_id === "system") {
+                if (request.id !== requestId || String(row?.sender_id || "") === String(request.user_id)) {
                   return request;
                 }
                 const nextUnread = unreadMentorUpdates(request) + 1;
@@ -137,12 +145,8 @@ export default function LearnerMentorshipOrdersSection() {
   }, [data]);
 
   const cycleByRequestId = useMemo(() => {
-    const map: Record<string, LearnerMentorshipOrdersData["tracking"]["mentorship_cycles"][number]> = {};
-    for (const cycle of data?.tracking.mentorship_cycles || []) {
-      map[String(cycle.request_id)] = cycle;
-    }
-    return map;
-  }, [data]);
+    return {} as Record<string, any>;
+  }, []);
 
   if (busy) {
     return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading mentorship orders...</div>;
@@ -151,21 +155,20 @@ export default function LearnerMentorshipOrdersSection() {
   const requests = data?.requests || [];
     const requestRows = requests.map((request) => {
     const session = sessionByRequestId[String(request.id)] || null;
-    const submission = request.submission_id ? data?.submissionsById[String(request.submission_id)] || null : null;
+    const submission = (request.submission_id ? data?.submissionsById[String(request.submission_id)] || null : null) as MainsCopySubmission | null;
     const series = request.series_id ? data?.seriesById[String(request.series_id)] || null : null;
-    const test = request.test_collection_id ? data?.testsById[String(request.test_collection_id)] || null : null;
-    const cycle = cycleByRequestId[String(request.id)] || null;
-    const mentorName = data?.mentorNameByUserId[request.provider_user_id] || request.provider_user_id;
-    const offeredSlotCount = Math.max(requestOfferedSlotIds(request).length, request.booking_open ? 1 : 0, cycle?.booking_open ? 1 : 0);
-    const currentStatus = mentorshipCurrentStatusLabel(request, session, submission, offeredSlotCount);
-    const nextAction = mentorshipNextActionLabel(request, session, submission, offeredSlotCount);
+    const test = null; // testsById removed in V2
+    const mentorName = data?.mentorNameById[String(request.provider_user_id)] || "Mentor";
+    const offeredSlotCount = Math.max(requestOfferedSlotIds(request).length, request.booking_open ? 1 : 0);
+    const currentStatus = mentorshipCurrentStatusLabel(request, session as any, submission, offeredSlotCount);
+    const nextAction = mentorshipNextActionLabel(request, session as any, submission, offeredSlotCount);
     const steps = buildMentorshipWorkflowSteps({
       request,
-      session,
+      session: session as any,
       submission,
       offeredSlotCount,
     });
-    const stage = resolveMentorshipWorkflowStage(request, session, submission, offeredSlotCount);
+    const stage = resolveMentorshipWorkflowStage(request, session as any, submission, offeredSlotCount);
     const needsPayment = request.status === "accepted" && request.payment_status !== "paid";
     const hasSessionPhase = Boolean(session) || ["booking_open", "scheduled", "live"].includes(stage);
     const isClosed = ["completed", "cancelled", "expired"].includes(stage) || ["completed", "cancelled", "rejected", "expired"].includes(request.status);
@@ -193,7 +196,6 @@ export default function LearnerMentorshipOrdersSection() {
       session,
       series,
       test,
-      cycle,
       mentorName,
       offeredSlotCount,
       currentStatus,
@@ -227,10 +229,12 @@ export default function LearnerMentorshipOrdersSection() {
 
   const handleCancelRequest = async (requestId: number) => {
     if (typeof window !== "undefined" && !window.confirm("Cancel this mentorship request?")) return;
+    if (!profileId) return;
     setActionBusyId(requestId);
     try {
-      await premiumApi.put(`/mentorship/requests/${requestId}/status`, { status: "cancelled" });
-      const response = await loadLearnerMentorshipOrders();
+      const supabase = createSupabaseClient();
+      await supabase.from("mentorship_requests").update({ status: "cancelled" }).eq("id", requestId);
+      const response = await reload(profileId);
       setData(response);
       toast.success("Mentorship request cancelled");
     } catch (error: unknown) {
@@ -242,10 +246,12 @@ export default function LearnerMentorshipOrdersSection() {
 
   const handleDeleteRequest = async (requestId: number) => {
     if (typeof window !== "undefined" && !window.confirm("Delete this mentorship request from your workspace?")) return;
+    if (!profileId) return;
     setActionBusyId(requestId);
     try {
-      await premiumApi.delete(`/mentorship/requests/${requestId}`);
-      const response = await loadLearnerMentorshipOrders();
+      const supabase = createSupabaseClient();
+      await supabase.from("mentorship_requests").delete().eq("id", requestId);
+      const response = await reload(profileId);
       setData(response);
       toast.success("Mentorship request deleted");
     } catch (error: unknown) {
@@ -292,7 +298,7 @@ export default function LearnerMentorshipOrdersSection() {
       </div>
 
       <div className="mt-4 space-y-4">
-        {filteredRows.map(({ request, submission, session, series, test, cycle, mentorName, currentStatus, nextAction, steps, primaryHref, primaryLabel, unreadUpdates }) => {
+        {filteredRows.map(({ request, submission, session, series, test, mentorName, currentStatus, nextAction, steps, primaryHref, primaryLabel, unreadUpdates }) => {
           const canCancelRequest = !["cancelled", "rejected", "expired", "completed"].includes(request.status) && session?.status !== "live";
           const canDeleteRequest = ["cancelled", "rejected", "expired", "completed"].includes(request.status) && session?.status !== "live";
           return (
@@ -319,8 +325,8 @@ export default function LearnerMentorshipOrdersSection() {
                   <p className="text-sm text-slate-600">
                     Requested on <span className="font-semibold text-slate-800">{formatWorkflowDateTime(request.requested_at)}</span>
                   </p>
-                  {series ? <p className="text-sm text-slate-600">Series: {series.title}</p> : null}
-                  {test ? <p className="text-sm text-slate-600">Test: {test.title}</p> : null}
+                  {series ? <p className="text-sm text-slate-600">Series: {series.name}</p> : null}
+
                   <p className="mt-2 text-sm text-slate-500">{plainTextExcerpt(request.note)}</p>
                 </div>
 
@@ -331,15 +337,6 @@ export default function LearnerMentorshipOrdersSection() {
                 <WorkflowProgressTrack steps={steps} />
               </div>
 
-              {cycle?.issues.length ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {cycle.issues.slice(0, 3).map((issue, index) => (
-                    <span key={`${request.id}-${issue.code}-${index}`} className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-800">
-                      {issue.label}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
 
               <div className="mt-4 flex flex-wrap gap-2">
                 <Link href={request.status === "rejected" ? "/mentors" : primaryHref} className="inline-flex rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white">

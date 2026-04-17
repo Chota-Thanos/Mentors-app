@@ -15,7 +15,7 @@ const inferBrowserBackendRoot = (): string => {
   const configuredPort = String(
     process.env.NEXT_PUBLIC_SUPA_BACKEND_PORT
     || process.env.NEXT_PUBLIC_API_PORT
-    || "8002",
+    || "8001",   // ← New backend runs on 8001
   ).trim();
 
   const protocol = window.location.protocol === "https:" ? "https:" : "http:";
@@ -23,7 +23,8 @@ const inferBrowserBackendRoot = (): string => {
 };
 
 const configuredRoot =
-  normalizeBackendRoot(process.env.NEXT_PUBLIC_SUPA_BACKEND_URL)
-  || normalizeBackendRoot(process.env.NEXT_PUBLIC_API_URL);
+  normalizeBackendRoot(process.env.NEXT_PUBLIC_API_URL)
+  || normalizeBackendRoot(process.env.NEXT_PUBLIC_SUPA_BACKEND_URL);
 
-export const backendRoot = configuredRoot || inferBrowserBackendRoot() || "http://localhost:8002";
+export const backendRoot = configuredRoot || inferBrowserBackendRoot() || "http://localhost:8001";
+

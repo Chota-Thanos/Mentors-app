@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import axios from "axios";
 import { toast } from "sonner";
 
-import { premiumApi } from "@/lib/premiumApi";
 import ContentItemPicker from "@/components/premium/ContentItemPicker";
+import { useProfile } from "@/context/ProfileContext";
+import { pdfsApi } from "@/lib/api";
+import { createClient } from "@/lib/supabase/client";
 import type { MainsCategory, MainsCategorySource } from "@/types/premium";
 
 type SourceKind = "text" | "url" | "content_item";
@@ -55,13 +56,30 @@ function collectDescendantIds(nodes: MainsCategory[], rootId: number): Set<numbe
 }
 
 function toErrorMessage(error: unknown): string {
-  if (!axios.isAxiosError(error)) {
-    return "Unknown error";
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
+function buildMainsCategoryTree(rows: MainsCategory[]): MainsCategory[] {
+  const byId = new Map<number, MainsCategory>();
+  const roots: MainsCategory[] = [];
+  for (const row of rows) byId.set(row.id, { ...row, children: [] });
+  for (const row of byId.values()) {
+    const parent = row.parent_id ? byId.get(row.parent_id) : null;
+    if (parent) parent.children = [...(parent.children || []), row];
+    else roots.push(row);
   }
-  if (typeof error.response?.data?.detail === "string") {
-    return error.response.data.detail;
-  }
-  return error.message;
+  return roots;
+}
+
+function normalizeSource(row: any, categoryId: number): MainsCategorySource {
+  return {
+    ...row,
+    mains_category_id: categoryId,
+    category_id: categoryId,
+    source_kind: row.source_kind === "pdf" ? "url" : row.source_kind,
+    content_item_id: row.content_item_id ?? null,
+    meta: row.meta || {},
+  } as MainsCategorySource;
 }
 
 function parseMetaJson(raw: string): Record<string, unknown> | null {
@@ -105,6 +123,7 @@ function findMainsCategoryById(nodes: MainsCategory[], id: number): MainsCategor
 }
 
 export default function MainsCategorySourceManager() {
+  const { profileId } = useProfile();
   const [categories, setCategories] = useState<MainsCategory[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
   const [isLoadingCategories, setIsLoadingCategories] = useState(false);
@@ -181,10 +200,14 @@ export default function MainsCategorySourceManager() {
   const loadCategories = useCallback(async () => {
     setIsLoadingCategories(true);
     try {
-      const response = await premiumApi.get<MainsCategory[]>("/mains/categories", {
-        params: { hierarchical: true, active_only: false },
-      });
-      setCategories(Array.isArray(response.data) ? response.data : []);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("categories")
+        .select("*")
+        .eq("domain", "mains")
+        .order("display_order", { ascending: true });
+      if (error) throw error;
+      setCategories(buildMainsCategoryTree((data || []) as unknown as MainsCategory[]));
     } catch (error: unknown) {
       toast.error("Failed to load mains categories", { description: toErrorMessage(error) });
       setCategories([]);
@@ -196,10 +219,26 @@ export default function MainsCategorySourceManager() {
   const loadSources = useCallback(async (categoryId: number) => {
     setIsLoadingSources(true);
     try {
-      const response = await premiumApi.get<MainsCategorySource[]>(`/mains/categories/${categoryId}/sources`, {
-        params: { active_only: activeOnlySources },
-      });
-      setSources(Array.isArray(response.data) ? response.data : []);
+      const supabase = createClient();
+      const { data: links, error: linkError } = await supabase
+        .from("category_ai_source_categories")
+        .select("source_id")
+        .eq("category_id", categoryId);
+      if (linkError) throw linkError;
+      const sourceIds = (links || []).map((row: any) => Number(row.source_id)).filter(Boolean);
+      if (sourceIds.length === 0) {
+        setSources([]);
+        return;
+      }
+      let query = supabase
+        .from("category_ai_sources")
+        .select("*")
+        .in("id", sourceIds)
+        .order("priority", { ascending: false });
+      if (activeOnlySources) query = query.eq("is_active", true);
+      const { data, error } = await query;
+      if (error) throw error;
+      setSources((data || []).map((row) => normalizeSource(row, categoryId)));
     } catch (error: unknown) {
       toast.error("Failed to load mains category sources", { description: toErrorMessage(error) });
       setSources([]);
@@ -262,12 +301,6 @@ export default function MainsCategorySourceManager() {
       return;
     }
 
-    const parsedMeta = parseMetaJson(categoryMetaJson);
-    if (!parsedMeta) {
-      toast.error("Category meta must be a valid JSON object");
-      return;
-    }
-
     const parentIdValue = categoryParentId.trim();
     const parsedParentId = parentIdValue ? Number(parentIdValue) : null;
     if (parentIdValue && (!Number.isInteger(parsedParentId) || (parsedParentId || 0) <= 0)) {
@@ -285,18 +318,26 @@ export default function MainsCategorySourceManager() {
       description: categoryDescription.trim() || null,
       parent_id: parsedParentId,
       is_active: categoryIsActive,
-      meta: parsedMeta,
     };
 
     setIsSavingCategory(true);
     try {
+      const supabase = createClient();
       if (editingCategoryId) {
-        const response = await premiumApi.put<MainsCategory>(`/mains/categories/${editingCategoryId}`, payload);
+        const { data, error } = await supabase.from("categories").update({
+          ...payload,
+          domain: "mains",
+        }).eq("id", editingCategoryId).select().single();
+        if (error) throw error;
         toast.success(`Mains category #${editingCategoryId} updated`);
-        setSelectedCategoryId(String(response.data?.id || editingCategoryId));
+        setSelectedCategoryId(String(data?.id || editingCategoryId));
       } else {
-        const response = await premiumApi.post<MainsCategory>("/mains/categories", payload);
-        const createdId = response.data?.id;
+        const { data, error } = await supabase.from("categories").insert({
+          ...payload,
+          domain: "mains",
+        }).select().single();
+        if (error) throw error;
+        const createdId = data?.id;
         toast.success(createdId ? `Mains category #${createdId} created` : "Mains category created");
         if (createdId) {
           setSelectedCategoryId(String(createdId));
@@ -318,7 +359,9 @@ export default function MainsCategorySourceManager() {
     }
     setDeletingCategoryId(item.id);
     try {
-      await premiumApi.delete(`/mains/categories/${item.id}`);
+      const supabase = createClient();
+      const { error } = await supabase.from("categories").delete().eq("id", item.id);
+      if (error) throw error;
       toast.success(`Mains category #${item.id} deleted`);
       if (editingCategoryId === item.id) {
         resetCategoryForm();
@@ -336,7 +379,7 @@ export default function MainsCategorySourceManager() {
 
   const startEditSource = (item: MainsCategorySource) => {
     setEditingSourceId(item.id);
-    setSourceKind(item.source_kind);
+    setSourceKind(item.source_kind === "url" ? "url" : item.content_item_id ? "content_item" : "text");
     setTitle(item.title || "");
     setSourceUrl(item.source_url || "");
     setSourceText(item.source_text || "");
@@ -419,11 +462,36 @@ export default function MainsCategorySourceManager() {
 
     setIsSavingSource(true);
     try {
+      if (!profileId) throw new Error("Profile is not loaded yet.");
+      const supabase = createClient();
+      const dbPayload = {
+        source_kind: sourceKind === "content_item" ? "text" : sourceKind,
+        title: payload.title,
+        source_url: payload.source_url,
+        source_text: sourceKind === "content_item"
+          ? `Linked content item: ${parsedContentItemId}`
+          : payload.source_text,
+        source_content_html: payload.source_content_html,
+        priority: payload.priority,
+        is_active: payload.is_active,
+        created_by: profileId,
+      };
       if (editingSourceId) {
-        await premiumApi.put(`/mains/categories/${categoryId}/sources/${editingSourceId}`, payload);
+        const { error } = await supabase.from("category_ai_sources").update(dbPayload).eq("id", editingSourceId);
+        if (error) throw error;
+        await supabase.from("category_ai_source_categories").upsert({
+          source_id: editingSourceId,
+          category_id: categoryId,
+        });
         toast.success(`Source #${editingSourceId} updated`);
       } else {
-        await premiumApi.post(`/mains/categories/${categoryId}/sources`, payload);
+        const { data, error } = await supabase.from("category_ai_sources").insert(dbPayload).select("id").single();
+        if (error) throw error;
+        const { error: linkError } = await supabase.from("category_ai_source_categories").insert({
+          source_id: data.id,
+          category_id: categoryId,
+        });
+        if (linkError) throw linkError;
         toast.success("Source created");
       }
       resetSourceForm();
@@ -452,25 +520,29 @@ export default function MainsCategorySourceManager() {
       return;
     }
 
-    const formData = new FormData();
-    for (const file of pdfFiles) {
-      formData.append("files", file);
-    }
-
     setIsUploadingPdfSources(true);
     try {
-      const response = await premiumApi.post<MainsCategorySource[]>(
-        `/mains/categories/${categoryId}/sources/upload-pdfs`,
-        formData,
-        {
-          params: {
-            use_ocr: usePdfOcr,
-            priority: Math.trunc(numericPriority),
-            is_active: isActive,
-          },
-        },
-      );
-      const createdCount = Array.isArray(response.data) ? response.data.length : 0;
+      if (!profileId) throw new Error("Profile is not loaded yet.");
+      const supabase = createClient();
+      let createdCount = 0;
+      for (const file of pdfFiles) {
+        const uploaded = await pdfsApi.upload(file) as any;
+        const { data, error } = await supabase.from("category_ai_sources").insert({
+          source_kind: "pdf",
+          title: file.name,
+          source_pdf_id: uploaded.id ?? uploaded.pdf_id ?? null,
+          priority: Math.trunc(numericPriority),
+          is_active: isActive,
+          created_by: profileId,
+        }).select("id").single();
+        if (error) throw error;
+        const { error: linkError } = await supabase.from("category_ai_source_categories").insert({
+          source_id: data.id,
+          category_id: categoryId,
+        });
+        if (linkError) throw linkError;
+        createdCount += 1;
+      }
       toast.success(createdCount > 0 ? `Added ${createdCount} PDF source(s)` : "PDF source upload completed");
       setPdfFiles([]);
       await loadSources(categoryId);
@@ -492,7 +564,10 @@ export default function MainsCategorySourceManager() {
     }
     setDeletingSourceId(item.id);
     try {
-      await premiumApi.delete(`/mains/categories/${categoryId}/sources/${item.id}`);
+      const supabase = createClient();
+      await supabase.from("category_ai_source_categories").delete().eq("source_id", item.id).eq("category_id", categoryId);
+      const { error } = await supabase.from("category_ai_sources").delete().eq("id", item.id);
+      if (error) throw error;
       toast.success(`Source #${item.id} deleted`);
       if (editingSourceId === item.id) {
         resetSourceForm();

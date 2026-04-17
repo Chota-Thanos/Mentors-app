@@ -1,125 +1,126 @@
-import { premiumApi } from "@/lib/premiumApi";
-import type {
-  LifecycleTrackingPayload,
-  MainsCopySubmission,
-  MentorshipRequest,
-  MentorshipSession,
-  ProfessionalPublicProfileDetail,
-  TestSeries,
-  TestSeriesTest,
-} from "@/types/premium";
+/**
+ * Loads learner mentorship data directly from Supabase (V2 schema).
+ * No FastAPI backend calls — all CRUD via RLS-secured Supabase queries.
+ */
+
+import { createClient } from "@/lib/supabase/client";
+import {
+  normalizeMainsCopySubmission,
+  normalizeMentorshipRequest,
+  normalizeMentorshipSession,
+} from "@/lib/mentorshipV2";
+
+import type { MentorshipRequest, MentorshipSession } from "@/types/premium";
 
 export interface LearnerMentorshipOrdersData {
   requests: MentorshipRequest[];
   sessions: MentorshipSession[];
-  tracking: LifecycleTrackingPayload;
-  seriesById: Record<string, TestSeries>;
-  testsById: Record<string, TestSeriesTest>;
-  submissionsById: Record<string, MainsCopySubmission>;
-  mentorNameByUserId: Record<string, string>;
+  seriesById: Record<string, TestSeriesRow>;
+  submissionsById: Record<string, SubmissionRow>;
+  mentorNameById: Record<string, string>;
 }
 
-const emptyTracking: LifecycleTrackingPayload = {
-  generated_at: "",
-  summary: {
-    users: 0,
-    mentorship_cycles: 0,
-    pending_mentorship: 0,
-    scheduled_mentorship: 0,
-    completed_mentorship: 0,
-    pending_copy_checks: 0,
-    delayed_items: 0,
-    technical_issues: 0,
-  },
-  mentorship_cycles: [],
-  user_rows: [],
-};
-
-async function fetchRecordMap<T extends { id: number }>(
-  ids: number[],
-  fetcher: (id: number) => Promise<T>,
-): Promise<Record<string, T>> {
-  if (ids.length === 0) return {};
-  const results = await Promise.allSettled(ids.map((id) => fetcher(id)));
-  const output: Record<string, T> = {};
-  for (const result of results) {
-    if (result.status !== "fulfilled") continue;
-    const row = result.value;
-    if (row?.id) output[String(row.id)] = row;
-  }
-  return output;
+export interface TestSeriesRow {
+  id: number;
+  name: string;
+  description?: string | null;
+  series_kind: string;
+  cover_image_url?: string | null;
+  price?: number | null;
+  is_paid: boolean;
+  is_active: boolean;
 }
 
-async function fetchMentorNameMap(providerUserIds: string[]): Promise<Record<string, string>> {
-  if (providerUserIds.length === 0) return {};
-  const results = await Promise.allSettled(
-    providerUserIds.map((userId) => premiumApi.get<ProfessionalPublicProfileDetail>(`/profiles/${userId}/detail`)),
-  );
-  const output: Record<string, string> = {};
-  for (let index = 0; index < results.length; index += 1) {
-    const userId = providerUserIds[index];
-    const result = results[index];
-    if (result.status !== "fulfilled") continue;
-    const displayName = String(result.value.data?.profile?.display_name || "").trim();
-    if (displayName) output[userId] = displayName;
-  }
-  return output;
+export interface SubmissionRow {
+  id: number;
+  user_id: number;
+  series_id?: number | null;
+  mains_question_id?: number | null;
+  answer_text: string;
+  status: string;
+  ai_score?: number | null;
+  ai_feedback?: string | null;
+  mentor_score?: number | null;
+  mentor_feedback?: string | null;
+  submitted_at: string;
+  updated_at: string;
 }
 
-export async function loadLearnerMentorshipOrders(): Promise<LearnerMentorshipOrdersData> {
-  const [requestsResponse, sessionsResponse, trackingResponse] = await Promise.all([
-    premiumApi.get<MentorshipRequest[]>("/mentorship/requests", { params: { scope: "me" } }),
-    premiumApi.get<MentorshipSession[]>("/mentorship/sessions", { params: { scope: "me" } }),
-    premiumApi.get<LifecycleTrackingPayload>("/lifecycle/tracking", { params: { scope: "me", limit_cycles: 200, limit_users: 1 } }),
-  ]);
+export async function loadLearnerMentorshipOrders(
+  profileId: number,
+): Promise<LearnerMentorshipOrdersData> {
+  const supabase = createClient();
 
-  const requests = Array.isArray(requestsResponse.data) ? requestsResponse.data : [];
-  const sessions = Array.isArray(sessionsResponse.data) ? sessionsResponse.data : [];
-  const tracking = trackingResponse.data || emptyTracking;
+  // Fetch mentorship requests for this learner, joined with mentor profile
+  const { data: requestsData, error: reqError } = await supabase
+    .from("mentorship_requests")
+    .select(`
+      *,
+      mentor:profiles!mentorship_requests_mentor_id_fkey(id, display_name, avatar_url)
+    `)
+    .eq("user_id", profileId)
+    .order("requested_at", { ascending: false });
 
+  if (reqError) throw reqError;
+  const requests = (requestsData ?? []).map((row) => normalizeMentorshipRequest(row as Record<string, unknown>));
+
+  // Fetch sessions for this learner
+  const { data: sessionsData, error: sessError } = await supabase
+    .from("mentorship_sessions")
+    .select("*")
+    .eq("user_id", profileId)
+    .order("starts_at", { ascending: false });
+
+  if (sessError) throw sessError;
+  const sessions = (sessionsData ?? []).map((row) => normalizeMentorshipSession(row as Record<string, unknown>));
+
+  // Gather unique series IDs referenced by requests
   const seriesIds = Array.from(
     new Set(
       requests
-        .map((row) => Number(row.series_id || 0))
-        .filter((value) => Number.isFinite(value) && value > 0),
-    ),
-  );
-  const testIds = Array.from(
-    new Set(
-      requests
-        .map((row) => Number(row.test_collection_id || 0))
-        .filter((value) => Number.isFinite(value) && value > 0),
-    ),
-  );
-  const submissionIds = Array.from(
-    new Set(
-      requests
-        .map((row) => Number(row.submission_id || 0))
-        .filter((value) => Number.isFinite(value) && value > 0),
-    ),
-  );
-  const providerUserIds = Array.from(
-    new Set(
-      requests
-        .map((row) => String(row.provider_user_id || "").trim())
-        .filter(Boolean),
+        .map((r) => r.series_id)
+        .filter((id): id is number => typeof id === "number" && id > 0),
     ),
   );
 
-  const [seriesById, testsById, submissionsById, mentorNameByUserId] = await Promise.all([
-    fetchRecordMap(seriesIds, async (id) => (await premiumApi.get<TestSeries>(`/programs/${id}`)).data),
-    fetchRecordMap(testIds, async (id) => (await premiumApi.get<TestSeriesTest>(`/tests/${id}`)).data),
-    fetchRecordMap(submissionIds, async (id) => (await premiumApi.get<MainsCopySubmission>(`/copy-submissions/${id}`)).data),
-    fetchMentorNameMap(providerUserIds),
-  ]);
+  // Fetch test series rows
+  let seriesById: Record<string, TestSeriesRow> = {};
+  if (seriesIds.length > 0) {
+    const { data: seriesData } = await supabase
+      .from("test_series")
+      .select("id, name, description, series_kind, cover_image_url, price, is_paid, is_active")
+      .in("id", seriesIds);
+    for (const row of seriesData ?? []) {
+      seriesById[String((row as TestSeriesRow).id)] = row as TestSeriesRow;
+    }
+  }
+
+  // Fetch mains submissions for this learner
+  const { data: submissionsData } = await supabase
+    .from("mains_test_copy_submissions")
+    .select("*")
+    .eq("user_id", profileId)
+    .order("submitted_at", { ascending: false });
+
+  const submissionsById: Record<string, SubmissionRow> = {};
+  for (const row of submissionsData ?? []) {
+    const normalized = normalizeMainsCopySubmission(row as Record<string, unknown>) as unknown as SubmissionRow;
+    submissionsById[String(normalized.id)] = normalized;
+  }
+
+  const mentorNameById: Record<string, string> = {};
+  for (const req of requests) {
+    const rawReq = req as unknown as any;
+    if (rawReq.mentor?.display_name) {
+      mentorNameById[String(req.provider_user_id)] = rawReq.mentor.display_name;
+    }
+  }
 
   return {
     requests,
     sessions,
-    tracking,
     seriesById,
-    testsById,
     submissionsById,
-    mentorNameByUserId,
+    mentorNameById,
   };
 }

@@ -15,7 +15,13 @@ export default async function MainsQuestionRepositoryPage() {
     redirect("/login");
   }
 
-  const canAccess = canAccessMainsAuthoring(user);
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  const canAccess = canAccessMainsAuthoring({ role: profile?.role });
 
   return (
     <AppLayout>

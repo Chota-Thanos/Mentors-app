@@ -5,7 +5,6 @@ import AppLayout from "@/components/layouts/AppLayout";
 import MainsQuestionRepositoryStudio from "@/components/mains/MainsQuestionRepositoryStudio";
 import QuestionCreationMethodsView from "@/components/premium/QuestionCreationMethodsView";
 import { canAccessMainsAuthoring, canAccessManualQuizBuilder } from "@/lib/accessControl";
-import { backendRoot } from "@/lib/backendUrl";
 import { createClient } from "@/lib/supabase/server";
 
 interface PageProps {
@@ -24,47 +23,26 @@ export default async function QuestionMethodsPage({ params }: PageProps) {
   if (!user) return redirect("/login");
 
   const { data: collection } = await supabase
-    .from("collections")
-    .select("id,title,test_kind,meta")
+    .from("premium_collections")
+    .select("id,name,collection_type")
     .eq("id", collectionId)
-    .single();
+    .maybeSingle();
 
-  let resolvedTitle = String(collection?.title || "").trim();
-  let resolvedTestKind = String(collection?.test_kind || "").trim().toLowerCase();
-  const meta = collection?.meta && typeof collection.meta === "object" ? (collection.meta as Record<string, unknown>) : {};
-  if (!resolvedTestKind) {
-    resolvedTestKind = String(meta.test_kind || "").trim().toLowerCase();
-  }
-  if (!resolvedTestKind && String(meta.collection_mode || "").toLowerCase().includes("mains")) {
-    resolvedTestKind = "mains";
-  }
+  if (!collection) return notFound();
 
-  if (!resolvedTitle) {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    if (token) {
-      const response = await fetch(`${backendRoot}/api/v1/premium/tests/${collectionId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
-      });
-      if (response.ok) {
-        const payload = await response.json();
-        resolvedTitle = String(payload?.title || "").trim();
-        resolvedTestKind = String(payload?.test_kind || resolvedTestKind || "").trim().toLowerCase();
-      }
-    }
-  }
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
 
-  if (!resolvedTitle) {
-    resolvedTitle = `Test #${collectionId}`;
-  }
+  const resolvedTitle = String(collection.name || `Test #${collectionId}`).trim();
+  const resolvedTestKind = String(collection.collection_type || "prelims").trim().toLowerCase();
 
-  if (resolvedTestKind === "mains" && !canAccessMainsAuthoring(user)) {
+  if (resolvedTestKind === "mains" && !canAccessMainsAuthoring({ role: profile?.role })) {
     return redirect(`/collections/${collectionId}`);
   }
-  if (resolvedTestKind !== "mains" && !canAccessManualQuizBuilder(user)) {
+  if (resolvedTestKind !== "mains" && !canAccessManualQuizBuilder({ role: profile?.role })) {
     return redirect(`/collections/${collectionId}`);
   }
 

@@ -7,7 +7,10 @@ import axios from "axios";
 import { ArrowLeft, BookOpen, Calculator, ChevronLeft, ChevronRight, FileText, ListPlus, Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { premiumApi, premiumApiRoot, premiumCompatApi } from "@/lib/premiumApi";
+import { useProfile } from "@/context/ProfileContext";
+import { fetchPremiumCategoryTree } from "@/lib/aiData";
+import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import type { PremiumExam, QuizKind } from "@/types/premium";
 
 type CategoryNode = { id: number; name: string; children?: CategoryNode[]; total_question_count?: number | null };
@@ -50,8 +53,9 @@ const QUIZ_OPTIONS: Array<{ value: QuizKind; label: string; icon: typeof BookOpe
 ];
 
 const toErr = (e: unknown) => {
-  if (!axios.isAxiosError(e)) return "Unknown error";
-  return typeof e.response?.data?.detail === "string" ? e.response.data.detail : e.message;
+  if (axios.isAxiosError(e)) return typeof e.response?.data?.detail === "string" ? e.response.data.detail : e.message;
+  if (e instanceof Error) return e.message;
+  return "Unknown error";
 };
 
 const mapQuiz = (v: string | null): QuizKind => {
@@ -73,8 +77,8 @@ const flatQuestion = (row: Record<string, unknown>): QuestionItem | null => {
   const data = (row.data || {}) as Record<string, unknown>;
   return {
     id,
-    title: String(row.title || `Quiz #${id}`),
-    statement: String(data.question_statement || data.passage_text || data.passage_title || ""),
+    title: String(row.title || row.passage_title || `Quiz #${id}`),
+    statement: String(row.question_statement || row.passage_text || data.question_statement || data.passage_text || data.passage_title || ""),
     isAttempted: attempted(row),
   };
 };
@@ -82,6 +86,8 @@ const flatQuestion = (row: Record<string, unknown>): QuestionItem | null => {
 export default function UserCollectionBuilder() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { profileId, loading: profileLoading } = useProfile();
+  const supabase = useMemo(() => createClient(), []);
 
   const [collectionName, setCollectionName] = useState(() => searchParams.get("prefill_name") || "");
   const [maxQuestions, setMaxQuestions] = useState("10");
@@ -163,10 +169,8 @@ export default function UserCollectionBuilder() {
     const run = async () => {
       setLoadingCats(true);
       try {
-        const res = await axios.get<CategoryNode[]>(`${premiumApiRoot}/api/v1/premium-categories/${quizType}/`, {
-          params: { hierarchical: true },
-        });
-        setTree(res.data || []);
+        const rows = await fetchPremiumCategoryTree(quizType);
+        setTree(rows as CategoryNode[]);
       } catch (e: unknown) {
         setTree([]);
         toast.error("Failed to load categories", { description: toErr(e) });
@@ -182,9 +186,25 @@ export default function UserCollectionBuilder() {
     setHistory([]);
   }, [tree]);
 
-  const fetchQuestions = async (k: QuizKind, examId: number, categoryId: number) => {
-    const res = await premiumApi.get<Record<string, unknown>[]>(`/quizzes/${k}`, { params: { category_id: categoryId, exam_id: examId, limit: 1000 } });
-    return res.data || [];
+  const fetchQuestions = async (k: QuizKind, _examId: number, categoryId: number) => {
+    if (k === "passage") {
+      const { data, error } = await supabase
+        .from("passage_quizzes")
+        .select("id,passage_title,passage_text,passage_quiz_categories!inner(category_id)")
+        .eq("passage_quiz_categories.category_id", categoryId)
+        .limit(1000);
+      if (error) throw error;
+      return (data || []) as Record<string, unknown>[];
+    }
+
+    const { data, error } = await supabase
+      .from("quizzes")
+      .select("id,title,question_statement,quiz_type,quiz_categories!inner(category_id)")
+      .eq("quiz_type", k)
+      .eq("quiz_categories.category_id", categoryId)
+      .limit(1000);
+    if (error) throw error;
+    return (data || []) as Record<string, unknown>[];
   };
 
   const openAddSheet = async (node: CategoryNode) => {
@@ -255,40 +275,68 @@ export default function UserCollectionBuilder() {
     if (!collectionName.trim()) return toast.error("Please enter a name");
     if (!selectedExamId) return toast.error("Please select exam");
     if (!selections.length) return toast.error("Add at least one selection");
+    if (profileLoading) return toast.error("Profile is still loading.");
+    if (!profileId) return toast.error("Creator profile is not loaded.");
     setSubmitting(true);
     let collectionId: number | null = null;
     try {
-      const created = await premiumCompatApi.post<{ id: number }>("/", {
-        name: collectionName.trim(),
-        description: null,
-        exam_ids: selectedExamId ? [selectedExamId] : [],
-        category_ids: [],
-        test_kind: "prelims",
-      });
-      collectionId = Number(created.data?.id || 0);
+      const sourceCategoryIds = Array.from(new Set(selections.map((selection) => selection.categoryId)));
+      const { data: created, error: collectionError } = await supabase
+        .from("premium_collections")
+        .insert({
+          name: collectionName.trim(),
+          description: null,
+          collection_type: "prelims",
+          creator_id: profileId,
+          source_category_ids: sourceCategoryIds,
+          is_public: false,
+          is_paid: false,
+          is_finalized: false,
+        })
+        .select("id")
+        .single();
+      if (collectionError) throw collectionError;
+
+      collectionId = Number(created?.id || 0);
       if (!collectionId) throw new Error("Prelims Test created but ID missing");
 
-      const picked = new Set<number>();
+      const picked = new Map<string, { id: number; quizType: QuizKind; categoryId: number }>();
       for (const s of selections) {
         if (s.kind === "question") {
-          for (const id of s.questionIds) picked.add(id);
+          for (const id of s.questionIds) picked.set(`${s.quizType}:${id}`, { id, quizType: s.quizType, categoryId: s.categoryId });
           continue;
         }
         const rows = await fetchQuestions(s.quizType, s.examId, s.categoryId);
         const ids = rows
           .filter((row) => s.includeAttempted || !attempted(row))
           .map((row) => Number(row.id))
-          .filter((id) => Number.isFinite(id) && !picked.has(id));
+          .filter((id) => Number.isFinite(id) && !picked.has(`${s.quizType}:${id}`));
         if (ids.length < s.count) throw new Error(`Not enough questions in ${s.categoryName}. Requested ${s.count}, found ${ids.length}.`);
-        for (const id of ids.slice(0, s.count)) picked.add(id);
+        for (const id of ids.slice(0, s.count)) picked.set(`${s.quizType}:${id}`, { id, quizType: s.quizType, categoryId: s.categoryId });
       }
 
-      const finalIds = Array.from(picked);
-      if (!finalIds.length) throw new Error("No questions selected");
+      const finalItems = Array.from(picked.values());
+      if (!finalItems.length) throw new Error("No questions selected");
 
-      await premiumApi.post(`/collections/${collectionId}/items/bulk-add`, { items: finalIds.map((content_item_id, order) => ({ content_item_id, order })) });
-      await premiumApi.put(`/collections/${collectionId}`, { is_finalized: true });
-      toast.success(`Test created with ${finalIds.length} questions`);
+      const { error: itemsError } = await supabase.from("premium_collection_items").insert(
+        finalItems.map((item, orderIndex) => ({
+          premium_collection_id: collectionId,
+          order_index: orderIndex,
+          item_type: item.quizType === "passage" ? "passage_quiz" : item.quizType === "maths" ? "maths_quiz" : "gk_quiz",
+          quiz_id: item.quizType === "passage" ? null : item.id,
+          passage_quiz_id: item.quizType === "passage" ? item.id : null,
+          category_id: item.categoryId,
+        })),
+      );
+      if (itemsError) throw itemsError;
+
+      const { error: finalizeError } = await supabase
+        .from("premium_collections")
+        .update({ is_finalized: true })
+        .eq("id", collectionId);
+      if (finalizeError) throw finalizeError;
+
+      toast.success(`Test created with ${finalItems.length} questions`);
       router.push(`/collections/${collectionId}/test`);
     } catch (e: unknown) {
       toast.error("Failed to create test", { description: toErr(e) });

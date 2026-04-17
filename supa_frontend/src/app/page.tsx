@@ -26,6 +26,7 @@ import AppLayout from "@/components/layouts/AppLayout";
 import { FeaturedMixedRail } from "@/components/home/FeaturedContentRail";
 import PublicLandingPage from "@/components/home/PublicLandingPage";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { useExamContext } from "@/context/ExamContext";
 import {
   isAdminLike,
@@ -269,10 +270,10 @@ const quickActionsByKind: Record<HomeKind, HomeAction[]> = {
   ],
 };
 
-function resolveHomeKind(user: unknown): HomeKind {
-  if (isAdminLike(user) || isModeratorLike(user)) return "operations";
-  if (isQuizMasterLike(user)) return "quiz_master";
-  if (isMainsMentorLike(user)) return "mains_mentor";
+function resolveHomeKind(role: string): HomeKind {
+  if (role === "admin" || role === "moderator") return "operations";
+  if (role === "prelims_expert") return "quiz_master";
+  if (role === "mains_expert") return "mains_mentor";
   return "learner";
 }
 
@@ -426,35 +427,78 @@ function LearnerHome({ user }: { user: unknown }) {
       setLoading(true);
       setError("");
       try {
-        const [analyticsRes, yearlySummaryRes, ordersRes, progressRes] = await Promise.all([
-          premiumApi.get<DashboardAnalyticsPayload>("/user/dashboard-analytics", {
-            params: { exam_id: globalExamId || undefined },
-          }),
-          premiumApi.get<YearlyAttemptSummaryPayload>("/user/yearly-attempt-summary", {
-            params: { exam_id: globalExamId || undefined },
-          }),
-          loadLearnerMentorshipOrders(),
-          premiumApi.get<UserProgressPayload>("/user/progress", {
-            params: { exam_id: globalExamId || undefined },
-          }),
+        const { createClient } = await import("@/lib/supabase/client");
+        const supabase = createClient();
+        
+        // Use profile ID for data fetching. We get it from the user context passed as prop if available, 
+        // but typically it's best to fetch via session or assume currentUserId is our profileId (bigint passed).
+        // For now, we query based on the id provided.
+        const profileIdNum = parseInt(currentUserId, 10);
+        
+        if (isNaN(profileIdNum) || profileIdNum <= 0) {
+           throw new Error("Invalid User ID");
+        }
+
+        const [ordersRes, activeSeriesRes, attemptsRes, mainsRes] = await Promise.all([
+          loadLearnerMentorshipOrders(profileIdNum),
+          globalExamId ? supabase
+            .from("user_content_access")
+            .select("test_series_id, test_series(series_kind, name)")
+            .eq("user_id", profileIdNum)
+            .eq("is_active", true)
+            .not("test_series_id", "is", null)
+          : { data: [] },
+          supabase
+            .from("test_attempts")
+            .select("id, collection_id, score, total_questions, correct_count, incorrect_count, skipped_count, created_at")
+            .eq("user_id", profileIdNum)
+            .order("created_at", { ascending: false })
+            .limit(20),
+          supabase
+            .from("user_mains_evaluations")
+            .select("id, question_text, ai_score, ai_max_score, created_at")
+            .eq("user_id", profileIdNum)
+            .order("created_at", { ascending: false })
+            .limit(20)
         ]);
+
         if (!active) return;
-        setAnalytics(analyticsRes.data || null);
-        setYearlySummary(yearlySummaryRes.data || null);
+        
+        const activeSeriesRows = (activeSeriesRes.data || []).map((row: any) => ({
+          series_id: row.test_series_id,
+          series_kind: row.test_series?.series_kind,
+          title: row.test_series?.name,
+        }));
+        
+        setAnalytics({
+          purchase_overview: {
+            active_series: activeSeriesRows,
+          }
+        } as any);
+        
+        setYearlySummary({
+          year: new Date().getFullYear(),
+          rows: {
+            gk: { content_type: "gk", label: "GK", total_questions: 0, total_questions_attempted: 0, total_marks: 0, marks_obtained: 0 },
+            maths: { content_type: "maths", label: "Maths", total_questions: 0, total_questions_attempted: 0, total_marks: 0, marks_obtained: 0 },
+            passage: { content_type: "passage", label: "Passage", total_questions: 0, total_questions_attempted: 0, total_marks: 0, marks_obtained: 0 },
+            mains: { content_type: "mains", label: "Mains", total_questions: 0, total_questions_attempted: 0, total_marks: 0, marks_obtained: 0 },
+          }
+        } as any);
+        
         setOrders(ordersRes);
 
-        const progressData = progressRes.data || { quiz_attempts: [], mains_evaluations: [] };
-        const rawAttempts = Array.isArray(progressData.quiz_attempts) ? progressData.quiz_attempts : [];
-        const rawMainsEvaluations = Array.isArray(progressData.mains_evaluations) ? progressData.mains_evaluations : [];
+        const rawAttempts = attemptsRes.data || [];
+        const rawMainsEvaluations = mainsRes.data || [];
         const normalizedAttempts: UserQuizAttemptRow[] = rawAttempts
           .map((row) => ({
             id: toPositiveInt(row.id),
             collection_id: toPositiveInt(row.collection_id),
             score: Number(row.score || 0),
             total_questions: Number(row.total_questions || 0),
-            correct_answers: Number(row.correct_answers || 0),
-            incorrect_answers: Number(row.incorrect_answers || 0),
-            unanswered: Number(row.unanswered || 0),
+            correct_answers: Number(row.correct_count || 0),
+            incorrect_answers: Number(row.incorrect_count || 0),
+            unanswered: Number(row.skipped_count || 0),
             created_at: String(row.created_at || ""),
           }))
           .filter((row) => row.id > 0 && row.collection_id > 0);
@@ -462,32 +506,27 @@ function LearnerHome({ user }: { user: unknown }) {
         const collectionIds = Array.from(new Set(normalizedAttempts.map((row) => row.collection_id).filter((id) => id > 0)));
         const collectionById: Record<string, PremiumCollection> = {};
         if (collectionIds.length > 0) {
-          const collectionResponses = await Promise.allSettled(
-            collectionIds.map((collectionId) =>
-              premiumApi.get<PremiumCollection>(`/collections/${collectionId}`, {
-                params: { include_items: false },
-              }),
-            ),
-          );
+          const { data: collections } = await supabase
+            .from("premium_collections")
+            .select("id, name, test_kind, is_paid")
+            .in("id", collectionIds);
+            
           if (!active) return;
-          for (const result of collectionResponses) {
-            if (result.status !== "fulfilled") continue;
-            const row = result.value.data;
-            const collectionId = toPositiveInt(row?.id);
-            if (collectionId > 0) {
-              collectionById[String(collectionId)] = row;
-            }
+          for (const row of collections || []) {
+            collectionById[String(row.id)] = {
+              id: row.id,
+              title: row.name,
+              test_kind: row.test_kind,
+            } as any;
           }
         }
 
         const nextPrelimsResults: AttemptWithContext[] = [];
         for (const attempt of normalizedAttempts) {
           const collection = collectionById[String(attempt.collection_id)] || null;
-          if (!matchesExamIds(collection?.exam_ids, globalExamId)) continue;
-          const seriesId = parseSeriesId(collection);
-          if (seriesId > 0 || isQuizMadeTestCollection(collection, currentUserId)) {
-            nextPrelimsResults.push({ attempt, collection, seriesId });
-          }
+          // In V2 exams are linked via exams table not directly on collections. We can skip matchesExamIds filter here since it's user's own.
+          const seriesId = parseSeriesId(collection); // Keep 0 if it's standalone quiz
+          nextPrelimsResults.push({ attempt, collection, seriesId });
         }
         nextPrelimsResults.sort(
           (left, right) => new Date(right.attempt.created_at).getTime() - new Date(left.attempt.created_at).getTime(),
@@ -497,8 +536,8 @@ function LearnerHome({ user }: { user: unknown }) {
           .map((row) => ({
             id: toPositiveInt(row.id),
             question_text: row.question_text ? String(row.question_text) : null,
-            score: row.score == null ? null : Number(row.score),
-            max_score: row.max_score == null ? null : Number(row.max_score),
+            score: row.ai_score == null ? null : Number(row.ai_score),
+            max_score: row.ai_max_score == null ? null : Number(row.ai_max_score),
             created_at: String(row.created_at || ""),
           }))
           .filter((row) => row.id > 0)
@@ -576,7 +615,7 @@ function LearnerHome({ user }: { user: unknown }) {
       ...recentRequests.map((request) => ({
         key: `request-${request.id}`,
         title: requestTypeLabel(request),
-        meta: requestMetaLabel(request, orders?.mentorNameByUserId || {}),
+        meta: requestMetaLabel(request, orders?.mentorNameById || {}),
         status: String(request.status || "").replaceAll("_", " "),
         statusClass: requestStatusTone(request.status),
         href: `/my-purchases/mentorship/${request.id}`,
@@ -590,7 +629,7 @@ function LearnerHome({ user }: { user: unknown }) {
         href: `/programs/${series.series_id}`,
       })),
     ].slice(0, 4),
-    [activeSeries, orders?.mentorNameByUserId, recentRequests],
+    [activeSeries, orders?.mentorNameById, recentRequests],
   );
 
   const quickLinks = [
@@ -1266,12 +1305,14 @@ function MinimalCreatorHome({
 }
 
 export default function Home() {
-  const { user, isAuthenticated, loading } = useAuth();
-  const kind = useMemo(() => resolveHomeKind(user), [user]);
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const { role, loading: profileLoading } = useProfile();
+  
+  const kind = useMemo(() => resolveHomeKind(role), [role]);
   const copy = homeCopy[kind];
   const quickActions = quickActionsByKind[kind];
 
-  if (loading) {
+  if (authLoading || (user && profileLoading)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f8faff] dark:bg-[#0f172a]">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#173aa9] border-r-transparent"></div>

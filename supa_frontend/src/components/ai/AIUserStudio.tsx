@@ -9,7 +9,15 @@ import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, ChevronUp
 import { toast } from "sonner";
 
 import { legacyPremiumAiApi } from "@/lib/legacyPremiumAiApi";
-import { premiumApi, premiumApiRoot } from "@/lib/premiumApi";
+import { pdfsApi } from "@/lib/api";
+import { premiumApi } from "@/lib/premiumApi";
+import {
+  createOwnedCollection,
+  fetchAiExampleAnalyses,
+  fetchOwnedCollections,
+  fetchPremiumCategoryTree,
+  fetchUploadedPdfs,
+} from "@/lib/aiData";
 import RoleWorkspaceSidebar from "@/components/layouts/RoleWorkspaceSidebar";
 import { getQuizMasterWorkspaceSections } from "@/components/layouts/roleWorkspaceLinks";
 import {
@@ -22,6 +30,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { useExamContext } from "@/context/ExamContext";
+import { useProfile } from "@/context/ProfileContext";
 import { hasGenerationSubscription, hasQuizMasterGenerationSubscription, isQuizMasterLike } from "@/lib/accessControl";
 import MiniRichTextInput from "@/components/ui/MiniRichTextInput";
 import CategorySelector from "@/components/premium/ExamCategorySelector";
@@ -34,7 +43,6 @@ import type {
   PremiumCategory,
   PremiumCollection,
   PremiumAIExampleAnalysis,
-  PremiumAIExampleAnalysisListResponse,
   PremiumPreviewResponse,
   QuizKind,
   UploadedPDF,
@@ -828,6 +836,7 @@ export default function AIUserStudio({
   showQuizKindSwitcher = false,
 }: AIUserStudioProps) {
   const { user, isAuthenticated } = useAuth();
+  const { profileId } = useProfile();
   const { globalExamId, globalExamName } = useExamContext();
   const searchParams = useSearchParams();
   const quizMasterMode = mode === "quiz_master";
@@ -1008,18 +1017,10 @@ export default function AIUserStudio({
     let active = true;
     const loadCategoryNames = async () => {
       try {
-        const quizType = `premium_${quizKind}`;
-        const response = await axios.get<PremiumCategory[]>(
-          `${premiumApiRoot}/api/v1/premium-categories/${quizType}/`,
-          {
-            params: {
-              hierarchical: true,
-            },
-          },
-        );
+        const response = await fetchPremiumCategoryTree(quizKind);
         if (!active) return;
         const map: Record<number, string> = {};
-        flattenCategoryNameMap(response.data || [], map);
+        flattenCategoryNameMap(response, map);
         setCategoryNameById(map);
       } catch {
         if (!active) return;
@@ -1177,13 +1178,7 @@ export default function AIUserStudio({
   }, [analyses]);
 
   const loadAnalyses = useCallback(async () => {
-    const params = new URLSearchParams();
-    params.set("content_type", selectedContentType);
-    params.set("include_admin", "false");
-    const response = await legacyPremiumAiApi.get<PremiumAIExampleAnalysisListResponse>(
-      `/premium-ai-quizzes/example-analyses?${params.toString()}`,
-    );
-    const nextAnalyses = response.data?.items || [];
+    const nextAnalyses = await fetchAiExampleAnalyses(selectedContentType);
     setAnalyses(nextAnalyses);
     setSelectedAnalysisId((current) => {
       if (current && nextAnalyses.some((item) => String(item.id) === current)) return current;
@@ -1202,8 +1197,7 @@ export default function AIUserStudio({
         setSelectedUploadedPdfId("");
         return;
       }
-      const response = await legacyPremiumAiApi.get<UploadedPDF[]>("/premium-ai-quizzes/uploaded-pdfs");
-      const items = Array.isArray(response.data) ? response.data : [];
+      const items = await fetchUploadedPdfs();
       setUploadedPdfs(items);
       setSelectedUploadedPdfId((prev) => {
         if (prev && items.some((item) => String(item.id) === prev)) return prev;
@@ -1249,15 +1243,16 @@ export default function AIUserStudio({
   }, [contentSourceType, isAuthenticated, loadUploadedPdfs]);
 
   const loadCollections = useCallback(async () => {
+    if (!isAuthenticated || !profileId) {
+      setCollections([]);
+      return;
+    }
     try {
-      const response = await premiumApi.get<PremiumCollection[]>("/collections", {
-        params: { mine_only: true, test_kind: "prelims" },
-      });
-      setCollections(Array.isArray(response.data) ? response.data : []);
+      setCollections(await fetchOwnedCollections(profileId, "prelims"));
     } catch (error: unknown) {
       toast.error("Failed to load Prelims Tests", { description: toError(error) });
     }
-  }, []);
+  }, [isAuthenticated, profileId]);
 
   useEffect(() => {
     loadCollections();
@@ -1522,18 +1517,14 @@ export default function AIUserStudio({
     }
     setUploadingPdf(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await legacyPremiumAiApi.post<UploadedPDF>(
-        "/premium-ai-quizzes/upload-pdf",
-        formData,
-        { params: { use_ocr: ocrOnUpload } },
-      );
-      const uploaded = response.data;
+      const uploaded = await pdfsApi.upload(file) as { id?: number; pdf_id?: number; filename?: string; used_ocr?: boolean };
+      const uploadedId = Number(uploaded.id ?? uploaded.pdf_id ?? 0);
       await loadUploadedPdfs();
-      setSelectedUploadedPdfId(String(uploaded.id));
+      if (uploadedId > 0) {
+        setSelectedUploadedPdfId(String(uploadedId));
+      }
       setContentSourceType("pdf");
-      toast.success(`PDF uploaded: ${uploaded.filename}`, {
+      toast.success(`PDF uploaded: ${uploaded.filename || file.name}`, {
         description: uploaded.used_ocr
           ? "OCR was used to improve extraction."
           : "Text extraction is ready.",
@@ -1550,7 +1541,7 @@ export default function AIUserStudio({
     if (!window.confirm(`Delete "${pdf.filename}"?`)) return;
     setDeletingPdfId(pdf.id);
     try {
-      await legacyPremiumAiApi.delete(`/premium-ai-quizzes/uploaded-pdfs/${pdf.id}`);
+      await pdfsApi.delete(pdf.id);
       setUploadedPdfs((prev) => prev.filter((item) => item.id !== pdf.id));
       setSelectedUploadedPdfId((prev) => (prev === String(pdf.id) ? "" : prev));
       toast.success("Uploaded PDF deleted.");
@@ -2212,27 +2203,86 @@ export default function AIUserStudio({
       toast.error("Select quiz item(s) first.");
       return;
     }
+    if (!profileId) {
+      toast.error("Creator profile is not loaded.");
+      return;
+    }
     setIsAddingToCollection(true);
     try {
+      const supabase = createClient();
       let addedCount = 0;
       for (const item of selectedGeneratedItems) {
         if (quizKind === "passage") {
           const contentData = buildPassageContentData(item);
-          await premiumApi.post("/content", {
-            title: contentData.passage_title || "AI Passage Quiz",
-            type: "quiz_passage",
-            data: contentData,
-            collection_id: collectionId,
+          const { data: passage, error: passageError } = await supabase.from("passage_quizzes").insert({
+            passage_title: contentData.passage_title || "AI Passage Quiz",
+            passage_text: contentData.passage_text,
+            source_reference: contentData.source_reference,
+            author_id: profileId,
+          }).select("id").single();
+          if (passageError) throw passageError;
+          const passageId = Number(passage.id);
+          const { error: questionsError } = await supabase.from("passage_questions").insert(
+            contentData.questions.map((question, index) => ({
+              passage_quiz_id: passageId,
+              question_statement: question.question_statement,
+              supp_question_statement: question.supp_question_statement,
+              statements_facts: question.statements_facts,
+              question_prompt: question.question_prompt,
+              options: question.options,
+              correct_answer: question.correct_answer,
+              explanation: question.explanation,
+              category_id: question.category_ids[0] || contentData.category_ids[0] || null,
+              display_order: index,
+            })),
+          );
+          if (questionsError) throw questionsError;
+          if (contentData.category_ids.length > 0) {
+            const { error: categoryError } = await supabase.from("passage_quiz_categories").insert(
+              contentData.category_ids.map((categoryId) => ({ passage_quiz_id: passageId, category_id: categoryId })),
+            );
+            if (categoryError) throw categoryError;
+          }
+          const { error: itemError } = await supabase.from("premium_collection_items").insert({
+            premium_collection_id: collectionId,
+            order_index: Date.now() + addedCount,
+            item_type: "passage_quiz",
+            passage_quiz_id: passageId,
+            category_id: contentData.category_ids[0] || null,
           });
+          if (itemError) throw itemError;
           addedCount += 1;
         } else {
           const contentData = buildQuestionContentData(item);
-          await premiumApi.post("/content", {
+          const { data: quiz, error: quizError } = await supabase.from("quizzes").insert({
+            quiz_type: quizKind,
             title: contentData.question_statement || `AI ${QUIZ_KIND_LABEL[quizKind]} Quiz`,
-            type: quizKind === "gk" ? "quiz_gk" : "quiz_maths",
-            data: contentData,
-            collection_id: collectionId,
+            question_statement: contentData.question_statement,
+            supp_question_statement: contentData.supp_question_statement,
+            statements_facts: contentData.statements_facts,
+            question_prompt: contentData.question_prompt,
+            options: contentData.options,
+            correct_answer: contentData.correct_answer,
+            explanation: contentData.explanation,
+            sources: contentData.source_reference ? [{ title: "Source", url: contentData.source_reference }] : [],
+            author_id: profileId,
+          }).select("id").single();
+          if (quizError) throw quizError;
+          const quizId = Number(quiz.id);
+          if (contentData.category_ids.length > 0) {
+            const { error: categoryError } = await supabase.from("quiz_categories").insert(
+              contentData.category_ids.map((categoryId) => ({ quiz_id: quizId, category_id: categoryId })),
+            );
+            if (categoryError) throw categoryError;
+          }
+          const { error: itemError } = await supabase.from("premium_collection_items").insert({
+            premium_collection_id: collectionId,
+            order_index: Date.now() + addedCount,
+            item_type: quizKind === "maths" ? "maths_quiz" : "gk_quiz",
+            quiz_id: quizId,
+            category_id: contentData.category_ids[0] || null,
           });
+          if (itemError) throw itemError;
           addedCount += 1;
         }
       }
@@ -2243,7 +2293,7 @@ export default function AIUserStudio({
     } finally {
       setIsAddingToCollection(false);
     }
-  }, [buildPassageContentData, buildQuestionContentData, loadCollections, quizKind, selectedGeneratedItems]);
+  }, [buildPassageContentData, buildQuestionContentData, loadCollections, profileId, quizKind, selectedGeneratedItems]);
 
   const handleCreatePdf = useCallback(async () => {
     if (!selectedGeneratedItems.length) {
@@ -2283,22 +2333,21 @@ export default function AIUserStudio({
       toast.error("Prelims Test name is required.");
       return;
     }
+    if (!profileId) {
+      toast.error("Profile is not loaded yet.");
+      return;
+    }
     setIsAddingToCollection(true);
     try {
-      const createResponse = await premiumApi.post<PremiumCollection>("/collections", {
-        title: name,
+      const created = await createOwnedCollection(profileId, {
+        name,
         description: "Generated from AI User Studio",
-        type: "test_series",
-        test_kind: "prelims",
-        is_premium: true,
-        is_public: false,
-        is_finalized: false,
-        meta: {
-          collection_mode: "prelims_quiz",
-          test_kind: "prelims",
-        },
+        collectionType: "prelims",
+        isPublic: false,
+        isPaid: false,
+        isFinalized: false,
       });
-      const collectionId = Number(createResponse.data?.id);
+      const collectionId = Number(created.id);
       if (!Number.isFinite(collectionId) || collectionId <= 0) {
         throw new Error("Prelims Test creation returned invalid ID.");
       }
@@ -2309,7 +2358,7 @@ export default function AIUserStudio({
       toast.error("Failed to create Prelims Test", { description: toError(error) });
       setIsAddingToCollection(false);
     }
-  }, [addItemsToCollection, newCollectionName]);
+  }, [addItemsToCollection, newCollectionName, profileId]);
 
   const handleAddToSelectedCollection = useCallback(() => {
     const collectionId = requireSpecificTargetCollection

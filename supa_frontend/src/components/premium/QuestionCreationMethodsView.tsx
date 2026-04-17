@@ -8,15 +8,17 @@ import { toast } from "sonner";
 
 import CategorySelector from "@/components/premium/ExamCategorySelector";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { hasQuizMasterGenerationSubscription } from "@/lib/accessControl";
+import { pdfsApi } from "@/lib/api";
+import { fetchAiExampleAnalyses, fetchUploadedPdfs } from "@/lib/aiData";
 import { legacyPremiumAiApi } from "@/lib/legacyPremiumAiApi";
 import { OUTPUT_LANGUAGE_OPTIONS, persistOutputLanguage, readOutputLanguage, type OutputLanguage } from "@/lib/outputLanguage";
 import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import type {
   PremiumAIContentType,
   PremiumAIExampleAnalysis,
-  PremiumAIExampleAnalysisListResponse,
-  PremiumContentItem,
   PremiumPreviewResponse,
   QuizKind,
   UploadedPDF,
@@ -499,6 +501,7 @@ const parseTextBlocksToDraftForms = (input: string): DraftForm[] => {
 
 export default function QuestionCreationMethodsView({ collectionId, collectionTitle }: QuestionCreationMethodsViewProps) {
   const { user, loading: authLoading } = useAuth();
+  const { profileId } = useProfile();
   const hasAiAccess = useMemo(() => hasQuizMasterGenerationSubscription(user), [user]);
 
   const [tab, setTab] = useState<TabKey>("manual");
@@ -552,9 +555,7 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
   const loadUploadedPdfs = useCallback(async () => {
     setLoadingUploadedPdfs(true);
     try {
-      const response = await legacyPremiumAiApi.get<UploadedPDF[]>("/premium-ai-quizzes/uploaded-pdfs");
-      const rows = Array.isArray(response.data) ? response.data : [];
-      setUploadedPdfs(rows);
+      setUploadedPdfs(await fetchUploadedPdfs());
     } catch {
       setUploadedPdfs([]);
     } finally {
@@ -565,13 +566,7 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
   const loadExampleAnalyses = useCallback(async () => {
     setLoadingExampleAnalyses(true);
     try {
-      const params = new URLSearchParams();
-      params.set("content_type", CONTENT_TYPE_MAP[quizKind]);
-      params.set("include_admin", "false");
-      const response = await legacyPremiumAiApi.get<PremiumAIExampleAnalysisListResponse>(
-        `/premium-ai-quizzes/example-analyses?${params.toString()}`,
-      );
-      const rows = Array.isArray(response.data?.items) ? response.data.items : [];
+      const rows = await fetchAiExampleAnalyses(CONTENT_TYPE_MAP[quizKind]);
       setExampleAnalyses(rows);
       setAiGenerateExampleAnalysisId((current) => {
         if (current && rows.some((item) => String(item.id) === current)) return current;
@@ -691,14 +686,14 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
     }
     setUploadingPdf(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await legacyPremiumAiApi.post<UploadedPDF>("/premium-ai-quizzes/upload-pdf", formData);
-      const uploaded = response.data;
+      const uploaded = await pdfsApi.upload(file) as { id?: number; pdf_id?: number; filename?: string };
+      const uploadedId = Number(uploaded.id ?? uploaded.pdf_id ?? 0);
       await loadUploadedPdfs();
       setAiGenerateSourceType("pdf");
-      setAiGenerateUploadedPdfId(String(uploaded.id));
-      toast.success(`PDF uploaded: ${uploaded.filename}`);
+      if (uploadedId > 0) {
+        setAiGenerateUploadedPdfId(String(uploadedId));
+      }
+      toast.success(`PDF uploaded: ${uploaded.filename || file.name}`);
     } catch (error: unknown) {
       toast.error("PDF upload failed", { description: toError(error) });
     } finally {
@@ -710,7 +705,7 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
     if (uploadingPdf || deletingPdfId !== null) return;
     setDeletingPdfId(pdfId);
     try {
-      await legacyPremiumAiApi.delete(`/premium-ai-quizzes/uploaded-pdfs/${pdfId}`);
+      await pdfsApi.delete(pdfId);
       setUploadedPdfs((prev) => prev.filter((row) => row.id !== pdfId));
       setAiGenerateUploadedPdfId((prev) => (prev === String(pdfId) ? "" : prev));
       toast.success("Uploaded PDF deleted.");
@@ -723,8 +718,13 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
 
   const refreshFinalCount = useCallback(async () => {
     try {
-      const response = await premiumApi.get<PremiumContentItem[]>("/content", { params: { collection_id: collectionId } });
-      setFinalCount(Array.isArray(response.data) ? response.data.length : 0);
+      const supabase = createClient();
+      const { count, error } = await supabase
+        .from("premium_collection_items")
+        .select("id", { count: "exact", head: true })
+        .eq("premium_collection_id", collectionId);
+      if (error) throw error;
+      setFinalCount(count ?? 0);
     } catch {
       setFinalCount(null);
     }
@@ -929,95 +929,116 @@ export default function QuestionCreationMethodsView({ collectionId, collectionTi
     const target = drafts.filter((row) => (scope === "all" ? true : row.selected));
     if (target.length === 0) return toast.error("No draft selected.");
     if (!ensureMetadataSelection()) return;
+    if (!profileId) return toast.error("Profile is not loaded yet.");
 
     setWorking(true);
     const saved = new Set<string>();
     let failed = 0;
+    const supabase = createClient();
 
-    for (const row of target) {
+    for (let rowIndex = 0; rowIndex < target.length; rowIndex += 1) {
+      const row = target[rowIndex];
       const effectiveCategoryIds =
         row.quiz_kind === quizKind && selectedCategoryIds.length > 0
           ? [...selectedCategoryIds]
           : [...row.category_ids];
-      const payload =
-        row.quiz_kind === "passage"
-          ? {
-              title: row.passage_title.trim() || "Passage Quiz",
-              type: "quiz_passage",
-              collection_id: collectionId,
-              data: {
-                passage_title: row.passage_title.trim() || "Passage Quiz",
-                passage_text: row.passage_text,
-                source_reference: row.source_reference || null,
-                source: row.source_reference || null,
-                exam_id: null,
-                category_ids: effectiveCategoryIds,
-                premium_passage_category_ids: effectiveCategoryIds,
-                alpha_cat_ids: parseIdsCsv(row.alpha_cat_ids_csv),
-                questions: [
-                  {
-                    question_statement: row.question_statement,
-                    supp_question_statement: row.supp_question_statement || null,
-                    supplementary_statement: row.supp_question_statement || null,
-                    statements_facts: parseFacts(row.statements_facts),
-                    statement_facts: parseFacts(row.statements_facts),
-                    question_prompt: row.question_prompt || null,
-                    options: [
-                      { label: "A", text: row.option_a },
-                      { label: "B", text: row.option_b },
-                      { label: "C", text: row.option_c },
-                      { label: "D", text: row.option_d },
-                      ...(row.option_e.trim() ? [{ label: "E", text: row.option_e.trim() }] : []),
-                    ],
-                    correct_answer: row.correct_answer,
-                    answer: row.correct_answer,
-                    explanation: row.explanation || null,
-                    explanation_text: row.explanation || null,
-                  },
-                ],
-              },
-            }
-          : {
-              title: row.question_statement.slice(0, 120) || "Quiz Question",
-              type: row.quiz_kind === "gk" ? "quiz_gk" : "quiz_maths",
-              collection_id: collectionId,
-              data: {
-                question_statement: row.question_statement,
-                supp_question_statement: row.supp_question_statement || null,
-                supplementary_statement: row.supp_question_statement || null,
-                statements_facts: parseFacts(row.statements_facts),
-                statement_facts: parseFacts(row.statements_facts),
-                question_prompt: row.question_prompt || null,
-                option_a: row.option_a,
-                option_b: row.option_b,
-                option_c: row.option_c,
-                option_d: row.option_d,
-                option_e: row.option_e || null,
-                options: [
-                  { label: "A", text: row.option_a },
-                  { label: "B", text: row.option_b },
-                  { label: "C", text: row.option_c },
-                  { label: "D", text: row.option_d },
-                  ...(row.option_e.trim() ? [{ label: "E", text: row.option_e.trim() }] : []),
-                ],
-                correct_answer: row.correct_answer,
-                answer: row.correct_answer,
-                explanation: row.explanation || null,
-                explanation_text: row.explanation || null,
-                source_reference: row.source_reference || null,
-                source: row.source_reference || null,
-                exam_id: null,
-                category_ids: effectiveCategoryIds,
-                premium_gk_category_ids: row.quiz_kind === "gk" ? effectiveCategoryIds : [],
-                premium_maths_category_ids: row.quiz_kind === "maths" ? effectiveCategoryIds : [],
-                alpha_cat_ids: parseIdsCsv(row.alpha_cat_ids_csv),
-              },
-            };
+      const options = [
+        { label: "A", text: row.option_a },
+        { label: "B", text: row.option_b },
+        { label: "C", text: row.option_c },
+        { label: "D", text: row.option_d },
+        ...(row.option_e.trim() ? [{ label: "E", text: row.option_e.trim() }] : []),
+      ].filter((option) => option.text.trim());
 
       try {
-        await premiumApi.post("/content", payload);
+        if (row.quiz_kind === "passage") {
+          const { data: passage, error: passageError } = await supabase
+            .from("passage_quizzes")
+            .insert({
+              passage_title: row.passage_title.trim() || "Passage Quiz",
+              passage_text: row.passage_text.trim() || row.question_statement,
+              source_reference: row.source_reference || null,
+              author_id: profileId,
+            })
+            .select("id")
+            .single();
+          if (passageError) throw passageError;
+
+          const passageId = Number(passage.id);
+          const { error: questionError } = await supabase.from("passage_questions").insert({
+            passage_quiz_id: passageId,
+            question_statement: row.question_statement,
+            supp_question_statement: row.supp_question_statement || null,
+            statements_facts: parseFacts(row.statements_facts),
+            question_prompt: row.question_prompt || null,
+            options,
+            correct_answer: row.correct_answer,
+            explanation: row.explanation || null,
+            category_id: effectiveCategoryIds[0] || null,
+            display_order: 0,
+          });
+          if (questionError) throw questionError;
+
+          if (effectiveCategoryIds.length > 0) {
+            const { error: categoryError } = await supabase.from("passage_quiz_categories").insert(
+              effectiveCategoryIds.map((categoryId) => ({
+                passage_quiz_id: passageId,
+                category_id: categoryId,
+              })),
+            );
+            if (categoryError) throw categoryError;
+          }
+
+          const { error: itemError } = await supabase.from("premium_collection_items").insert({
+            premium_collection_id: collectionId,
+            order_index: Date.now() + rowIndex,
+            item_type: "passage_quiz",
+            passage_quiz_id: passageId,
+            category_id: effectiveCategoryIds[0] || null,
+          });
+          if (itemError) throw itemError;
+        } else {
+          const { data: quiz, error: quizError } = await supabase
+            .from("quizzes")
+            .insert({
+              quiz_type: row.quiz_kind,
+              title: row.question_statement.slice(0, 120) || "Quiz Question",
+              question_statement: row.question_statement,
+              supp_question_statement: row.supp_question_statement || null,
+              statements_facts: parseFacts(row.statements_facts),
+              question_prompt: row.question_prompt || null,
+              options,
+              correct_answer: row.correct_answer,
+              explanation: row.explanation || null,
+              author_id: profileId,
+            })
+            .select("id")
+            .single();
+          if (quizError) throw quizError;
+
+          const quizId = Number(quiz.id);
+          if (effectiveCategoryIds.length > 0) {
+            const { error: categoryError } = await supabase.from("quiz_categories").insert(
+              effectiveCategoryIds.map((categoryId) => ({
+                quiz_id: quizId,
+                category_id: categoryId,
+              })),
+            );
+            if (categoryError) throw categoryError;
+          }
+
+          const { error: itemError } = await supabase.from("premium_collection_items").insert({
+            premium_collection_id: collectionId,
+            order_index: Date.now() + rowIndex,
+            item_type: row.quiz_kind === "maths" ? "maths_quiz" : "gk_quiz",
+            quiz_id: quizId,
+            category_id: effectiveCategoryIds[0] || null,
+          });
+          if (itemError) throw itemError;
+        }
         saved.add(row.local_id);
-      } catch {
+      } catch (error) {
+        console.error("Failed to publish draft", error);
         failed += 1;
       }
     }

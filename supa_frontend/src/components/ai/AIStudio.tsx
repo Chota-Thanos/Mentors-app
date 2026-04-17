@@ -8,14 +8,20 @@ import { ArrowDown, ArrowUp, Download, FileText, Loader2, Plus, RefreshCcw, Spar
 import { toast } from "sonner";
 
 import { legacyPremiumAiApi } from "@/lib/legacyPremiumAiApi";
+import { pdfsApi } from "@/lib/api";
 import { premiumApi } from "@/lib/premiumApi";
 import { OUTPUT_LANGUAGE_OPTIONS, persistOutputLanguage, readOutputLanguage, type OutputLanguage } from "@/lib/outputLanguage";
+import {
+  deleteAiExampleAnalysis,
+  fetchAiExampleAnalyses,
+  fetchUploadedPdfs,
+  upsertAiExampleAnalysis,
+} from "@/lib/aiData";
 import { createClient } from "@/lib/supabase/client";
 import type {
   AIProvider,
   PremiumAIContentType,
   PremiumAIExampleAnalysis,
-  PremiumAIExampleAnalysisListResponse,
   ConvertDraftToPremiumQuizResponse,
   PremiumAIDraftQuiz,
   PremiumAIQuizInstruction,
@@ -407,15 +413,10 @@ export default function AIStudio() {
   }, [selectedContentType, selectedInstructionId]);
 
   const loadAnalyses = useCallback(async () => {
-    const params = new URLSearchParams();
-    params.set("content_type", selectedContentType);
-    params.set("include_admin", "true");
-    const response = await legacyPremiumAiApi.get<PremiumAIExampleAnalysisListResponse>(
-      `/premium-ai-quizzes/example-analyses?${params.toString()}`,
-    );
-    setAnalyses(response.data?.items || []);
-    if (response.data?.items?.length && !response.data.items.some((item) => String(item.id) === selectedAnalysisId)) {
-      setSelectedAnalysisId(String(response.data.items[0].id));
+    const rows = await fetchAiExampleAnalyses(selectedContentType);
+    setAnalyses(rows);
+    if (rows.length && !rows.some((item) => String(item.id) === selectedAnalysisId)) {
+      setSelectedAnalysisId(String(rows[0].id));
     }
   }, [selectedContentType, selectedAnalysisId]);
 
@@ -429,8 +430,7 @@ export default function AIStudio() {
         setSelectedUploadedPdfId("");
         return;
       }
-      const response = await legacyPremiumAiApi.get<UploadedPDF[]>("/premium-ai-quizzes/uploaded-pdfs");
-      const items = Array.isArray(response.data) ? response.data : [];
+      const items = await fetchUploadedPdfs();
       setUploadedPdfs(items);
       setSelectedUploadedPdfId((prev) => {
         if (prev && items.some((item) => String(item.id) === prev)) return prev;
@@ -544,12 +544,12 @@ export default function AIStudio() {
       };
 
       if (selectedAnalysisId && selectedAnalysis) {
-        await legacyPremiumAiApi.put(`/premium-ai-quizzes/example-analyses/${selectedAnalysis.id}`, payload);
+        await upsertAiExampleAnalysis(selectedContentType, payload, selectedAnalysis.id);
         toast.success("Example analysis updated.");
       } else {
-        const created = await legacyPremiumAiApi.post<PremiumAIExampleAnalysis>("/premium-ai-quizzes/example-analyses", payload);
+        const created = await upsertAiExampleAnalysis(selectedContentType, payload);
         toast.success("Example analysis created.");
-        setSelectedAnalysisId(String(created.data.id));
+        setSelectedAnalysisId(String(created.id));
       }
 
       await loadAnalyses();
@@ -566,7 +566,7 @@ export default function AIStudio() {
     if (!selectedAnalysis) return;
     if (!window.confirm(`Delete analysis \"${selectedAnalysis.title}\"?`)) return;
     try {
-      await legacyPremiumAiApi.delete(`/premium-ai-quizzes/example-analyses/${selectedAnalysis.id}`);
+      await deleteAiExampleAnalysis(selectedAnalysis.id);
       toast.success("Example analysis deleted.");
       setSelectedAnalysisId("");
       await loadAnalyses();
@@ -591,18 +591,14 @@ export default function AIStudio() {
     }
     setUploadingPdf(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await legacyPremiumAiApi.post<UploadedPDF>(
-        "/premium-ai-quizzes/upload-pdf",
-        formData,
-        { params: { use_ocr: ocrOnUpload } },
-      );
-      const uploaded = response.data;
+      const uploaded = await pdfsApi.upload(file) as { id?: number; pdf_id?: number; filename?: string; used_ocr?: boolean };
+      const uploadedId = Number(uploaded.id ?? uploaded.pdf_id ?? 0);
       await loadUploadedPdfs();
-      setSelectedUploadedPdfId(String(uploaded.id));
+      if (uploadedId > 0) {
+        setSelectedUploadedPdfId(String(uploadedId));
+      }
       setContentSourceType("pdf");
-      toast.success(`PDF uploaded: ${uploaded.filename}`, {
+      toast.success(`PDF uploaded: ${uploaded.filename || file.name}`, {
         description: uploaded.used_ocr
           ? "OCR was used to improve extraction."
           : "Text extraction is ready.",
@@ -619,7 +615,7 @@ export default function AIStudio() {
     if (!window.confirm(`Delete "${pdf.filename}"?`)) return;
     setDeletingPdfId(pdf.id);
     try {
-      await legacyPremiumAiApi.delete(`/premium-ai-quizzes/uploaded-pdfs/${pdf.id}`);
+      await pdfsApi.delete(pdf.id);
       setUploadedPdfs((prev) => prev.filter((item) => item.id !== pdf.id));
       setSelectedUploadedPdfId((prev) => (prev === String(pdf.id) ? "" : prev));
       toast.success("Uploaded PDF deleted.");

@@ -5,13 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, ArrowRight, Loader2 } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
+import { createClient } from "@/lib/supabase/client";
 import { useExamContext } from "@/context/ExamContext";
 import {
   DASHBOARD_CONTENT_TYPES,
   DASHBOARD_SECTION_META,
   type DashboardContentType,
 } from "@/lib/dashboardSections";
-import { premiumApi } from "@/lib/premiumApi";
 import type {
   PerformanceAuditMainsCategory,
   PerformanceAuditMainsMetrics,
@@ -177,6 +178,110 @@ function buildMainsSuggestions(
     ),
     fallbackHref: "/programs/mains",
     fallbackLabel: "Open mains programs",
+  };
+}
+
+function emptyQuizSource(sourceKind: PerformanceAuditSourceKind) {
+  return {
+    source_kind: sourceKind,
+    total_questions: 0,
+    attempted_questions: 0,
+    correct_count: 0,
+    incorrect_count: 0,
+    unanswered_count: 0,
+    percentage: 0,
+    first_level_categories: [],
+  };
+}
+
+function emptyMainsSource(sourceKind: PerformanceAuditSourceKind) {
+  return {
+    source_kind: sourceKind,
+    total_questions: 0,
+    total_score: 0,
+    max_total_score: 0,
+    percentage: 0,
+    first_level_categories: [],
+  };
+}
+
+function buildAuditPayload(rows: any[]): PerformanceAuditOverviewPayload {
+  const generatedAt = rows
+    .map((row) => String(row.updated_at || ""))
+    .filter(Boolean)
+    .sort()
+    .at(-1) || new Date().toISOString();
+
+  const quizSection = (contentType: Exclude<DashboardContentType, "mains">): PerformanceAuditQuizSection => {
+    const source = emptyQuizSource("program") as PerformanceAuditQuizSection["sources"]["program"];
+    const domainRows = rows.filter((row) => row.quiz_domain === contentType);
+    for (const row of domainRows) {
+      const total = Number(row.total_questions || 0);
+      const skipped = Number(row.skipped_count || 0);
+      const correct = Number(row.correct_count || 0);
+      const incorrect = Number(row.incorrect_count || 0);
+      source.total_questions += total;
+      source.attempted_questions += Math.max(total - skipped, 0);
+      source.correct_count += correct;
+      source.incorrect_count += incorrect;
+      source.unanswered_count += skipped;
+      source.first_level_categories.push({
+        id: row.category_id ?? null,
+        name: row.category?.name || "Uncategorised",
+        has_children: false,
+        total_questions: total,
+        attempted_questions: Math.max(total - skipped, 0),
+        correct_count: correct,
+        incorrect_count: incorrect,
+        unanswered_count: skipped,
+        percentage: Number(row.accuracy || 0),
+      });
+    }
+    source.percentage = source.attempted_questions > 0
+      ? (source.correct_count / source.attempted_questions) * 100
+      : 0;
+    return {
+      content_type: contentType,
+      label: DASHBOARD_SECTION_META[contentType].label,
+      is_quiz: true,
+      sources: { ai: emptyQuizSource("ai") as PerformanceAuditQuizSection["sources"]["ai"], program: source },
+    };
+  };
+
+  const mainsSource = emptyMainsSource("program") as PerformanceAuditMainsSection["sources"]["program"];
+  for (const row of rows.filter((item) => item.quiz_domain === "mains")) {
+    const total = Number(row.total_questions || 0);
+    const percentage = Number(row.accuracy || 0);
+    mainsSource.total_questions += total;
+    mainsSource.max_total_score += total * 10;
+    mainsSource.total_score += (percentage / 100) * total * 10;
+    mainsSource.first_level_categories.push({
+      id: row.category_id ?? null,
+      name: row.category?.name || "Uncategorised",
+      has_children: false,
+      total_questions: total,
+      total_score: (percentage / 100) * total * 10,
+      max_total_score: total * 10,
+      percentage,
+    });
+  }
+  mainsSource.percentage = mainsSource.max_total_score > 0
+    ? (mainsSource.total_score / mainsSource.max_total_score) * 100
+    : 0;
+
+  return {
+    generated_at: generatedAt,
+    sections: {
+      gk: quizSection("gk"),
+      maths: quizSection("maths"),
+      passage: quizSection("passage"),
+      mains: {
+        content_type: "mains",
+        label: DASHBOARD_SECTION_META.mains.label,
+        is_quiz: false,
+        sources: { ai: emptyMainsSource("ai") as PerformanceAuditMainsSection["sources"]["ai"], program: mainsSource },
+      },
+    },
   };
 }
 
@@ -582,47 +687,68 @@ export default function LearnerPerformanceAudit() {
   const [mainsProgramRows, setMainsProgramRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [error, setError] = useState("");
 
+  const { profileId } = useProfile();
+
   useEffect(() => {
-    if (authLoading || !isAuthenticated) return;
+    if (authLoading || !isAuthenticated || !profileId) return;
     let active = true;
 
+    const supabase = createClient();
+
+    const fetchAudit = supabase
+      .from("user_performance_snapshots")
+      .select("*, category:categories(id,name,domain,parent_id)")
+      .eq("user_id", profileId)
+      .order("updated_at", { ascending: false });
+
+    const fetchPrograms = async (kind: string) => {
+      const q = supabase
+        .from("test_series")
+        .select("id, name, description, series_kind, cover_image_url, price, is_paid, is_public, is_active")
+        .eq("series_kind", kind)
+        .eq("is_public", true)
+        .eq("is_active", true)
+        .limit(120);
+      
+      const { data } = await q;
+      if (!data) return [];
+      
+      return data.map((series) => ({
+        series: {
+          ...series,
+          title: series.name,
+          access_type: Number(series.price || 0) > 0 ? "paid" : "free",
+          exam_ids: [],
+        },
+        category_ids: [],
+        category_labels: [],
+        provider_profile: null,
+      })) as unknown as TestSeriesDiscoverySeries[];
+    };
+
     Promise.allSettled([
-      premiumApi.get<PerformanceAuditOverviewPayload>("/user/performance-audit", {
-        params: { exam_id: globalExamId || undefined },
-      }),
-      premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", {
-        params: { limit: 120, series_kind: "quiz", exam_id: globalExamId || undefined },
-      }),
-      premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", {
-        params: { limit: 120, series_kind: "mains", exam_id: globalExamId || undefined },
-      }),
+      fetchAudit,
+      fetchPrograms("prelims"),
+      fetchPrograms("mains")
     ]).then(([auditResult, quizProgramsResult, mainsProgramsResult]) => {
       if (!active) return;
 
       if (auditResult.status === "fulfilled") {
-        setPayload(auditResult.value.data);
+        setPayload(buildAuditPayload(auditResult.value.data || []));
         setError("");
       } else {
-        const err = auditResult.reason;
-        const detail =
-          typeof err === "object" &&
-          err !== null &&
-          "response" in err &&
-          (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
-            ? String((err as { response?: { data?: { detail?: string } } }).response?.data?.detail)
-            : "Failed to load performance audit.";
-        setError(detail);
+        setError("Failed to load performance audit.");
         setPayload(null);
       }
 
       setQuizProgramRows(
-        quizProgramsResult.status === "fulfilled" && Array.isArray(quizProgramsResult.value.data)
-          ? quizProgramsResult.value.data.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId))
+        quizProgramsResult.status === "fulfilled" 
+          ? quizProgramsResult.value.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId))
           : [],
       );
       setMainsProgramRows(
-        mainsProgramsResult.status === "fulfilled" && Array.isArray(mainsProgramsResult.value.data)
-          ? mainsProgramsResult.value.data.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId))
+        mainsProgramsResult.status === "fulfilled" 
+          ? mainsProgramsResult.value.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId))
           : [],
       );
     });
@@ -630,7 +756,7 @@ export default function LearnerPerformanceAudit() {
     return () => {
       active = false;
     };
-  }, [authLoading, globalExamId, isAuthenticated]);
+  }, [authLoading, globalExamId, isAuthenticated, profileId]);
 
   const loading = authLoading || (isAuthenticated && !payload && !error);
   const sections = useMemo(() => {

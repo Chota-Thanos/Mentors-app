@@ -32,18 +32,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [loading, setLoading] = useState(true);
     const supabase = createClient();
 
+    const enrichUserWithProfileRole = async (nextUser: AuthUser | null): Promise<AuthUser | null> => {
+        if (!nextUser?.id) return nextUser;
+        try {
+            const { data: profile } = await supabase
+                .from("profiles")
+                .select("role")
+                .eq("auth_user_id", nextUser.id)
+                .maybeSingle();
+
+            if (!profile?.role) return nextUser;
+            return {
+                ...nextUser,
+                role: String(profile.role),
+            };
+        } catch {
+            return nextUser;
+        }
+    };
+
     useEffect(() => {
         const initAuth = async () => {
             const { data: { session } } = await supabase.auth.getSession();
-            setUser((session?.user as AuthUser | null) ?? null);
+            const nextUser = await enrichUserWithProfileRole((session?.user as AuthUser | null) ?? null);
+            setUser(nextUser);
             setLoading(false);
         };
 
         initAuth();
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            setUser((session?.user as AuthUser | null) ?? null);
-            setLoading(false);
+            void (async () => {
+                const nextUser = await enrichUserWithProfileRole((session?.user as AuthUser | null) ?? null);
+                setUser(nextUser);
+                setLoading(false);
+            })();
         });
 
         return () => {

@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import axios from "axios";
 import { toast } from "sonner";
 
-import { premiumApiRoot } from "@/lib/premiumApi";
 import type { PremiumCategory, QuizKind } from "@/types/premium";
 
 interface CategorySelectorProps {
@@ -31,6 +29,24 @@ function flattenCategories(nodes: PremiumCategory[], depth = 0): FlatCategoryNod
   return output;
 }
 
+function buildCategoryTree(rows: PremiumCategory[]): PremiumCategory[] {
+  const byId = new Map<number, PremiumCategory>();
+  const roots: PremiumCategory[] = [];
+  for (const row of rows) {
+    byId.set(row.id, { ...row, children: [] });
+  }
+  for (const row of byId.values()) {
+    const parentId = row.parent_id ?? null;
+    const parent = parentId ? byId.get(parentId) : null;
+    if (parent) {
+      parent.children = [...(parent.children || []), row];
+    } else {
+      roots.push(row);
+    }
+  }
+  return roots;
+}
+
 export default function CategorySelector({
   quizKind,
   selectedCategoryIds,
@@ -45,25 +61,27 @@ export default function CategorySelector({
     const loadCategories = async () => {
       setIsLoadingCategories(true);
       try {
-        const quizType = `premium_${quizKind}`;
-        const response = await axios.get<PremiumCategory[]>(
-          `${premiumApiRoot}/api/v1/premium-categories/${quizType}/`,
-          {
-            params: {
-              hierarchical: true,
-            },
-          },
-        );
-        setCategories(response.data || []);
+        const { createClient } = await import("@/lib/supabase/client");
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from("categories")
+          .select("*")
+          .eq("domain", quizKind)
+          .eq("is_active", true)
+          .order("display_order", { ascending: true })
+          .order("name", { ascending: true });
+
+        if (error) throw error;
+        setCategories(buildCategoryTree((data || []) as unknown as PremiumCategory[]));
       } catch (error: unknown) {
-        const description = axios.isAxiosError(error) ? error.message : "Unknown error";
+        const description = error instanceof Error ? error.message : "Unknown error";
         toast.error("Failed to load categories", { description });
       } finally {
         setIsLoadingCategories(false);
       }
     };
 
-    loadCategories();
+    void loadCategories();
   }, [quizKind]);
 
   const flatCategories = useMemo(() => flattenCategories(categories), [categories]);

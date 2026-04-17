@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 
-import { premiumApi, premiumApiRoot } from "@/lib/premiumApi";
-import ContentItemPicker from "@/components/premium/ContentItemPicker";
+import { useProfile } from "@/context/ProfileContext";
+import { fetchPremiumCategoryTree } from "@/lib/aiData";
+import { pdfsApi } from "@/lib/api";
+import { createClient } from "@/lib/supabase/client";
 import type { CategoryAISource, PremiumCategory, QuizKind } from "@/types/premium";
 
 type FlatCategoryNode = {
@@ -14,10 +16,10 @@ type FlatCategoryNode = {
   depth: number;
 };
 
-type SourceKind = "text" | "url" | "content_item";
+type SourceKind = "text" | "url";
 
 const QUIZ_TYPES: QuizKind[] = ["gk", "maths", "passage"];
-const SOURCE_KINDS: SourceKind[] = ["text", "url", "content_item"];
+const SOURCE_KINDS: SourceKind[] = ["text", "url"];
 
 function flattenCategories(nodes: PremiumCategory[], depth = 0): FlatCategoryNode[] {
   const output: FlatCategoryNode[] = [];
@@ -35,13 +37,12 @@ function flattenCategories(nodes: PremiumCategory[], depth = 0): FlatCategoryNod
 }
 
 function toErrorMessage(error: unknown): string {
-  if (!axios.isAxiosError(error)) {
-    return "Unknown error";
-  }
-  if (typeof error.response?.data?.detail === "string") {
+  if (axios.isAxiosError(error) && typeof error.response?.data?.detail === "string") {
     return error.response.data.detail;
   }
-  return error.message;
+  if (axios.isAxiosError(error)) return error.message;
+  if (error instanceof Error) return error.message;
+  return "Unknown error";
 }
 
 function parseMetaJson(raw: string): Record<string, unknown> | null {
@@ -67,10 +68,36 @@ function sourceKindHint(kind: SourceKind): string {
   if (kind === "url") {
     return "Provide source_url. Optional fallback source_text can be added.";
   }
-  return "Provide content_item_id. Optional source_text can be a fallback.";
+  return "Upload PDFs from the PDF source section.";
+}
+
+function sourceFromJoin(row: unknown, categoryId: number): CategoryAISource | null {
+  const record = row && typeof row === "object" ? (row as Record<string, unknown>) : {};
+  const sourceValue = record.category_ai_sources;
+  const source = Array.isArray(sourceValue)
+    ? (sourceValue[0] as Record<string, unknown> | undefined)
+    : (sourceValue as Record<string, unknown> | undefined);
+  if (!source || typeof source !== "object") return null;
+  return {
+    id: Number(source.id || 0),
+    category_id: categoryId,
+    source_kind: (String(source.source_kind || "text") as CategoryAISource["source_kind"]),
+    title: source.title ? String(source.title) : null,
+    source_url: source.source_url ? String(source.source_url) : null,
+    source_text: source.source_text ? String(source.source_text) : null,
+    source_content_html: source.source_content_html ? String(source.source_content_html) : null,
+    priority: Number(source.priority || 0),
+    is_active: source.is_active !== false,
+    meta: source.meta && typeof source.meta === "object" ? (source.meta as Record<string, unknown>) : {},
+    created_by: source.created_by ? String(source.created_by) : null,
+    created_at: String(source.created_at || ""),
+    updated_at: source.updated_at ? String(source.updated_at) : null,
+  };
 }
 
 export default function CategoryAISourceManager() {
+  const { profileId } = useProfile();
+  const supabase = useMemo(() => createClient(), []);
   const [quizType, setQuizType] = useState<QuizKind>("gk");
   const [activeOnlySources, setActiveOnlySources] = useState(false);
 
@@ -91,14 +118,12 @@ export default function CategoryAISourceManager() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [sourceText, setSourceText] = useState("");
   const [sourceContentHtml, setSourceContentHtml] = useState("");
-  const [contentItemId, setContentItemId] = useState("");
   const [priority, setPriority] = useState("0");
   const [isActive, setIsActive] = useState(true);
   const [metaJson, setMetaJson] = useState("{}");
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
   const [usePdfOcr, setUsePdfOcr] = useState(true);
 
-  const quizTypeKey = `premium_${quizType}`;
   const flatCategories = useMemo(() => flattenCategories(categories), [categories]);
   const selectedCategory = useMemo(
     () => flatCategories.find((item) => String(item.id) === selectedCategoryId) || null,
@@ -112,7 +137,6 @@ export default function CategoryAISourceManager() {
     setSourceUrl("");
     setSourceText("");
     setSourceContentHtml("");
-    setContentItemId("");
     setPriority("0");
     setIsActive(true);
     setMetaJson("{}");
@@ -121,16 +145,9 @@ export default function CategoryAISourceManager() {
   }, []);
 
   const loadCategories = useCallback(async () => {
-    const response = await premiumApi.get<PremiumCategory[]>(
-      `${premiumApiRoot}/api/v1/premium-categories/${quizTypeKey}/`,
-      {
-        params: {
-          hierarchical: true,
-        },
-      },
-    );
-    setCategories(Array.isArray(response.data) ? response.data : []);
-  }, [quizTypeKey]);
+    const rows = await fetchPremiumCategoryTree(quizType);
+    setCategories(Array.isArray(rows) ? rows : []);
+  }, [quizType]);
 
   const refreshContext = useCallback(async () => {
     setIsLoadingContext(true);
@@ -146,17 +163,25 @@ export default function CategoryAISourceManager() {
   const loadSources = useCallback(async (categoryId: number) => {
     setIsLoadingSources(true);
     try {
-      const response = await premiumApi.get<CategoryAISource[]>(`/categories/${categoryId}/ai-sources`, {
-        params: { active_only: activeOnlySources },
-      });
-      setSources(Array.isArray(response.data) ? response.data : []);
+      let query = supabase
+        .from("category_ai_source_categories")
+        .select("category_ai_sources(id,source_kind,title,source_url,source_text,source_content_html,priority,is_active,meta,created_by,created_at,updated_at)")
+        .eq("category_id", categoryId);
+      const { data, error } = await query;
+      if (error) throw error;
+      const rows = (data || [])
+        .map((row) => sourceFromJoin(row, categoryId))
+        .filter((item): item is CategoryAISource => Boolean(item))
+        .filter((item) => !activeOnlySources || item.is_active)
+        .sort((left, right) => right.priority - left.priority);
+      setSources(rows);
     } catch (error: unknown) {
       toast.error("Failed to load category sources", { description: toErrorMessage(error) });
       setSources([]);
     } finally {
       setIsLoadingSources(false);
     }
-  }, [activeOnlySources]);
+  }, [activeOnlySources, supabase]);
 
   useEffect(() => {
     setIsLoadingContext(true);
@@ -190,12 +215,11 @@ export default function CategoryAISourceManager() {
 
   const startEditSource = (item: CategoryAISource) => {
     setEditingSourceId(item.id);
-    setSourceKind(item.source_kind);
+    setSourceKind(item.source_kind === "url" ? "url" : "text");
     setTitle(item.title || "");
     setSourceUrl(item.source_url || "");
     setSourceText(item.source_text || "");
     setSourceContentHtml(item.source_content_html || "");
-    setContentItemId(item.content_item_id ? String(item.content_item_id) : "");
     setPriority(String(item.priority ?? 0));
     setIsActive(Boolean(item.is_active));
     setMetaJson(JSON.stringify(item.meta || {}, null, 2));
@@ -235,13 +259,6 @@ export default function CategoryAISourceManager() {
       return;
     }
 
-    const contentItemIdValue = contentItemId.trim();
-    const parsedContentItemId = contentItemIdValue ? Number(contentItemIdValue) : null;
-    if (contentItemIdValue && (!Number.isInteger(parsedContentItemId) || (parsedContentItemId || 0) <= 0)) {
-      toast.error("content_item_id must be a positive integer");
-      return;
-    }
-
     const trimmedSourceText = sourceText.trim();
     const trimmedSourceHtml = sourceContentHtml.trim();
     const trimmedSourceUrl = sourceUrl.trim();
@@ -254,18 +271,12 @@ export default function CategoryAISourceManager() {
       toast.error("URL source requires source_url");
       return;
     }
-    if (sourceKind === "content_item" && !parsedContentItemId && !trimmedSourceText) {
-      toast.error("Content-item source requires content_item_id");
-      return;
-    }
-
     const payload = {
       source_kind: sourceKind,
       title: title.trim() || null,
       source_url: trimmedSourceUrl || null,
       source_text: trimmedSourceText || null,
       source_content_html: trimmedSourceHtml || null,
-      content_item_id: parsedContentItemId,
       priority: Math.trunc(numericPriority),
       is_active: isActive,
       meta: parsedMeta,
@@ -274,10 +285,23 @@ export default function CategoryAISourceManager() {
     setIsSavingSource(true);
     try {
       if (editingSourceId) {
-        await premiumApi.put(`/categories/${categoryId}/ai-sources/${editingSourceId}`, payload);
+        const { error } = await supabase
+          .from("category_ai_sources")
+          .update(payload)
+          .eq("id", editingSourceId);
+        if (error) throw error;
         toast.success(`Source #${editingSourceId} updated`);
       } else {
-        await premiumApi.post(`/categories/${categoryId}/ai-sources`, payload);
+        const { data: created, error: sourceError } = await supabase
+          .from("category_ai_sources")
+          .insert({ ...payload, created_by: profileId })
+          .select("id")
+          .single();
+        if (sourceError) throw sourceError;
+        const { error: linkError } = await supabase
+          .from("category_ai_source_categories")
+          .insert({ source_id: Number(created.id), category_id: categoryId });
+        if (linkError) throw linkError;
         toast.success("Source created");
       }
       resetSourceForm();
@@ -306,25 +330,35 @@ export default function CategoryAISourceManager() {
       return;
     }
 
-    const formData = new FormData();
-    for (const file of pdfFiles) {
-      formData.append("files", file);
-    }
-
     setIsUploadingPdfSources(true);
     try {
-      const response = await premiumApi.post<CategoryAISource[]>(
-        `/categories/${categoryId}/ai-sources/upload-pdfs`,
-        formData,
-        {
-          params: {
-            use_ocr: usePdfOcr,
-            priority: Math.trunc(numericPriority),
-            is_active: isActive,
+      const uploadedRows = await Promise.all(pdfFiles.map((file) => pdfsApi.upload(file) as Promise<Record<string, unknown>>));
+      const { data: createdSources, error: sourceError } = await supabase.from("category_ai_sources").insert(
+        uploadedRows.map((row, index) => ({
+          source_kind: "pdf",
+          title: String(row.filename || pdfFiles[index]?.name || "PDF source"),
+          source_pdf_id: Number(row.id || 0) || null,
+          source_text: row.extracted_text ? String(row.extracted_text) : null,
+          priority: Math.trunc(numericPriority),
+          is_active: isActive,
+          created_by: profileId,
+          meta: {
+            filename: String(row.filename || pdfFiles[index]?.name || ""),
+            used_ocr: usePdfOcr,
+            source_asset_kind: "pdf",
           },
-        },
-      );
-      const createdCount = Array.isArray(response.data) ? response.data.length : 0;
+        })),
+      ).select("id");
+      if (sourceError) throw sourceError;
+
+      const createdIds = (createdSources || []).map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0);
+      if (createdIds.length > 0) {
+        const { error: linkError } = await supabase.from("category_ai_source_categories").insert(
+          createdIds.map((sourceId) => ({ source_id: sourceId, category_id: categoryId })),
+        );
+        if (linkError) throw linkError;
+      }
+      const createdCount = createdIds.length;
       toast.success(createdCount > 0 ? `Added ${createdCount} PDF source(s)` : "PDF source upload completed");
       setPdfFiles([]);
       await loadSources(categoryId);
@@ -346,7 +380,8 @@ export default function CategoryAISourceManager() {
     }
     setDeletingSourceId(item.id);
     try {
-      await premiumApi.delete(`/categories/${categoryId}/ai-sources/${item.id}`);
+      const { error } = await supabase.from("category_ai_sources").delete().eq("id", item.id);
+      if (error) throw error;
       toast.success(`Source #${item.id} deleted`);
       if (editingSourceId === item.id) {
         resetSourceForm();
@@ -456,7 +491,7 @@ export default function CategoryAISourceManager() {
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Priority</label>
             <input
@@ -464,16 +499,6 @@ export default function CategoryAISourceManager() {
               value={priority}
               onChange={(event) => setPriority(event.target.value)}
               className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">content_item_id</label>
-            <input
-              value={contentItemId}
-              onChange={(event) => setContentItemId(event.target.value)}
-              className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
-              placeholder="Optional for content_item kind"
             />
           </div>
 
@@ -488,13 +513,6 @@ export default function CategoryAISourceManager() {
             </label>
           </div>
         </div>
-
-        <ContentItemPicker
-          value={contentItemId}
-          onChange={setContentItemId}
-          quizKind={quizType}
-          label="Search and select content_item_id"
-        />
 
         <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -640,11 +658,6 @@ export default function CategoryAISourceManager() {
                   </span>
                   {assetKind === "pdf" ? (
                     <span className="rounded bg-indigo-100 px-2 py-0.5 text-indigo-700">pdf</span>
-                  ) : null}
-                  {item.content_item_id ? (
-                    <span className="rounded bg-purple-100 px-2 py-0.5 text-purple-700">
-                      content_item_id {item.content_item_id}
-                    </span>
                   ) : null}
                 </div>
                 {pdfFilename ? (

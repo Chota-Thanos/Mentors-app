@@ -463,7 +463,7 @@ export default function TestSeriesCatalogView({
   description,
 }: TestSeriesCatalogViewProps) {
   const { globalExamId } = useExamContext();
-  const [seriesRows, setSeriesRows] = useState<TestSeriesDiscoverySeries[]>([]);
+  const [seriesRows, setSeriesRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -482,29 +482,72 @@ export default function TestSeriesCatalogView({
     const loadRows = async () => {
       setLoading(true);
       try {
-        const params: Record<string, unknown> = {
-          limit: 200,
-          series_kind: isMains ? "mains" : "quiz",
-        };
+        const { createClient } = await import("@/lib/supabase/client");
+        const supabase = createClient();
 
-        if (search.trim()) params.search = search.trim();
-        if (categoryId.trim()) params.category_id = Number(categoryId);
-        if (accessType !== "all") params.access_type = accessType;
-        if (onlyFree) params.only_free = true;
-        if (minPrice.trim()) params.min_price = Number(minPrice);
-        if (maxPrice.trim()) params.max_price = Number(maxPrice);
+        let query = supabase
+          .from("test_series")
+          .select(`
+            id, name, description, price, is_paid, cover_image_url, series_kind, created_at,
+            creator:profiles(display_name),
+            program_units(id)
+          `)
+          .eq("is_active", true)
+          .eq("is_public", true);
+
+        if (isMains) {
+          query = query.eq("series_kind", "mains");
+        } else {
+          query = query.neq("series_kind", "mains");
+        }
+
+        if (search.trim()) {
+          query = query.ilike("name", `%${search.trim()}%`);
+        }
+        if (accessType === "free" || onlyFree) {
+          query = query.eq("is_paid", false);
+        } else if (accessType === "paid") {
+          query = query.eq("is_paid", true);
+        }
         
-        // Pass the global exam context to backend
-        if (globalExamId !== null) params.exam_id = globalExamId;
+        if (minPrice.trim() && !isNaN(Number(minPrice))) {
+          query = query.gte("price", Number(minPrice));
+        }
+        if (maxPrice.trim() && !isNaN(Number(maxPrice))) {
+          query = query.lte("price", Number(maxPrice));
+        }
 
-        const response = await premiumApi.get<TestSeriesDiscoverySeries[]>("/programs-discovery/series", { params });
+        const { data, error } = await query;
+        if (error) throw error;
+        
         if (!active) return;
-        const rows = Array.isArray(response.data) ? response.data : [];
-        setSeriesRows(rows.filter((row) => matchesExamIds(row.series.exam_ids, globalExamId)));
+        
+        const mappedRows = (data || []).map((row: any) => ({
+          series: {
+             id: row.id,
+             title: row.name || "",
+             description: row.description || "",
+             price: Number(row.price || 0),
+             access_type: row.is_paid ? "paid" : "free",
+             cover_image_url: row.cover_image_url || "",
+             test_count: row.program_units?.length || 0,
+             created_at: row.created_at,
+             exam_ids: [],
+          },
+          provider_profile: {
+             display_name: row.creator?.display_name || "Faculty",
+             is_verified: false,
+             meta: {},
+          },
+          category_labels: [row.series_kind],
+          category_ids: [],
+        }));
+
+        setSeriesRows(mappedRows);
       } catch (error: unknown) {
         if (!active) return;
         setSeriesRows([]);
-        toast.error("Failed to load programs", { description: toError(error) });
+        toast.error("Failed to load programs", { description: String((error as any).message || error) });
       } finally {
         if (active) setLoading(false);
       }
@@ -520,13 +563,13 @@ export default function TestSeriesCatalogView({
   const categoryOptions = useMemo(() => {
     const map = new Map<number, string>();
     for (const row of seriesRows) {
-      row.category_ids.forEach((id, index) => {
+      row.category_ids.forEach((id: number, index: number) => {
         const label = row.category_labels[index] || `Category ${id}`;
         if (!map.has(id)) map.set(id, label);
       });
     }
 
-    return [...map.entries()]
+    return Array.from(map.entries())
       .map(([id, label]) => ({ id, label }))
       .sort((left, right) => left.label.localeCompare(right.label));
   }, [seriesRows]);

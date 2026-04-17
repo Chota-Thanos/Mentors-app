@@ -1,10 +1,11 @@
 "use client";
 
-import axios from "axios";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { useProfile } from "@/context/ProfileContext";
+import { dbMentorshipMode } from "@/lib/mentorshipV2";
 import {
   buildAvailabilityDays,
   buildSlotBatchPayload,
@@ -13,7 +14,7 @@ import {
   mentorshipCallLabel,
   slotIdsForDate,
 } from "@/lib/mentorAvailability";
-import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import { toNullableRichText } from "@/lib/richText";
 import type {
   MentorshipCallProvider,
@@ -39,9 +40,7 @@ const WEEKDAY_OPTIONS = [
 ];
 
 const toError = (error: unknown): string => {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
+  return error instanceof Error ? error.message : "Unknown error";
 };
 
 const addDays = (days: number): string => {
@@ -93,27 +92,29 @@ export default function MentorshipAvailabilityManager({
   const [title, setTitle] = useState("Mentorship session");
   const [description, setDescription] = useState("");
   const [meetingLink, setMeetingLink] = useState("");
+  const { profile, profileId } = useProfile();
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       setLoading(true);
+      const supabase = createClient();
       try {
-        const [profileResponse, optionsResponse] = await Promise.all([
-          premiumApi.get<ProfessionalProfile>("/profiles/me").catch((error) => {
-            if (axios.isAxiosError(error) && error.response?.status === 404) return null;
-            throw error;
-          }),
-          premiumApi.get<ProfessionalSeriesOptions>("/profiles/me/series-options").catch(() => null),
-        ]);
+        if (!profileId) throw new Error("Profile is not loaded yet.");
+
+        const { data: profileData } = await supabase
+          .from("creator_profiles")
+          .select("*")
+          .eq("user_id", profileId)
+          .maybeSingle();
 
         if (!active) return;
 
-        const profile = profileResponse?.data || null;
-        const meta = ((profile?.meta as Record<string, unknown>) || {});
-        const resolvedRole = String(profile?.role || "mentor").trim() || "mentor";
+        const creatorProfile = profileData as ProfessionalProfile | null;
+        const meta = (((profileData as any)?.social_links as Record<string, unknown>) || {});
+        const resolvedRole = String(profile?.role || "mains_expert").trim() || "mains_expert";
         setRole(resolvedRole);
-        setDisplayName(String(profile?.display_name || "").trim());
+        setDisplayName(String(creatorProfile?.display_name || profile?.display_name || "").trim());
         setAvailabilityMode(String(meta.mentorship_availability_mode || "").toLowerCase() === "open" ? "open" : "series_only");
         setOpenScopeNote(String(meta.mentorship_open_scope_note || ""));
         const rawDefaultCallProvider = String(meta.mentorship_default_call_provider || "").trim().toLowerCase();
@@ -146,10 +147,20 @@ export default function MentorshipAvailabilityManager({
             : [],
         );
 
-        const options = optionsResponse?.data || { provided_series: [], assigned_series: [] };
+        // Load series options
+        const { data: seriesData } = await supabase
+          .from("test_series")
+          .select("id, name, series_kind")
+          .eq("is_active", true);
+        
+        if (!active) return;
         setSeriesOptions({
-          provided_series: Array.isArray(options.provided_series) ? options.provided_series : [],
-          assigned_series: Array.isArray(options.assigned_series) ? options.assigned_series : [],
+          provided_series: (seriesData || []).map((row: any) => ({
+            id: row.id,
+            title: row.name,
+            series_kind: row.series_kind,
+          })),
+          assigned_series: [],
         });
       } catch (error: unknown) {
         if (active) {
@@ -165,7 +176,7 @@ export default function MentorshipAvailabilityManager({
     return () => {
       active = false;
     };
-  }, []);
+  }, [profile, profileId]);
 
   const seriesRows = useMemo(() => {
     const map = new Map<number, { id: number; title: string; hint: string }>();
@@ -217,11 +228,20 @@ export default function MentorshipAvailabilityManager({
 
   const saveSettings = async () => {
     setSavingSettings(true);
+    const supabase = createClient();
     try {
-      await premiumApi.put("/profiles/me", {
-        role,
+      if (!profileId) throw new Error("Profile is not loaded yet.");
+      const { error: profileError } = await supabase.from("profiles").update({
         display_name: displayName || undefined,
-        meta: {
+      }).eq("id", profileId);
+      if (profileError) throw profileError;
+
+      const { error } = await supabase.from("creator_profiles").upsert({
+        user_id: profileId,
+        display_name: displayName || profile?.display_name || "Mentor",
+        is_public: true,
+        is_active: true,
+        social_links: {
           mentorship_availability_mode: availabilityMode,
           mentorship_open_scope_note: toNullableRichText(openScopeNote),
           mentorship_available_series_ids: selectedSeriesIds,
@@ -232,7 +252,8 @@ export default function MentorshipAvailabilityManager({
           copy_evaluation_configured: true,
           copy_evaluation_note: toNullableRichText(copyEvaluationNote),
         },
-      });
+      }, { onConflict: "user_id" });
+      if (error) throw error;
       toast.success("Mentorship settings saved");
       await onRefresh();
     } catch (error: unknown) {
@@ -266,8 +287,23 @@ export default function MentorshipAvailabilityManager({
     }
 
     setPublishing(true);
+    const supabase = createClient();
     try {
-      await premiumApi.post("/mentorship/slots/batch", payload);
+      if (!profileId) throw new Error("Profile is not loaded yet.");
+      const rows = payload.slots.map((slot) => ({
+        mentor_id: profileId,
+        starts_at: slot.starts_at,
+        ends_at: slot.ends_at,
+        mode: dbMentorshipMode(slot.mode),
+        meeting_link: slot.meeting_link,
+        title: slot.title,
+        description: slot.description,
+        is_active: true,
+        booked_count: 0,
+        max_bookings: 1,
+      }));
+      const { error } = await supabase.from("mentorship_slots").insert(rows);
+      if (error) throw error;
       toast.success(`Published ${payload.slots.length} availability slot${payload.slots.length === 1 ? "" : "s"}`);
       await onRefresh();
     } catch (error: unknown) {
@@ -287,8 +323,12 @@ export default function MentorshipAvailabilityManager({
     }
 
     setDeactivatingDateKey(dateKey);
+    const supabase = createClient();
     try {
-      await premiumApi.post("/mentorship/slots/deactivate-batch", { slot_ids: targetSlotIds });
+      const { error } = await supabase.from("mentorship_slots")
+        .update({ is_active: false })
+        .in("id", targetSlotIds);
+      if (error) throw error;
       toast.success(`Marked ${dateKey} unavailable`);
       await onRefresh();
     } catch (error: unknown) {

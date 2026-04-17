@@ -1,6 +1,5 @@
 "use client";
 
-import axios from "axios";
 import { X, Check, ArrowRight, ArrowLeft } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useRouter } from "next/navigation";
@@ -9,27 +8,12 @@ import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { useAuth } from "@/context/AuthContext";
-import { premiumApi } from "@/lib/premiumApi";
-import type { MentorshipServiceType, MentorshipRequest, MentorshipMode } from "@/types/premium";
+import { useProfile } from "@/context/ProfileContext";
+import { createClient } from "@/lib/supabase/client";
+import type { MentorshipServiceType } from "@/types/premium";
 
 function toError(error: unknown): string {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
-}
-
-function currentLearnerLabel(user: { email?: string | null; user_metadata?: Record<string, unknown> } | null | undefined): string {
-  const metadata = user?.user_metadata || {};
-  const namedKeys = ["full_name", "name", "display_name"] as const;
-  for (const key of namedKeys) {
-    const value = String(metadata[key] || "").trim();
-    if (value) return value;
-  }
-  const firstName = String(metadata["first_name"] || "").trim();
-  const lastName = String(metadata["last_name"] || "").trim();
-  const combined = `${firstName} ${lastName}`.trim();
-  if (combined) return combined;
-  return "";
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
 interface MentorshipRequestModalProps {
@@ -62,6 +46,8 @@ export default function MentorshipRequestModal({
   const [copyPdfUrl, setCopyPdfUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const { profileId } = useProfile();
+
   const handleNext = () => {
     if (step === 1) setStep(2);
   };
@@ -70,18 +56,8 @@ export default function MentorshipRequestModal({
     if (step === 2) setStep(1);
   };
 
-  const loadLatestRequestForSubmission = async (submissionId: number): Promise<MentorshipRequest | null> => {
-    const response = await premiumApi.get<MentorshipRequest[]>("/mentorship/requests", { params: { scope: "me" } });
-    const requests = Array.isArray(response.data) ? response.data : [];
-    return (
-      requests
-        .filter((row) => row.submission_id === submissionId && row.provider_user_id === mentorId)
-        .sort((left, right) => new Date(right.requested_at).getTime() - new Date(left.requested_at).getTime())[0] || null
-    );
-  };
-
   const submitRequest = async () => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !user || !profileId) {
       onOpenChange(false);
       showLoginModal();
       return;
@@ -97,42 +73,72 @@ export default function MentorshipRequestModal({
 
     setSubmitting(true);
     try {
-      let request: MentorshipRequest | null = null;
-      if (serviceType === "mentorship_only") {
-        const learnerName = currentLearnerLabel(user);
-        const learnerEmail = String(user?.email || "").trim();
-        const response = await premiumApi.post<MentorshipRequest>("/mentorship/requests", {
-          provider_user_id: mentorId,
-          preferred_mode: "video", // defaulting
-          note: problemStatement.trim(),
-          service_type: serviceType,
-          series_id: seriesId || undefined,
-          learner_name: learnerName || undefined,
-          learner_email: learnerEmail || undefined,
-        });
-        request = response.data;
-      } else {
-        const submissionResponse = await premiumApi.post<{ id: number }>(`/mentors/${mentorId}/copy-submissions`, {
-          answer_pdf_url: copyPdfUrl.trim(),
-          preferred_mode: "video", // defaulting
-          note: problemStatement.trim(),
-        });
-        request = await loadLatestRequestForSubmission(Number(submissionResponse.data?.id || 0));
+      const supabase = createClient();
+      let requestId: number | null = null;
+      let submissionId: number | null = null;
+
+      if (serviceType === "copy_evaluation_and_mentorship" && seriesId) {
+        const { data: subData, error: subError } = await supabase
+          .from("mains_test_copy_submissions")
+          .insert({
+            user_id: profileId,
+            series_id: seriesId,
+            answer_pdf_url: copyPdfUrl.trim(),
+            status: "submitted",
+            learner_note: problemStatement.trim(),
+          })
+          .select()
+          .single();
+
+        if (subError) throw subError;
+        submissionId = subData.id;
       }
 
-      if (!request?.id) {
+      const { data: reqData, error: reqError } = await supabase
+        .from("mentorship_requests")
+        .insert({
+          user_id: profileId,
+          mentor_id: parseInt(mentorId, 10),
+          series_id: seriesId || null,
+          preferred_mode: "video",
+          note: [
+            problemStatement.trim(),
+            serviceType === "copy_evaluation_and_mentorship" && copyPdfUrl.trim()
+              ? `Evaluation document: ${copyPdfUrl.trim()}`
+              : "",
+          ].filter(Boolean).join("\n\n"),
+          status: "requested",
+        })
+        .select()
+        .single();
+
+      if (reqError) throw reqError;
+      requestId = reqData.id;
+
+      if (submissionId && seriesId) {
+        await supabase.from("mains_program_mentorship_requests").insert({
+          user_id: profileId,
+          mentor_id: parseInt(mentorId, 10),
+          series_id: seriesId,
+          submission_id: submissionId,
+          preferred_mode: "video",
+          learner_note: problemStatement.trim(),
+          status: "requested",
+        });
+      }
+
+      if (!requestId) {
         throw new Error("Request created but failed to route.");
       }
 
       toast.success("Request sent!");
       onOpenChange(false);
-      // reset state for next open
       setTimeout(() => {
         setStep(1);
         setProblemStatement("");
         setCopyPdfUrl("");
       }, 300);
-      router.push(`/my-purchases/mentorship/${request.id}`); // This could route to the new Mentorship Dashboard
+      router.push(`/my-purchases/mentorship/${requestId}`);
     } catch (error: unknown) {
       toast.error("Failed to send request", { description: toError(error) });
     } finally {

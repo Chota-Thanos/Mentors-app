@@ -433,16 +433,22 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
 
   useEffect(() => {
     let active = true;
-    premiumApi
-      .get<PremiumExam[]>("/exams", { params: { active_only: true } })
-      .then((response) => {
+
+    const loadExams = async () => {
+      try {
+        const { createClient } = await import("@/lib/supabase/client");
+        const supabase = createClient();
+        const { data, error } = await supabase.from("exams").select("*").eq("is_active", true);
+        if (error) throw error;
         if (!active) return;
-        setAvailableExams(Array.isArray(response.data) ? response.data : []);
-      })
-      .catch(() => {
-        if (!active) return;
-        setAvailableExams([]);
-      });
+        setAvailableExams(data || []);
+      } catch {
+        if (active) setAvailableExams([]);
+      }
+    };
+
+    void loadExams();
+
     return () => {
       active = false;
     };
@@ -456,20 +462,48 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
     }
     let active = true;
     setMentorDirectoryLoading(true);
-    premiumApi
-      .get<ProfessionalProfile[]>("/mentors/public", { params: { only_verified: false, limit: 200 } })
-      .then((response) => {
+
+    const loadDirectory = async () => {
+      try {
+        const { createClient } = await import("@/lib/supabase/client");
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("*")
+          .in("role", ["prelims_expert", "mains_expert"])
+          .eq("is_active", true)
+          .order("display_name")
+          .limit(200);
+
+        if (error) throw error;
         if (!active) return;
-        setMentorDirectory(Array.isArray(response.data) ? response.data : []);
-      })
-      .catch((error: unknown) => {
+
+        const mappedDirectory = (data || []).map((row: any) => ({
+          user_id: String(row.id),
+          display_name: row.display_name || "Verified Mentor",
+          profile_image_url: row.avatar_url || "",
+          headline: Array.isArray(row.highlights) && row.highlights.length > 0 ? row.highlights[0] : "Verified Expert Mentor",
+          bio: row.bio || "",
+          specialization_tags: Array.isArray(row.highlights) ? row.highlights : [],
+          credentials: [],
+          highlights: Array.isArray(row.highlights) ? row.highlights : [],
+          experiences: [],
+          meta: typeof row.payout_details === "object" ? row.payout_details : {},
+          exam_ids: Array.isArray(row.creator_exam_ids) ? row.creator_exam_ids : [],
+          is_verified: !!row.is_verified,
+        })) as unknown as ProfessionalProfile[];
+
+        setMentorDirectory(mappedDirectory);
+      } catch (error: unknown) {
         if (!active) return;
         setMentorDirectory([]);
         toast.error("Failed to load mentors directory", { description: toError(error) });
-      })
-      .finally(() => {
+      } finally {
         if (active) setMentorDirectoryLoading(false);
-      });
+      }
+    };
+
+    void loadDirectory();
     return () => {
       active = false;
     };

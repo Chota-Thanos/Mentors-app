@@ -30,7 +30,7 @@ export interface PremiumCategory {
 export interface CategoryAISource {
   id: number;
   category_id: number;
-  source_kind: "text" | "url" | "content_item";
+  source_kind: "text" | "url" | "pdf" | "content_item";
   title?: string | null;
   source_url?: string | null;
   source_text?: string | null;
@@ -60,7 +60,7 @@ export interface MainsCategory {
 export interface MainsCategorySource {
   id: number;
   mains_category_id: number;
-  source_kind: "text" | "url" | "content_item";
+  source_kind: "text" | "url" | "pdf" | "content_item";
   title?: string | null;
   source_url?: string | null;
   source_text?: string | null;

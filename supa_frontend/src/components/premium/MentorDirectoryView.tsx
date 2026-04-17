@@ -1,6 +1,5 @@
 "use client";
 
-import axios from "axios";
 import { ArrowRight, CalendarDays, Check, MapPin, RefreshCcw, Search, SlidersHorizontal, Star } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -8,16 +7,17 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { toast } from "sonner";
 
 import { useExamContext } from "@/context/ExamContext";
-import { premiumApi } from "@/lib/premiumApi";
 import type { MentorAvailabilityStatus, ProfessionalProfile } from "@/types/premium";
 
 type AvailabilityFilter = "all" | "available" | "soon";
 type ServiceFilter = "all" | "mentorship" | "copy_review";
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
 function toError(error: unknown): string {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
 function initialsFromLabel(label: string): string {
@@ -137,37 +137,89 @@ export default function MentorDirectoryView() {
   const loadMentors = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await premiumApi.get<ProfessionalProfile[]>("/mentors/public", {
-        params: { only_verified: false, limit: 200, exam_id: globalExamId || undefined },
-      });
-      const mentorRows = (Array.isArray(response.data) ? response.data : []).filter((row) => matchesExamIds(row.exam_ids, globalExamId));
+      const { createClient } = await import("@/lib/supabase/client");
+      const supabase = createClient();
+
+      const { data, error: fetchError } = await supabase
+        .from("creator_profiles")
+        .select(`
+          *,
+          profile:profiles!creator_profiles_user_id_fkey(id, display_name, avatar_url, role, city, bio, is_active),
+          exams:creator_profile_exams(exam_id)
+        `)
+        .eq("is_public", true)
+        .eq("is_active", true)
+        .order("display_name");
+
+      if (fetchError) throw fetchError;
+
+      const mentorRows = (data || [])
+        .map((row: any) => {
+          const examIds = Array.isArray(row.exams)
+            ? row.exams.map((item: any) => Number(item.exam_id)).filter((value: number) => Number.isFinite(value))
+            : [];
+          const highlights = Array.isArray(row.highlights) ? row.highlights : [];
+          return {
+            id: row.id,
+            user_id: String(row.user_id),
+            role: row.profile?.role || "mains_expert",
+            display_name: row.display_name || row.profile?.display_name || "Verified Mentor",
+            profile_image_url: row.profile_image_url || row.profile?.avatar_url || "",
+            headline: row.headline || "Verified Expert Mentor",
+            bio: row.bio || row.profile?.bio || "",
+            specialization_tags: Array.isArray(row.specialization_tags) ? row.specialization_tags : [],
+            credentials: Array.isArray(row.credentials) ? row.credentials : [],
+            highlights,
+            languages: Array.isArray(row.languages) ? row.languages : [],
+            experiences: [],
+            meta: asRecord(row.social_links),
+            exam_ids: examIds,
+            is_verified: !!row.is_verified,
+            is_public: !!row.is_public,
+            is_active: !!row.is_active,
+            city: row.city || row.profile?.city || "",
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+          };
+        })
+        .filter((row) => matchesExamIds(row.exam_ids, globalExamId)) as unknown as ProfessionalProfile[];
+
       setRows(mentorRows);
 
-      const providerUserIds = mentorRows
+      const mentorIds = mentorRows
         .map((row) => String(row.user_id || "").trim())
         .filter((value, index, arr) => value && arr.indexOf(value) === index);
 
-      if (providerUserIds.length === 0) {
+      if (mentorIds.length === 0) {
         setMentorStatusByUserId({});
       } else {
-        try {
-          const statusResponse = await premiumApi.get<MentorAvailabilityStatus[]>("/mentorship/mentors/status", {
-            params: {
-              provider_user_ids: providerUserIds.join(","),
-              include_offline: true,
-              limit: Math.min(providerUserIds.length, 500),
-            },
-          });
-          const nextStatusMap: Record<string, MentorAvailabilityStatus> = {};
-          for (const row of Array.isArray(statusResponse.data) ? statusResponse.data : []) {
-            const providerUserId = String(row.provider_user_id || "").trim();
-            if (!providerUserId) continue;
-            nextStatusMap[providerUserId] = row;
-          }
-          setMentorStatusByUserId(nextStatusMap);
-        } catch {
-          setMentorStatusByUserId({});
+        const nowIso = new Date().toISOString();
+        const { data: slotData } = await supabase
+          .from("mentorship_slots")
+          .select("mentor_id, starts_at, ends_at, booked_count, max_bookings, updated_at")
+          .in("mentor_id", mentorIds.map(Number))
+          .eq("is_active", true)
+          .gte("ends_at", nowIso)
+          .order("starts_at", { ascending: true });
+
+        const nextStatusMap: Record<string, MentorAvailabilityStatus> = {};
+        for (const mentorId of mentorIds) {
+          const rowsForMentor = (slotData || []).filter((slot: any) => String(slot.mentor_id) === mentorId);
+          const openSlots = rowsForMentor.filter((slot: any) => Number(slot.booked_count || 0) < Number(slot.max_bookings || 1));
+          const activeNow = openSlots.filter((slot: any) => slot.starts_at <= nowIso && slot.ends_at >= nowIso);
+          const nextSlot = openSlots[0] || null;
+          nextStatusMap[mentorId] = {
+            provider_user_id: mentorId,
+            status: activeNow.length > 0 ? "available_now" : nextSlot ? "offline" : "offline",
+            available_now: activeNow.length > 0,
+            busy_now: false,
+            active_slots_now: activeNow.length,
+            next_available_at: nextSlot?.starts_at ?? null,
+            live_session_id: null,
+            updated_at: nextSlot?.updated_at ?? nowIso,
+          };
         }
+        setMentorStatusByUserId(nextStatusMap);
       }
     } catch (error: unknown) {
       setRows([]);

@@ -21,8 +21,6 @@ interface QuizQuestion {
 interface QuizRecord {
     id: number
     title: string
-    data?: { questions?: unknown } | null
-    meta?: { questions?: unknown } | null
 }
 
 const FALLBACK_QUESTIONS: QuizQuestion[] = [
@@ -60,6 +58,23 @@ const asQuestions = (input: unknown): QuizQuestion[] => {
         .filter((row): row is QuizQuestion => row !== null)
 }
 
+const optionText = (option: unknown): string => {
+    if (typeof option === 'string') return option.trim()
+    if (option && typeof option === 'object') {
+        const record = option as Record<string, unknown>
+        return String(record.text || record.label || '').trim()
+    }
+    return ''
+}
+
+const answerIndex = (answer: unknown, options: string[]): number => {
+    const raw = String(answer || '').trim().toUpperCase()
+    const labelIndex = ['A', 'B', 'C', 'D', 'E'].indexOf(raw)
+    if (labelIndex >= 0) return labelIndex
+    const exact = options.findIndex((option) => option.trim().toUpperCase() === raw)
+    return exact >= 0 ? exact : 0
+}
+
 export default function QuizPlayer({ quizId, backToHref = '/collections' }: QuizPlayerProps) {
     const [quiz, setQuiz] = useState<QuizRecord | null>(null)
     const [questions, setQuestions] = useState<QuizQuestion[]>([])
@@ -86,23 +101,55 @@ export default function QuizPlayer({ quizId, backToHref = '/collections' }: Quiz
     useEffect(() => {
         async function fetchQuiz() {
             try {
-                const { data, error } = await supabase
-                    .from('content_items')
-                    .select('*')
+                const { data: quiz, error: quizError } = await supabase
+                    .from('quizzes')
+                    .select('id,title,question_statement,options,correct_answer')
                     .eq('id', quizId)
-                    .single()
+                    .maybeSingle()
 
-                if (error) throw error
+                if (quizError) throw quizError
 
-                const typedData = data as QuizRecord
-                setQuiz(typedData)
+                if (quiz) {
+                    const options = Array.isArray(quiz.options) ? quiz.options.map(optionText).filter(Boolean) : []
+                    setQuiz({ id: Number(quiz.id), title: String(quiz.title || `Quiz #${quiz.id}`) })
+                    setQuestions([{
+                        id: Number(quiz.id),
+                        question: String(quiz.question_statement || ''),
+                        options,
+                        correct: answerIndex(quiz.correct_answer, options),
+                    }])
+                    return
+                }
 
-                const dataQuestions = asQuestions(typedData.data?.questions)
-                const metaQuestions = asQuestions(typedData.meta?.questions)
-                setQuestions(dataQuestions.length > 0 ? dataQuestions : metaQuestions.length > 0 ? metaQuestions : FALLBACK_QUESTIONS)
+                const { data: passage, error: passageError } = await supabase
+                    .from('passage_quizzes')
+                    .select('id,passage_title,passage_text,passage_questions(id,question_statement,options,correct_answer,display_order)')
+                    .eq('id', quizId)
+                    .maybeSingle()
+                if (passageError) throw passageError
+                if (!passage) throw new Error('Quiz not found')
+
+                const passageQuestions = Array.isArray(passage.passage_questions)
+                    ? [...passage.passage_questions]
+                        .map((row) => row as Record<string, unknown>)
+                        .sort((left, right) => Number(left.display_order || 0) - Number(right.display_order || 0))
+                        .map((row, index) => {
+                            const options = Array.isArray(row.options) ? row.options.map(optionText).filter(Boolean) : []
+                            return {
+                                id: Number(row.id || index + 1),
+                                question: String(row.question_statement || ''),
+                                options,
+                                correct: answerIndex(row.correct_answer, options),
+                            }
+                        })
+                    : []
+
+                setQuiz({ id: Number(passage.id), title: String(passage.passage_title || 'Passage Quiz') })
+                setQuestions(passageQuestions.length > 0 ? passageQuestions : FALLBACK_QUESTIONS)
             } catch (err: unknown) {
                 toast.error('Failed to load quiz')
                 console.error(err)
+                setQuestions(FALLBACK_QUESTIONS)
             } finally {
                 setIsLoading(false)
             }

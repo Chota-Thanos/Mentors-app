@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/context/AuthContext";
-import { isAdminLike, isMainsMentorLike, isModeratorLike, isQuizMasterLike } from "@/lib/accessControl";
-import { premiumApi } from "@/lib/premiumApi";
+import { useProfile } from "@/context/ProfileContext";
+import { roleIsMainsExpert, roleIsModerator, roleIsPrelimsExpert } from "@/lib/accessControl";
 import { richTextToPlainText } from "@/lib/richText";
+import { createClient } from "@/lib/supabase/client";
 
 export interface CollectionContentListItem {
   collection_item_id: number;
@@ -175,7 +175,8 @@ function mergeUpdated(current: CollectionContentListItem, updated: ContentItemRe
 
 export default function CollectionContentList({ collectionId, manageHref, items }: CollectionContentListProps) {
   const router = useRouter();
-  const { user } = useAuth();
+  void collectionId;
+  const { role } = useProfile();
   const [rows, setRows] = useState(items);
   const [previewId, setPreviewId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -185,8 +186,8 @@ export default function CollectionContentList({ collectionId, manageHref, items 
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const canManage = useMemo(
-    () => isAdminLike(user) || isModeratorLike(user) || isQuizMasterLike(user) || isMainsMentorLike(user),
-    [user],
+    () => roleIsModerator(role) || roleIsPrelimsExpert(role) || roleIsMainsExpert(role),
+    [role],
   );
 
   const previewItem = useMemo(() => rows.find((item) => item.collection_item_id === previewId) || null, [previewId, rows]);
@@ -219,6 +220,7 @@ export default function CollectionContentList({ collectionId, manageHref, items 
     const currentData = asRecord(editingItem.data);
     setSavingId(editingItem.collection_item_id);
     try {
+      const supabase = createClient();
       if (isStandardQuiz(editingItem) && quizEdit) {
         const options = [
           { label: "A", text: quizEdit.option_a.trim() },
@@ -229,8 +231,26 @@ export default function CollectionContentList({ collectionId, manageHref, items 
         ].filter((option) => option.text);
         const facts = parseLines(quizEdit.statements_facts);
         const correctAnswer = (quizEdit.correct_answer || "A").trim().toUpperCase();
-        const response = await premiumApi.put<ContentItemResponse>(`/tests/${collectionId}/items/${editingItem.collection_item_id}/content`, {
+        const { data, error } = await supabase
+          .from("quizzes")
+          .update({
+            title: quizEdit.title.trim() || quizEdit.question_statement.trim().slice(0, 120) || editingItem.title,
+            question_statement: quizEdit.question_statement.trim(),
+            supp_question_statement: quizEdit.supplementary_statement.trim() || null,
+            statements_facts: facts,
+            question_prompt: quizEdit.question_prompt.trim() || null,
+            options,
+            correct_answer: correctAnswer,
+            explanation: quizEdit.explanation_text.trim() || null,
+          })
+          .eq("id", editingItem.content_item_id)
+          .select("id,title,quiz_type,question_statement,supp_question_statement,statements_facts,question_prompt,options,correct_answer,explanation")
+          .single();
+        if (error) throw error;
+        const updated: ContentItemResponse = {
+          id: Number(data.id),
           title: quizEdit.title.trim() || quizEdit.question_statement.trim().slice(0, 120) || editingItem.title,
+          type: data.quiz_type === "maths" ? "quiz_maths" : "quiz_gk",
           data: {
             ...currentData,
             question_statement: quizEdit.question_statement.trim(),
@@ -247,8 +267,8 @@ export default function CollectionContentList({ collectionId, manageHref, items 
             source_reference: quizEdit.source_reference.trim() || null,
             source: quizEdit.source_reference.trim() || null,
           },
-        });
-        setRows((current) => current.map((item) => item.collection_item_id === editingItem.collection_item_id ? mergeUpdated(item, response.data) : item));
+        };
+        setRows((current) => current.map((item) => item.collection_item_id === editingItem.collection_item_id ? mergeUpdated(item, updated) : item));
         toast.success("Question updated.");
         closeEdit();
         router.refresh();
@@ -256,19 +276,33 @@ export default function CollectionContentList({ collectionId, manageHref, items 
       }
 
       if (isMainsQuestion(editingItem) && mainsEdit) {
-        const response = await premiumApi.put<ContentItemResponse>(`/tests/${collectionId}/items/${editingItem.collection_item_id}/content`, {
+        const { data, error } = await supabase
+          .from("mains_questions")
+          .update({
+            question_text: mainsEdit.question_text.trim(),
+            approach: mainsEdit.answer_approach.trim() || null,
+            model_answer: mainsEdit.model_answer.trim() || null,
+            word_limit: Math.max(0, Number(mainsEdit.word_limit) || 0),
+          })
+          .eq("id", editingItem.content_item_id)
+          .select("id,question_text,approach,model_answer,word_limit,source_reference")
+          .single();
+        if (error) throw error;
+        const updated: ContentItemResponse = {
+          id: Number(data.id),
           title: mainsEdit.title.trim() || mainsEdit.question_text.trim().slice(0, 120) || editingItem.title,
+          type: "question",
           data: {
             ...currentData,
-            question_text: mainsEdit.question_text.trim(),
-            answer_approach: mainsEdit.answer_approach.trim() || null,
-            model_answer: mainsEdit.model_answer.trim() || null,
-            answer_style_guidance: mainsEdit.answer_style_guidance.trim() || null,
-            word_limit: Math.max(0, Number(mainsEdit.word_limit) || 0),
+            question_text: data.question_text,
+            answer_approach: data.approach || null,
+            model_answer: data.model_answer || null,
+            answer_style_guidance: mainsEdit.answer_style_guidance.trim() || currentData.answer_style_guidance || null,
+            word_limit: data.word_limit,
             max_marks: Math.max(0, Number(mainsEdit.max_marks) || 0),
           },
-        });
-        setRows((current) => current.map((item) => item.collection_item_id === editingItem.collection_item_id ? mergeUpdated(item, response.data) : item));
+        };
+        setRows((current) => current.map((item) => item.collection_item_id === editingItem.collection_item_id ? mergeUpdated(item, updated) : item));
         toast.success("Question updated.");
         closeEdit();
         router.refresh();
@@ -284,7 +318,12 @@ export default function CollectionContentList({ collectionId, manageHref, items 
     if (!window.confirm("Remove this question from the test?")) return;
     setDeletingId(item.collection_item_id);
     try {
-      await premiumApi.delete(`/tests/${collectionId}/items/${item.collection_item_id}`);
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("premium_collection_items")
+        .delete()
+        .eq("id", item.collection_item_id);
+      if (error) throw error;
       setRows((current) => current.filter((row) => row.collection_item_id !== item.collection_item_id));
       if (previewId === item.collection_item_id) setPreviewId(null);
       if (editingId === item.collection_item_id) closeEdit();

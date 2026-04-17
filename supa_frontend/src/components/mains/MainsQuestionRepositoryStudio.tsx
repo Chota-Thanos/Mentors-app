@@ -3,21 +3,20 @@
 import Link from "next/link";
 import { Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import axios from "axios";
 import { toast } from "sonner";
 
 import MainsCategorySelector from "@/components/mains/MainsCategorySelector";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { hasGenerationSubscription } from "@/lib/accessControl";
+import { aiMainsApi } from "@/lib/api";
 import { isMainsTestCollection } from "@/lib/collectionKind";
 import { OUTPUT_LANGUAGE_OPTIONS, persistOutputLanguage, readOutputLanguage, type OutputLanguage } from "@/lib/outputLanguage";
-import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import type {
   MainsCategory,
   PremiumAIExampleAnalysis,
-  PremiumAIExampleAnalysisListResponse,
   PremiumCollection,
-  PremiumContentItem,
 } from "@/types/premium";
 
 interface MainsQuestionRepositoryStudioProps {
@@ -38,10 +37,6 @@ type ParsedMainsQuestion = {
   mains_category_id?: number | null;
   category_ids?: number[];
   description?: string;
-};
-
-type MainsParseResponse = {
-  questions: ParsedMainsQuestion[];
 };
 
 type MainsDraftItem = {
@@ -66,14 +61,7 @@ type MainsRepositoryItem = {
   mains_category_ids: number[];
 };
 
-const MAINS_MODES = new Set(["mains", "mains_ai", "mains_ai_question", "mains_question", "mains_test"]);
-
 const toError = (error: unknown): string => {
-  if (axios.isAxiosError(error)) {
-    const detail = error.response?.data?.detail;
-    if (typeof detail === "string" && detail.trim()) return detail;
-    return error.message;
-  }
   if (error instanceof Error) return error.message;
   return "Unknown error";
 };
@@ -125,23 +113,21 @@ const flattenMainsCategories = (nodes: MainsCategory[]): MainsCategory[] => {
   return output;
 };
 
-const toRepositoryItem = (item: PremiumContentItem): MainsRepositoryItem | null => {
-  const data = item.data && typeof item.data === "object" ? (item.data as Record<string, unknown>) : {};
-  const mode = String(data.mode || data.kind || "").trim().toLowerCase();
-  const questionText = String(data.question_text || data.question_statement || data.question || "").trim();
-  if (!questionText) return null;
-  if (mode && !MAINS_MODES.has(mode)) return null;
-
-  return {
-    id: Number(item.id),
-    title: String(item.title || toQuestionTitle(questionText)),
-    question_text: questionText,
-    answer_approach: String(data.answer_approach || "").trim(),
-    model_answer: String(data.model_answer || "").trim(),
-    word_limit: normalizeWordLimit(data.word_limit, 150),
-    source_reference: String(data.source_reference || data.source || "").trim(),
-    mains_category_ids: extractMainsCategoryIds(data),
-  };
+const buildMainsCategoryTree = (rows: MainsCategory[]): MainsCategory[] => {
+  const byId = new Map<number, MainsCategory>();
+  const roots: MainsCategory[] = [];
+  for (const row of rows) {
+    byId.set(row.id, { ...row, children: [] });
+  }
+  for (const row of byId.values()) {
+    const parent = row.parent_id ? byId.get(row.parent_id) : null;
+    if (parent) {
+      parent.children = [...(parent.children || []), row];
+    } else {
+      roots.push(row);
+    }
+  }
+  return roots;
 };
 
 export default function MainsQuestionRepositoryStudio({
@@ -149,6 +135,7 @@ export default function MainsQuestionRepositoryStudio({
   boundCollectionTitle,
 }: MainsQuestionRepositoryStudioProps) {
   const { user, isAuthenticated, showLoginModal } = useAuth();
+  const { profileId } = useProfile();
   const hasBoundCollection = Number.isFinite(boundCollectionId) && Number(boundCollectionId) > 0;
   const normalizedBoundCollectionId = hasBoundCollection ? Number(boundCollectionId) : null;
 
@@ -235,10 +222,15 @@ export default function MainsQuestionRepositoryStudio({
         return;
       }
       try {
-        const response = await premiumApi.get<MainsCategory[]>("/mains/categories", {
-          params: { hierarchical: true, active_only: true },
-        });
-        const flattened = flattenMainsCategories(Array.isArray(response.data) ? response.data : []);
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from("categories")
+          .select("*")
+          .eq("domain", "mains")
+          .eq("is_active", true)
+          .order("display_order", { ascending: true });
+        if (error) throw error;
+        const flattened = flattenMainsCategories(buildMainsCategoryTree((data || []) as unknown as MainsCategory[]));
         const lookup = new Map<number, string>();
         for (const row of flattened) {
           lookup.set(Number(row.id), String(row.name || `Category ${row.id}`));
@@ -250,24 +242,33 @@ export default function MainsQuestionRepositoryStudio({
     };
 
     void loadCategoryNames();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, profileId]);
 
   const loadMainsCollections = useCallback(async () => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !profileId) {
       setCollections([]);
       setSelectedCollectionId("");
       return;
     }
     try {
-      const response = await premiumApi.get<PremiumCollection[]>("/collections", {
-        params: { mine_only: true, test_kind: "mains" },
-      });
-      const rows = Array.isArray(response.data) ? response.data : [];
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("premium_collections")
+        .select("*")
+        .eq("creator_id", profileId)
+        .eq("collection_type", "mains")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      const rows = (data || []).map((row: any) => ({
+        ...row,
+        title: row.name,
+        test_kind: row.collection_type,
+      })) as PremiumCollection[];
       setCollections(rows);
     } catch (error: unknown) {
       toast.error("Failed to load Mains Tests", { description: toError(error) });
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, profileId]);
 
   const loadRepository = useCallback(async () => {
     if (!isAuthenticated) {
@@ -277,17 +278,26 @@ export default function MainsQuestionRepositoryStudio({
     }
     setIsRepoLoading(true);
     try {
-      const params: Record<string, unknown> = {
-        limit: 500,
-        search: repoSearch.trim() || undefined,
-      };
-      if (selectedCategoryIds.length === 1) {
-        params.category_id = selectedCategoryIds[0];
-      }
-      const response = await premiumApi.get<PremiumContentItem[]>("/mains/questions", { params });
-      const rows = (Array.isArray(response.data) ? response.data : [])
-        .map((item) => toRepositoryItem(item))
-        .filter((item): item is MainsRepositoryItem => Boolean(item));
+      const supabase = createClient();
+      let query = supabase
+        .from("mains_questions")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (repoSearch.trim()) query = query.ilike("question_text", `%${repoSearch.trim()}%`);
+      if (selectedCategoryIds.length === 1) query = query.eq("category_id", selectedCategoryIds[0]);
+      const { data, error } = await query;
+      if (error) throw error;
+      const rows = (data || []).map((item: any) => ({
+        id: Number(item.id),
+        title: toQuestionTitle(String(item.question_text || "")),
+        question_text: String(item.question_text || ""),
+        answer_approach: String(item.approach || ""),
+        model_answer: String(item.model_answer || ""),
+        word_limit: normalizeWordLimit(item.word_limit, 150),
+        source_reference: String(item.source_reference || ""),
+        mains_category_ids: item.category_id ? [Number(item.category_id)] : [],
+      }));
 
       const filtered = selectedCategoryIds.length > 1
         ? rows.filter((item) => item.mains_category_ids.some((id) => selectedCategoryIds.includes(id)))
@@ -308,17 +318,22 @@ export default function MainsQuestionRepositoryStudio({
     }
     setLoadingExampleAnalyses(true);
     try {
-      const response = await premiumApi.get<PremiumAIExampleAnalysisListResponse>("/ai/example-analyses", {
-        params: { content_type: "mains_question_generation", include_admin: true },
-      });
-      setExampleAnalyses(Array.isArray(response.data?.items) ? response.data.items : []);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("ai_example_analyses")
+        .select("*")
+        .eq("quiz_domain", "mains")
+        .eq("is_active", true)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setExampleAnalyses((data || []) as unknown as PremiumAIExampleAnalysis[]);
     } catch (error: unknown) {
       setExampleAnalyses([]);
       toast.error("Failed to load mains generation styles", { description: toError(error) });
     } finally {
       setLoadingExampleAnalyses(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, profileId]);
 
   useEffect(() => {
     void loadMainsCollections();
@@ -433,19 +448,22 @@ export default function MainsQuestionRepositoryStudio({
 
     setIsParsing(true);
     try {
-      const payload: Record<string, unknown> = {
-        mains_category_ids: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
-        use_mains_category_source: useMainsCategorySource,
-        number_of_questions: effectiveParseCount,
-        word_limit: effectiveWordLimit,
-      };
-      if (!useMainsCategorySource) {
-        if (sourceType === "text") payload.content = sourceValue;
-        if (sourceType === "url") payload.url = sourceValue;
-      }
-
-      const response = await premiumApi.post<MainsParseResponse>("/mains/questions/parse", payload);
-      const rows = Array.isArray(response.data?.questions) ? response.data.questions : [];
+      const generated = await Promise.all(
+        Array.from({ length: effectiveParseCount }, () => aiMainsApi.generateQuestion({
+          source_text: sourceType === "text" ? sourceValue : `Generate from this URL context: ${sourceValue}`,
+          category_id: selectedCategoryIds[0],
+          word_limit: effectiveWordLimit,
+          language: outputLanguage,
+          save: false,
+        })),
+      );
+      const rows = generated.map((item) => ({
+        question_text: item.question_text,
+        answer_approach: item.answer_approach,
+        model_answer: item.model_answer,
+        word_limit: item.word_limit,
+        mains_category_ids: selectedCategoryIds,
+      }));
       const normalized = buildDraftsFromAiRows(
         rows,
         effectiveWordLimit,
@@ -480,23 +498,22 @@ export default function MainsQuestionRepositoryStudio({
 
     setIsGenerating(true);
     try {
-      const payload: Record<string, unknown> = {
-        mains_category_ids: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
-        use_mains_category_source: generateUseMainsCategorySource,
-        number_of_questions: effectiveGenerateCount,
-        word_limit: effectiveGenerateWordLimit,
-        example_format_id: generateExampleAnalysisId ? Number(generateExampleAnalysisId) : undefined,
-        example_formatting_guidance: generateFormattingGuidance.trim() || undefined,
-        user_instructions: generateInstructions.trim() || undefined,
-        output_language: outputLanguage,
-      };
-      if (!generateUseMainsCategorySource) {
-        if (generateSourceType === "text") payload.content = generateSourceValue;
-        if (generateSourceType === "url") payload.url = generateSourceValue;
-      }
-
-      const response = await premiumApi.post<MainsParseResponse>("/ai-mains-questions/generate", payload);
-      const rows = Array.isArray(response.data?.questions) ? response.data.questions : [];
+      const generated = await Promise.all(
+        Array.from({ length: effectiveGenerateCount }, () => aiMainsApi.generateQuestion({
+          source_text: generateSourceType === "text" ? generateSourceValue : `Generate from this URL context: ${generateSourceValue}`,
+          category_id: selectedCategoryIds[0],
+          word_limit: effectiveGenerateWordLimit,
+          language: outputLanguage,
+          save: false,
+        })),
+      );
+      const rows = generated.map((item) => ({
+        question_text: item.question_text,
+        answer_approach: item.answer_approach,
+        model_answer: item.model_answer,
+        word_limit: item.word_limit,
+        mains_category_ids: selectedCategoryIds,
+      }));
       const normalized = buildDraftsFromAiRows(
         rows,
         effectiveGenerateWordLimit,
@@ -543,6 +560,12 @@ export default function MainsQuestionRepositoryStudio({
     }
 
     setIsSavingDrafts(true);
+    if (!profileId) {
+      toast.error("Profile is not loaded yet.");
+      setIsSavingDrafts(false);
+      return;
+    }
+    const supabase = createClient();
     const savedIds = new Set<string>();
     let failedCount = 0;
 
@@ -554,27 +577,27 @@ export default function MainsQuestionRepositoryStudio({
         continue;
       }
 
-      const payload = {
-        title: toQuestionTitle(questionText),
-        type: "question",
-        collection_id: normalizedBoundCollectionId || undefined,
-        data: {
-          mode: "mains_ai",
-          kind: "mains_ai_question",
+      try {
+        const { data, error } = await supabase.from("mains_questions").insert({
           question_text: questionText,
-          answer_approach: draft.answer_approach.trim() || null,
+          approach: draft.answer_approach.trim() || null,
           model_answer: draft.model_answer.trim() || null,
           word_limit: normalizeWordLimit(draft.word_limit, 150),
-          mains_category_ids: categoryIds.length > 0 ? categoryIds : undefined,
-          mains_category_id: categoryIds[0] || null,
-          category_ids: categoryIds.length > 0 ? categoryIds : undefined,
+          category_id: categoryIds[0] || null,
           source_reference: draft.source_reference.trim() || null,
-          description: questionText,
-        },
-      };
-
-      try {
-        await premiumApi.post("/content", payload);
+          author_id: profileId,
+        }).select("id").single();
+        if (error) throw error;
+        if (normalizedBoundCollectionId && data?.id) {
+          const { error: itemError } = await supabase.from("premium_collection_items").insert({
+            premium_collection_id: normalizedBoundCollectionId,
+            item_type: "mains_question",
+            mains_question_id: data.id,
+            category_id: categoryIds[0] || null,
+            order_index: -1,
+          });
+          if (itemError) throw itemError;
+        }
         savedIds.add(draft.local_id);
       } catch {
         failedCount += 1;
@@ -613,9 +636,16 @@ export default function MainsQuestionRepositoryStudio({
 
     setIsAddingToCollection(true);
     try {
-      await premiumApi.post(`/collections/${collectionId}/items/bulk-add`, {
-        items: selectedRepoIds.map((contentItemId) => ({ content_item_id: contentItemId, order: -1 })),
-      });
+      const supabase = createClient();
+      const { error } = await supabase.from("premium_collection_items").insert(
+        selectedRepoIds.map((mainsQuestionId, index) => ({
+          premium_collection_id: collectionId,
+          item_type: "mains_question",
+          mains_question_id: mainsQuestionId,
+          order_index: -1 - index,
+        })),
+      );
+      if (error) throw error;
       toast.success(`Added ${selectedRepoIds.length} item(s) to Mains Test.`);
       setSelectedRepoIds([]);
     } catch (error: unknown) {

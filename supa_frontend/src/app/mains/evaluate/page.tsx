@@ -26,10 +26,13 @@ import {
     Wand2,
     X,
 } from "lucide-react";
+import { createOwnedCollection, fetchAiExampleAnalyses, fetchOwnedCollections } from "@/lib/aiData";
 import { premiumApi } from "@/lib/premiumApi";
 import { OUTPUT_LANGUAGE_OPTIONS, persistOutputLanguage, readOutputLanguage, type OutputLanguage } from "@/lib/outputLanguage";
+import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { hasGenerationSubscription, hasMainsMentorGenerationSubscription } from "@/lib/accessControl";
 import { isMainsTestCollection } from "@/lib/collectionKind";
 import { clsx, type ClassValue } from "clsx";
@@ -224,6 +227,7 @@ const writeStoredMainsItems = (storageKey: string, items: UserAIMainsQuestion[])
 
 export default function MainsEvaluationPage() {
     const { user, isAuthenticated, showLoginModal } = useAuth();
+    const { profileId } = useProfile();
     const currentUserId = String(user?.id || "").trim();
     const mainsMentorWorkspaceSections = useMemo(
         () => getMainsMentorWorkspaceSections(currentUserId || undefined),
@@ -381,31 +385,39 @@ export default function MainsEvaluationPage() {
     );
 
     const loadCollections = useCallback(async () => {
-        if (!isAuthenticated) {
+        if (!isAuthenticated || !profileId) {
             setCollections([]);
             setSelectedCollectionId("");
             return;
         }
         try {
-            const response = await premiumApi.get<PremiumCollection[]>("/collections", {
-                params: { mine_only: true, test_kind: "mains" },
-            });
-            const rows = Array.isArray(response.data) ? response.data : [];
-            setCollections(rows);
+            setCollections(await fetchOwnedCollections(profileId, "mains"));
         } catch (error: unknown) {
             toast.error("Failed to load Mains Tests", { description: getErrorMessage(error) });
         }
-    }, [isAuthenticated]);
+    }, [isAuthenticated, profileId]);
 
     // --- Load Styles & History ---
     useEffect(() => {
         const fetchData = async () => {
+            if (!isAuthenticated || !profileId) {
+                setGenerationStyles([]);
+                setIsLoadingHistory(false);
+                return;
+            }
+            setIsLoadingHistory(true);
             try {
-                const [generationStylesRes, historyRes] = await Promise.all([
-                    premiumApi.get("/ai/example-analyses?content_type=mains_question_generation&include_admin=true"),
-                    premiumApi.get("/ai-mains-questions/user")
+                const supabase = createClient();
+                const [generationStylesRows, historyRes] = await Promise.all([
+                    fetchAiExampleAnalyses("mains_question_generation"),
+                    supabase
+                        .from("ai_mains_questions")
+                        .select("*")
+                        .eq("user_id", profileId)
+                        .order("created_at", { ascending: false }),
                 ]);
-                setGenerationStyles(Array.isArray(generationStylesRes.data?.items) ? generationStylesRes.data.items : []);
+                if (historyRes.error) throw historyRes.error;
+                setGenerationStyles(generationStylesRows);
                 setMainsItems((prev) => mergeMainsItems(Array.isArray(historyRes.data) ? historyRes.data : [], prev));
             } catch (error) {
                 console.error("Failed to fetch data", error);
@@ -414,7 +426,7 @@ export default function MainsEvaluationPage() {
             }
         };
         fetchData();
-    }, []);
+    }, [isAuthenticated, profileId]);
 
     useEffect(() => {
         if (typeof window === "undefined") return;
@@ -767,41 +779,44 @@ export default function MainsEvaluationPage() {
     };
 
     const addSelectedToCollection = useCallback(async (collectionId: number): Promise<number> => {
+        if (!profileId) throw new Error("Creator profile is not loaded.");
+        const supabase = createClient();
         let addedCount = 0;
         const selectedOverrideCategoryIds = selectedMainsCategoryIds
             .map((value) => Number(value))
             .filter((value, index, values) => Number.isFinite(value) && value > 0 && values.indexOf(value) === index);
         for (const item of selectedItems) {
-            const answerStyle = String(item.answer_style_guidance || "").trim();
             const mainsCategoryIds = selectedOverrideCategoryIds.length > 0
                 ? selectedOverrideCategoryIds
                 : normalizeCategoryIds([
                     ...(item.mains_category_ids || []),
                     ...(item.category_ids || []),
                 ]);
-            const payload = {
-                title: toQuestionTitle(item.question_text),
-                type: "question",
-                data: {
-                    mode: "mains_ai",
-                    kind: "mains_ai_question",
+            const { data: question, error: questionError } = await supabase
+                .from("mains_questions")
+                .insert({
                     question_text: item.question_text,
-                    answer_approach: item.answer_approach || null,
+                    approach: item.answer_approach || null,
                     model_answer: item.model_answer || null,
                     word_limit: Number(item.word_limit) > 0 ? Number(item.word_limit) : 150,
-                    answer_style_guidance: answerStyle || null,
-                    mains_category_ids: mainsCategoryIds.length > 0 ? mainsCategoryIds : undefined,
-                    mains_category_id: mainsCategoryIds[0] || null,
-                    category_ids: mainsCategoryIds.length > 0 ? mainsCategoryIds : undefined,
-                    description: item.question_text,
-                },
-                collection_id: collectionId,
-            };
-            await premiumApi.post("/content", payload);
+                    category_id: mainsCategoryIds[0] || null,
+                    author_id: profileId,
+                })
+                .select("id")
+                .single();
+            if (questionError) throw questionError;
+            const { error: itemError } = await supabase.from("premium_collection_items").insert({
+                premium_collection_id: collectionId,
+                order_index: Date.now() + addedCount,
+                item_type: "mains_question",
+                mains_question_id: Number(question.id),
+                category_id: mainsCategoryIds[0] || null,
+            });
+            if (itemError) throw itemError;
             addedCount += 1;
         }
         return addedCount;
-    }, [selectedItems, selectedMainsCategoryIds]);
+    }, [profileId, selectedItems, selectedMainsCategoryIds]);
 
     const handleAddToExistingCollection = useCallback(async () => {
         if (!isAuthenticated) {
@@ -849,21 +864,21 @@ export default function MainsEvaluationPage() {
             toast.error("Mains Test name is required.");
             return;
         }
+        if (!profileId) {
+            toast.error("Profile is not loaded yet.");
+            return;
+        }
         setIsAddingToCollection(true);
         try {
-            const response = await premiumApi.post<PremiumCollection>("/collections", {
-                title: name,
+            const created = await createOwnedCollection(profileId, {
+                name,
                 description: "Generated from Mains Studio",
-                type: "test_series",
-                test_kind: "mains",
-                is_premium: true,
-                is_public: false,
-                is_finalized: false,
-                meta: {
-                    collection_mode: "mains_ai",
-                },
+                collectionType: "mains",
+                isPublic: false,
+                isPaid: false,
+                isFinalized: false,
             });
-            const collectionId = Number(response.data?.id);
+            const collectionId = Number(created.id);
             if (!Number.isFinite(collectionId) || collectionId <= 0) {
                 throw new Error("Mains Test creation returned invalid ID.");
             }
@@ -877,7 +892,7 @@ export default function MainsEvaluationPage() {
         } finally {
             setIsAddingToCollection(false);
         }
-    }, [addSelectedToCollection, isAuthenticated, loadCollections, newCollectionName, selectedItems.length, showLoginModal]);
+    }, [addSelectedToCollection, isAuthenticated, loadCollections, newCollectionName, profileId, selectedItems.length, showLoginModal]);
 
     return (
         <>

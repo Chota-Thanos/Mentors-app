@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import axios from "axios";
 
-import { premiumApi } from "@/lib/premiumApi";
+import { useProfile } from "@/context/ProfileContext";
+import { createClient } from "@/lib/supabase/client";
 import type { MainsCategory, PremiumContentItem } from "@/types/premium";
 import MainsCategorySelector from "@/components/mains/MainsCategorySelector";
 
@@ -51,6 +52,18 @@ const flattenMainsCategories = (nodes: MainsCategory[]): MainsCategory[] => {
   return output;
 };
 
+const buildMainsCategoryTree = (rows: MainsCategory[]): MainsCategory[] => {
+  const byId = new Map<number, MainsCategory>();
+  const roots: MainsCategory[] = [];
+  rows.forEach((row) => byId.set(row.id, { ...row, children: [] }));
+  byId.forEach((row) => {
+    const parent = row.parent_id ? byId.get(row.parent_id) : null;
+    if (parent) parent.children = [...(parent.children || []), row];
+    else roots.push(row);
+  });
+  return roots;
+};
+
 const extractMainsCategoryIds = (item: PremiumContentItem): number[] => {
   const data = (item.data && typeof item.data === "object") ? (item.data as Record<string, unknown>) : {};
   const fromArray = normalizeIdList(data.mains_category_ids || data.category_ids);
@@ -76,6 +89,8 @@ const isMainsQuestionItem = (item: PremiumContentItem): boolean => {
 
 export default function AddMainsContentForm({ collectionId }: AddMainsContentFormProps) {
   const router = useRouter();
+  const { profileId } = useProfile();
+  const supabase = useMemo(() => createClient(), []);
 
   const [mode, setMode] = useState<FormMode>("existing");
   const [loading, setLoading] = useState(false);
@@ -95,10 +110,25 @@ export default function AddMainsContentForm({ collectionId }: AddMainsContentFor
   useEffect(() => {
     const loadCategoryNames = async () => {
       try {
-        const response = await premiumApi.get<MainsCategory[]>("/mains/categories", {
-          params: { hierarchical: true, active_only: true },
-        });
-        const flattened = flattenMainsCategories(Array.isArray(response.data) ? response.data : []);
+        const { data, error } = await supabase
+          .from("categories")
+          .select("id,name,slug,description,parent_id,is_active,created_at,updated_at")
+          .eq("domain", "mains")
+          .eq("is_active", true)
+          .order("display_order", { ascending: true })
+          .order("name", { ascending: true });
+        if (error) throw error;
+        const rows = (data || []).map((row) => ({
+          id: Number(row.id),
+          name: String(row.name || ""),
+          slug: row.slug ? String(row.slug) : null,
+          description: row.description ? String(row.description) : null,
+          parent_id: row.parent_id ? Number(row.parent_id) : null,
+          is_active: row.is_active !== false,
+          created_at: String(row.created_at || ""),
+          updated_at: row.updated_at ? String(row.updated_at) : null,
+        }));
+        const flattened = flattenMainsCategories(buildMainsCategoryTree(rows));
         const lookup = new Map<number, string>();
         for (const row of flattened) {
           lookup.set(Number(row.id), String(row.name || `Category ${row.id}`));
@@ -109,22 +139,43 @@ export default function AddMainsContentForm({ collectionId }: AddMainsContentFor
       }
     };
     void loadCategoryNames();
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     const loadExisting = async () => {
       if (mode !== "existing") return;
       setLoading(true);
       try {
-        const params: Record<string, unknown> = {
-          limit: 500,
-          search: search.trim() || undefined,
-        };
+        let query = supabase
+          .from("mains_questions")
+          .select("id,question_text,approach,model_answer,word_limit,marks,category_id")
+          .limit(500);
         if (selectedCategoryIds.length === 1) {
-          params.category_id = selectedCategoryIds[0];
+          query = query.eq("category_id", selectedCategoryIds[0]);
         }
-        const response = await premiumApi.get<PremiumContentItem[]>("/mains/questions", { params });
-        const rows = Array.isArray(response.data) ? response.data : [];
+        const normalizedSearch = search.trim();
+        if (normalizedSearch) {
+          query = query.ilike("question_text", `%${normalizedSearch}%`);
+        }
+        const { data, error } = await query;
+        if (error) throw error;
+        const rows: PremiumContentItem[] = (data || []).map((row) => ({
+          id: Number(row.id),
+          title: String(row.question_text || "").slice(0, 120),
+          type: "question",
+          data: {
+            mode: "mains_question",
+            kind: "mains_question",
+            question_text: row.question_text,
+            answer_approach: row.approach,
+            model_answer: row.model_answer,
+            word_limit: row.word_limit,
+            max_marks: row.marks,
+            mains_category_ids: row.category_id ? [Number(row.category_id)] : [],
+            mains_category_id: row.category_id ? Number(row.category_id) : null,
+            category_ids: row.category_id ? [Number(row.category_id)] : [],
+          },
+        }));
         const mainsRows = rows.filter(isMainsQuestionItem);
         const filtered = selectedCategoryIds.length > 1
           ? mainsRows.filter((item) =>
@@ -178,8 +229,20 @@ export default function AddMainsContentForm({ collectionId }: AddMainsContentFor
     }
     setLoading(true);
     try {
-      const items = selectedContentIds.map((contentItemId) => ({ content_item_id: contentItemId, order: -1 }));
-      await premiumApi.post(`/collections/${collectionId}/items/bulk-add`, { items });
+      const { count } = await supabase
+        .from("premium_collection_items")
+        .select("id", { count: "exact", head: true })
+        .eq("premium_collection_id", Number(collectionId));
+      const { error } = await supabase.from("premium_collection_items").insert(
+        selectedContentIds.map((questionId, index) => ({
+          premium_collection_id: Number(collectionId),
+          order_index: (count || 0) + index,
+          item_type: "mains_question",
+          mains_question_id: questionId,
+          category_id: selectedCategoryIds[0] || null,
+        })),
+      );
+      if (error) throw error;
       toast.success("Mains questions added to test.");
       router.push(`/collections/${collectionId}`);
       router.refresh();
@@ -200,27 +263,31 @@ export default function AddMainsContentForm({ collectionId }: AddMainsContentFor
       toast.error("Select at least one mains category.");
       return;
     }
+    if (!profileId) {
+      toast.error("Creator profile is not loaded.");
+      return;
+    }
 
     setLoading(true);
     try {
-      await premiumApi.post("/content", {
-        title: normalizedQuestion.slice(0, 120),
-        type: "question",
-        collection_id: Number(collectionId),
-        data: {
-          mode: "mains_ai",
-          kind: "mains_ai_question",
-          question_text: normalizedQuestion,
-          answer_approach: answerApproach.trim() || null,
-          model_answer: modelAnswer.trim() || null,
-          word_limit: parsedWordLimit,
-          max_marks: parsedMaxMarks,
-          mains_category_ids: selectedCategoryIds,
-          mains_category_id: selectedCategoryIds[0] || null,
-          category_ids: selectedCategoryIds,
-          description: normalizedQuestion,
-        },
+      const { data: question, error: questionError } = await supabase.from("mains_questions").insert({
+        question_text: normalizedQuestion,
+        approach: answerApproach.trim() || null,
+        model_answer: modelAnswer.trim() || null,
+        word_limit: parsedWordLimit,
+        marks: Math.floor(parsedMaxMarks),
+        category_id: selectedCategoryIds[0] || null,
+        author_id: profileId,
+      }).select("id").single();
+      if (questionError) throw questionError;
+      const { error: itemError } = await supabase.from("premium_collection_items").insert({
+        premium_collection_id: Number(collectionId),
+        order_index: Date.now(),
+        item_type: "mains_question",
+        mains_question_id: Number(question.id),
+        category_id: selectedCategoryIds[0] || null,
       });
+      if (itemError) throw itemError;
       toast.success("Mains question posted and added.");
       setQuestionText("");
       setAnswerApproach("");

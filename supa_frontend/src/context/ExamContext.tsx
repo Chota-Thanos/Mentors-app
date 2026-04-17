@@ -1,8 +1,13 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { premiumApi } from "@/lib/premiumApi";
-import type { PremiumExam } from "@/types/premium";
+import { createClient } from "@/lib/supabase/client";
+
+export interface PremiumExam {
+  id: number;
+  name: string;
+  is_active: boolean;
+}
 
 export interface ExamContextState {
   exams: PremiumExam[];
@@ -13,6 +18,16 @@ export interface ExamContextState {
   showOnboarding: boolean;
   closeOnboarding: () => void;
 }
+
+const defaultExamContext: ExamContextState = {
+  exams: [],
+  isLoading: false,
+  globalExamId: null,
+  globalExamName: null,
+  setGlobalExamId: () => {},
+  showOnboarding: false,
+  closeOnboarding: () => {},
+};
 
 const ExamContext = createContext<ExamContextState | undefined>(undefined);
 
@@ -33,13 +48,19 @@ export function ExamProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [globalExamId, setGlobalExamId] = useState<number | null>(() => readStoredExamId());
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const supabase = createClient();
 
   useEffect(() => {
     async function init() {
       setIsLoading(true);
       try {
-        const response = await premiumApi.get<PremiumExam[]>("/exams", { params: { active_only: true } });
-        const fetchedExams = response.data || [];
+        const { data } = await supabase
+          .from("exams")
+          .select("id, name, is_active")
+          .eq("is_active", true)
+          .order("name");
+
+        const fetchedExams = (data ?? []) as PremiumExam[];
         setExams(fetchedExams);
 
         const storedId = localStorage.getItem("globalExamId");
@@ -52,14 +73,12 @@ export function ExamProvider({ children }: { children: React.ReactNode }) {
             if (exists) {
               setGlobalExamId(numId);
             } else {
-              setGlobalExamId(null); // Corrupt or deactivated exam
+              setGlobalExamId(null);
               setShowOnboarding(true);
             }
           }
         } else {
-          // Default to 'all' without showing onboarding by default as requested.
           setGlobalExamId(null);
-          // If we want to show it only once, we could set a flag in localStorage but the user said "keep it at all, by default."
           setShowOnboarding(false);
           localStorage.setItem("globalExamId", "all");
         }
@@ -70,7 +89,7 @@ export function ExamProvider({ children }: { children: React.ReactNode }) {
       }
     }
     init();
-  }, []);
+  }, [supabase]);
 
   const handleSetGlobalExamId = (examId: number | null) => {
     setGlobalExamId(examId);
@@ -79,7 +98,6 @@ export function ExamProvider({ children }: { children: React.ReactNode }) {
     } else {
       localStorage.setItem("globalExamId", String(examId));
     }
-    // Only close onboarding explicitly so the user knows they made a choice
     if (showOnboarding) {
       setShowOnboarding(false);
     }
@@ -111,7 +129,7 @@ export function ExamProvider({ children }: { children: React.ReactNode }) {
 export function useExamContext() {
   const context = useContext(ExamContext);
   if (context === undefined) {
-    throw new Error("useExamContext must be used within an ExamProvider");
+    return defaultExamContext;
   }
   return context;
 }

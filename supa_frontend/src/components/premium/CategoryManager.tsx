@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import axios from "axios";
 
-import { premiumApi, premiumApiRoot } from "@/lib/premiumApi";
+import { fetchPremiumCategoryTree } from "@/lib/aiData";
+import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import type { PremiumCategory, PremiumExam, QuizKind } from "@/types/premium";
 
 const QUIZ_TYPES: QuizKind[] = ["gk", "maths", "passage"];
@@ -54,13 +56,12 @@ function flatten(nodes: PremiumCategory[], depth = 0): FlatCategoryNode[] {
 }
 
 function toErrorMessage(error: unknown): string {
-  if (!axios.isAxiosError(error)) {
-    return "Unknown error";
-  }
-  if (typeof error.response?.data?.detail === "string") {
+  if (axios.isAxiosError(error) && typeof error.response?.data?.detail === "string") {
     return error.response.data.detail;
   }
-  return error.message;
+  if (axios.isAxiosError(error)) return error.message;
+  if (error instanceof Error) return error.message;
+  return "Unknown error";
 }
 
 function parseBulkCategoryInput(raw: string): BulkCategoryInput[] {
@@ -134,11 +135,25 @@ function buildPathLevels(nodes: PremiumCategory[], selectedPath: number[], block
   return levels;
 }
 
+function collectCategorySubtreeIds(nodes: PremiumCategory[], rootIds: Set<number>): number[] {
+  const output = new Set<number>();
+  const visit = (node: PremiumCategory, ancestorSelected: boolean) => {
+    const selected = ancestorSelected || rootIds.has(node.id);
+    if (selected) output.add(node.id);
+    for (const child of node.children || []) {
+      visit(child, selected);
+    }
+  };
+  nodes.forEach((node) => visit(node, false));
+  return Array.from(output);
+}
+
 export default function CategoryManager({
   title = "Exam and Premium Category Manager",
   description,
   showExamManagement = true,
 }: CategoryManagerProps) {
+  const supabase = useMemo(() => createClient(), []);
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingExam, setIsSavingExam] = useState(false);
   const [isSavingCategory, setIsSavingCategory] = useState(false);
@@ -173,7 +188,6 @@ export default function CategoryManager({
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
 
   const flatCategories = useMemo(() => flatten(categoryTree), [categoryTree]);
-  const quizTypeKey = `premium_${quizType}`;
   const selectedParentId = parentPathIds.length > 0 ? parentPathIds[parentPathIds.length - 1] : null;
   const selectedBulkParentId = bulkParentPathIds.length > 0 ? bulkParentPathIds[bulkParentPathIds.length - 1] : null;
 
@@ -220,22 +234,15 @@ export default function CategoryManager({
   const loadCategories = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await premiumApi.get<PremiumCategory[]>(
-        `${premiumApiRoot}/api/v1/premium-categories/${quizTypeKey}/`,
-        {
-          params: {
-            hierarchical: true,
-          },
-        },
-      );
-      setCategoryTree(response.data || []);
+      const rows = await fetchPremiumCategoryTree(quizType);
+      setCategoryTree(rows || []);
     } catch (error: unknown) {
       toast.error("Failed to load premium categories", { description: toErrorMessage(error) });
       setFeedback("error", "Failed to load categories.");
     } finally {
       setIsLoading(false);
     }
-  }, [quizTypeKey, setFeedback]);
+  }, [quizType, setFeedback]);
 
   useEffect(() => {
     if (!showExamManagement) {
@@ -414,11 +421,21 @@ export default function CategoryManager({
         parent_id: selectedParentId,
       };
       if (editingCategoryId) {
-        await premiumApi.put(`${premiumApiRoot}/api/v1/premium-categories/${quizTypeKey}/${editingCategoryId}`, payload);
+        const { error } = await supabase
+          .from("categories")
+          .update(payload)
+          .eq("id", editingCategoryId)
+          .eq("domain", quizType);
+        if (error) throw error;
         toast.success("Premium category updated");
         setFeedback("success", `Category ID ${editingCategoryId} updated.`);
       } else {
-        await premiumApi.post(`${premiumApiRoot}/api/v1/premium-categories/${quizTypeKey}/`, payload);
+        const { error } = await supabase.from("categories").insert({
+          ...payload,
+          domain: quizType,
+          is_active: true,
+        });
+        if (error) throw error;
         toast.success("Premium category created");
         setFeedback("success", "Category created.");
       }
@@ -443,7 +460,13 @@ export default function CategoryManager({
     setDeletingCategoryId(category.id);
     setFeedback("info", `Deleting category "${category.name}"...`);
     try {
-      await premiumApi.delete(`${premiumApiRoot}/api/v1/premium-categories/${quizTypeKey}/${category.id}`);
+      const categoryIds = collectCategorySubtreeIds(categoryTree, new Set([category.id]));
+      const { error } = await supabase
+        .from("categories")
+        .delete()
+        .in("id", categoryIds.length > 0 ? categoryIds : [category.id])
+        .eq("domain", quizType);
+      if (error) throw error;
       toast.success("Premium category deleted");
       setFeedback("success", `Category "${category.name}" deleted.`);
       if (editingCategoryId === category.id) {
@@ -496,19 +519,18 @@ export default function CategoryManager({
     setIsDeletingBulkCategories(true);
     setFeedback("info", `Deleting ${selectedCategoryIds.length} selected categories...`);
     try {
-      const response = await premiumApi.post<{
-        message?: string;
-        deleted_count?: number;
-        deleted_category_ids?: number[];
-      }>(`${premiumApiRoot}/api/v1/premium-categories/${quizTypeKey}/bulk-delete/`, {
-        category_ids: selectedCategoryIds,
-      });
-      const deletedIds = Array.isArray(response.data?.deleted_category_ids) ? response.data.deleted_category_ids : [];
+      const deletedIds = collectCategorySubtreeIds(categoryTree, new Set(selectedCategoryIds));
+      const { error } = await supabase
+        .from("categories")
+        .delete()
+        .in("id", deletedIds.length > 0 ? deletedIds : selectedCategoryIds)
+        .eq("domain", quizType);
+      if (error) throw error;
       if (editingCategoryId && deletedIds.includes(editingCategoryId)) {
         resetCategoryForm();
       }
       setSelectedCategoryIds([]);
-      const message = response.data?.message || `Deleted ${response.data?.deleted_count ?? deletedIds.length} categories.`;
+      const message = `Deleted ${deletedIds.length || selectedCategoryIds.length} categories.`;
       toast.success(message);
       setFeedback("success", message);
       await loadCategories();
@@ -536,21 +558,20 @@ export default function CategoryManager({
     setIsSavingBulkCategory(true);
     setFeedback("info", "Creating bulk categories...");
     try {
-      const response = await premiumApi.post<{
-        message?: string;
-        created_count?: number;
-      }>(`${premiumApiRoot}/api/v1/premium-categories/${quizTypeKey}/bulk/`, {
-        parent_id: selectedBulkParentId,
-        categories,
-      });
-      const message = response.data?.message;
-      if (typeof message === "string" && message.trim()) {
-        toast.success(message);
-        setFeedback("success", message);
-      } else {
-        toast.success(`Created ${response.data?.created_count ?? categories.length} categories`);
-        setFeedback("success", `Created ${response.data?.created_count ?? categories.length} categories.`);
-      }
+      const { error } = await supabase.from("categories").insert(
+        categories.map((category, index) => ({
+          name: category.name,
+          description: category.description || null,
+          parent_id: selectedBulkParentId,
+          domain: quizType,
+          display_order: index,
+          is_active: true,
+        })),
+      );
+      if (error) throw error;
+      const message = `Created ${categories.length} categories.`;
+      toast.success(message);
+      setFeedback("success", message);
       resetBulkForm();
       await loadCategories();
     } catch (error: unknown) {

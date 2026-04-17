@@ -7,16 +7,18 @@ import { useMemo, useState } from "react";
 import { UserNav } from "@/components/layouts/UserNav";
 import { useAuth } from "@/context/AuthContext";
 import { useExamContext } from "@/context/ExamContext";
+import { useProfile } from "@/context/ProfileContext";
+import { flattenRoleWorkspaceSections, getMainsMentorWorkspaceSections, getQuizMasterWorkspaceSections } from "@/components/layouts/roleWorkspaceLinks";
 import {
   canAccessMainsAuthoring,
   canAccessStandaloneManualQuizBuilder,
   canManageMainsSeries,
-  canManageMentorship,
+  canManageMentorshipLegacy,
   canManagePrelimsSeries,
-  isAdminLike,
-  isMainsMentorLike,
-  isModeratorLike,
-  isQuizMasterLike,
+  roleIsAdmin,
+  roleIsMainsExpert,
+  roleIsModerator,
+  roleIsPrelimsExpert,
 } from "@/lib/accessControl";
 
 type NavLink = {
@@ -98,18 +100,20 @@ function MobileSection({
 
 export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolean } = {}) {
   const { user } = useAuth();
+  const { role } = useProfile();
   const { exams, globalExamId, globalExamName, setGlobalExamId, showOnboarding } = useExamContext();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const adminLike = isAdminLike(user);
-  const moderatorLike = isModeratorLike(user);
-  const quizMasterLike = isQuizMasterLike(user);
-  const mainsMentorLike = isMainsMentorLike(user);
-  const canPrelimsAuthor = canManagePrelimsSeries(user);
-  const canMainsAuthor = canManageMainsSeries(user);
-  const canMentorshipActions = canManageMentorship(user);
-  const canQuizBuilder = canAccessStandaloneManualQuizBuilder(user);
-  const canMainsRepository = canAccessMainsAuthoring(user);
+  const currentUserId = String(user?.id || "").trim();
+  const adminLike = roleIsAdmin(role);
+  const moderatorLike = roleIsModerator(role);
+  const quizMasterLike = roleIsPrelimsExpert(role);
+  const mainsMentorLike = roleIsMainsExpert(role);
+  const canPrelimsAuthor = canManagePrelimsSeries({ role });
+  const canMainsAuthor = canManageMainsSeries({ role });
+  const canMentorshipActions = canManageMentorshipLegacy({ role });
+  const canQuizBuilder = canAccessStandaloneManualQuizBuilder({ role });
+  const canMainsRepository = canAccessMainsAuthoring({ role });
   const canEditProfessionalProfile = adminLike || moderatorLike || quizMasterLike || mainsMentorLike;
   const learnerLike = !adminLike && !moderatorLike && !quizMasterLike && !mainsMentorLike;
   const dashboardLabel = learnerLike ? "Performance Evaluation" : "Dashboard";
@@ -173,6 +177,12 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
     if (adminLike || moderatorLike) {
       links.push({ href: "/onboarding/review", label: "Onboarding Queue" });
     }
+    if (quizMasterLike) {
+      links.push(...flattenRoleWorkspaceSections(getQuizMasterWorkspaceSections(currentUserId)));
+    }
+    if (mainsMentorLike) {
+      links.push(...flattenRoleWorkspaceSections(getMainsMentorWorkspaceSections(currentUserId)));
+    }
 
     return dedupeLinks(links);
   }, [
@@ -181,7 +191,10 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
     canMentorshipActions,
     canPrelimsAuthor,
     hideAdminLinks,
+    currentUserId,
+    mainsMentorLike,
     moderatorLike,
+    quizMasterLike,
   ]);
 
   const accountLinks = useMemo(() => {

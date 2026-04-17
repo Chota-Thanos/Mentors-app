@@ -11,10 +11,18 @@ import WorkflowProgressTrack from "@/components/premium/WorkflowProgressTrack";
 import MentorshipChatView from "@/components/premium/MentorshipChatView";
 import RichTextContent from "@/components/ui/RichTextContent";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { isAdminLike, isMentorLike, isModeratorLike } from "@/lib/accessControl";
 import { requestOfferedSlotIds } from "@/lib/copyEvaluationFlow";
 import { buildMentorshipWorkflowSteps, mentorshipCurrentStatusLabel, mentorshipKindLabel, mentorshipNextActionLabel, resolveMentorshipWorkflowStage } from "@/lib/mentorshipOrderFlow";
-import { premiumApi } from "@/lib/premiumApi";
+import {
+  dbMentorshipMode,
+  normalizeMainsCopySubmission,
+  normalizeMentorshipMessage,
+  normalizeMentorshipRequest,
+  normalizeMentorshipSession,
+  normalizeMentorshipSlot,
+} from "@/lib/mentorshipV2";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { MainsCopySubmission, MentorshipMessage, MentorshipRequest, MentorshipSession, MentorshipSlot } from "@/types/premium";
 
@@ -129,7 +137,7 @@ function plainTextExcerpt(value?: string | null, fallback = "No problem statemen
 
 function canStartSessionImmediately(row: DerivedRequestRow): boolean {
   if (row.session) return false;
-  if (row.request.status !== "accepted") return false;
+  if (!["accepted", "scheduled"].includes(row.request.status)) return false;
   if (row.request.payment_amount > 0 && row.request.payment_status !== "paid") return false;
   return true;
 }
@@ -175,36 +183,56 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
 
   const mode: Mode = providerCapable ? modeOverride ?? "provider" : "user";
 
+  const { profileId } = useProfile();
+
   const load = async () => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !profileId) {
       setBusy(false);
       return;
     }
     setBusy(true);
     try {
-      const scope = mode === "provider" ? (adminLike ? "all" : "provider") : "me";
-      const [requestRes, sessionRes] = await Promise.all([
-        premiumApi.get<MentorshipRequest[]>("/mentorship/requests", { params: { scope } }),
-        premiumApi.get<MentorshipSession[]>("/mentorship/sessions", { params: { scope } }),
-      ]);
-      let nextRequests = Array.isArray(requestRes.data) ? requestRes.data : [];
-      if (seriesId) nextRequests = nextRequests.filter((row) => row.series_id === seriesId);
-      const nextSessions = Array.isArray(sessionRes.data) ? sessionRes.data : [];
-      const submissionIds = Array.from(new Set(nextRequests.map((row) => row.submission_id).filter(Boolean))) as number[];
-      const fetched = await Promise.all(
-        submissionIds.map(async (id) => {
-          try {
-            return [String(id), (await premiumApi.get<MainsCopySubmission>(`/copy-submissions/${id}`)).data] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
-      const nextSubmissions: Record<string, MainsCopySubmission> = {};
-      for (const item of fetched) {
-        if (!item) continue;
-        nextSubmissions[item[0]] = item[1];
+      const supabase = createSupabaseClient();
+      let reqQuery = supabase.from("mentorship_requests").select("*");
+      let sessQuery = supabase.from("mentorship_sessions").select("*");
+
+      if (mode === "provider") {
+        if (!adminLike) {
+          reqQuery = reqQuery.eq("mentor_id", profileId);
+          sessQuery = sessQuery.eq("mentor_id", profileId);
+        }
+      } else {
+        reqQuery = reqQuery.eq("user_id", profileId);
+        sessQuery = sessQuery.eq("user_id", profileId);
       }
+
+      if (seriesId) {
+        reqQuery = reqQuery.eq("series_id", seriesId);
+      }
+
+      const [{ data: requestRes }, { data: sessionRes }] = await Promise.all([
+        reqQuery,
+        sessQuery,
+      ]);
+
+      const nextRequests = (requestRes || []).map((row) => normalizeMentorshipRequest(row as Record<string, unknown>));
+      const nextSessions = (sessionRes || []).map((row) => normalizeMentorshipSession(row as Record<string, unknown>));
+
+      const submissionIds = Array.from(new Set(nextRequests.map((row) => row.submission_id).filter(Boolean))) as number[];
+      const nextSubmissions: Record<string, MainsCopySubmission> = {};
+      
+      if (submissionIds.length > 0) {
+        const { data: fetchSubmissions } = await supabase
+          .from("mains_test_copy_submissions")
+          .select("*")
+          .in("id", submissionIds);
+        
+        for (const item of (fetchSubmissions || [])) {
+          const normalized = normalizeMainsCopySubmission(item as Record<string, unknown>);
+          nextSubmissions[String(normalized.id)] = normalized;
+        }
+      }
+
       setRequests(nextRequests);
       setSessions(nextSessions);
       setSubmissions(nextSubmissions);
@@ -232,9 +260,9 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "mentorship_messages", filter },
         (payload) => {
-          const row = payload.new as { request_id?: number; sender_user_id?: string } | undefined;
+          const row = payload.new as { request_id?: number; sender_id?: number } | undefined;
           const requestId = Number(row?.request_id || 0);
-          if (requestId <= 0 || row?.sender_user_id === user.id || row?.sender_user_id === "system") return;
+          if (requestId <= 0 || row?.sender_id === profileId) return;
           setRequests((current) =>
             current.map((request) => {
               if (request.id !== requestId || request.id === selectedRequestId) return request;
@@ -275,7 +303,7 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
     if (mode !== "provider") return derived;
     return derived.filter(({ request, stage }) => {
       if (tab === "new_requests") return request.status === "requested";
-      if (tab === "active_conversations") return request.status === "accepted" || ["paid", "evaluating", "feedback_ready", "booking_open"].includes(stage);
+      if (tab === "active_conversations") return ["accepted", "scheduled"].includes(request.status) || ["paid", "evaluating", "feedback_ready", "booking_open"].includes(stage);
       if (tab === "upcoming_calls") return ["scheduled", "live"].includes(stage);
       return ["completed", "cancelled", "expired"].includes(stage) || ["completed", "cancelled", "rejected", "expired"].includes(request.status);
     });
@@ -285,7 +313,7 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
     const learnerCount = (rows: DerivedRequestRow[]) => new Set(rows.map((row) => row.request.user_id)).size;
     return {
       new_requests: learnerCount(derived.filter(({ request }) => request.status === "requested")),
-      active_conversations: learnerCount(derived.filter(({ stage, request }) => request.status === "accepted" || ["paid", "evaluating", "feedback_ready", "booking_open"].includes(stage))),
+      active_conversations: learnerCount(derived.filter(({ stage, request }) => ["accepted", "scheduled"].includes(request.status) || ["paid", "evaluating", "feedback_ready", "booking_open"].includes(stage))),
       upcoming_calls: learnerCount(derived.filter(({ stage }) => ["scheduled", "live"].includes(stage))),
       completed: learnerCount(
         derived.filter(
@@ -348,27 +376,32 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
       return;
     }
     let active = true;
+    const supabase = createSupabaseClient();
     Promise.all([
-      premiumApi.get<MentorshipMessage[]>(`/mentorship/requests/${selectedRequestIdValue}/messages`),
-      premiumApi.get<MentorshipSlot[]>("/mentorship/slots", { params: { provider_user_id: selectedProviderUserId, only_available: false } }),
-    ]).then(([messageRes, slotRes]) => {
+      supabase.from("mentorship_messages").select("*").eq("request_id", selectedRequestIdValue).order("created_at", { ascending: true }),
+      supabase.from("mentorship_slots").select("*").eq("mentor_id", selectedProviderUserId),
+    ]).then(([{ data: messageData }, { data: slotData }]) => {
       if (!active) return;
-      setMessages(Array.isArray(messageRes.data) ? messageRes.data : []);
-      setSlots(Array.isArray(slotRes.data) ? slotRes.data : []);
+      setMessages((messageData || []).map((row) => normalizeMentorshipMessage(row as Record<string, unknown>)));
+      setSlots((slotData || []).map((row) => normalizeMentorshipSlot(row as Record<string, unknown>)));
       if (selected && requestUnreadCount(selected.request) > 0) {
-        void premiumApi.post(`/mentorship/requests/${selectedRequestIdValue}/messages/read`).then(() => {
-          if (!active) return;
-          setRequests((current) =>
-            current.map((row) =>
-              row.id === selectedRequestIdValue
-                ? {
-                    ...row,
-                    meta: { ...(row.meta || {}), viewer_unread_message_count: 0, viewer_has_unread_messages: false },
-                  }
-                : row,
-            ),
-          );
-        }).catch(() => undefined);
+        void supabase.from("mentorship_messages")
+          .update({ is_read: true })
+          .eq("request_id", selectedRequestIdValue)
+          .neq("sender_id", profileId)
+          .then(() => {
+            if (!active) return;
+            setRequests((current) =>
+              current.map((row) =>
+                row.id === selectedRequestIdValue
+                  ? {
+                      ...row,
+                      meta: { ...(row.meta || {}), viewer_unread_message_count: 0, viewer_has_unread_messages: false },
+                    }
+                  : row,
+              ),
+            );
+          }, () => undefined);
       }
     }).catch(() => {
       if (!active) return;
@@ -405,9 +438,14 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
         (payload) => {
           const row = payload.new as MentorshipMessage | undefined;
           if (!row?.id) return;
-          setMessages((current) => mergeMentorshipMessages(current, row));
-          if (String(row.sender_user_id || "") !== String(user?.id || "") && row.sender_user_id !== "system") {
-            void premiumApi.post(`/mentorship/requests/${selectedRequestIdValue}/messages/read`).catch(() => undefined);
+          const normalized = normalizeMentorshipMessage(row as unknown as Record<string, unknown>);
+          setMessages((current) => mergeMentorshipMessages(current, normalized));
+          if (String(normalized.sender_user_id || "") !== String(profileId || "")) {
+            void supabase.from("mentorship_messages")
+              .update({ is_read: true })
+              .eq("request_id", selectedRequestIdValue)
+              .neq("sender_id", profileId)
+              .then(() => undefined, () => undefined);
             setRequests((current) =>
               current.map((request) =>
                 request.id === selectedRequestIdValue
@@ -430,7 +468,10 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
   const mutateRequest = async (requestId: number, status: "accepted" | "rejected") => {
     setActionBusy(`${status}-${requestId}`);
     try {
-      await premiumApi.put(`/mentorship/requests/${requestId}/status`, { status });
+      const supabase = createSupabaseClient();
+      await supabase.from("mentorship_requests").update({
+        status: status === "accepted" ? "scheduled" : "rejected",
+      }).eq("id", requestId);
       toast.success(status === "accepted" ? "Request accepted" : "Request rejected");
       await load();
     } catch (error: unknown) {
@@ -440,12 +481,19 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
     }
   };
 
-  const sendMessage = async (requestId: number) => {
-    if (!messageBody.trim()) return;
+  const sendMessage = async (requestId: number, body = messageBody) => {
+    if (!body.trim() || !profileId) return;
     setActionBusy(`chat-${requestId}`);
     try {
-      const response = await premiumApi.post<MentorshipMessage>(`/mentorship/requests/${requestId}/messages`, { body: messageBody.trim() });
-      setMessages((current) => mergeMentorshipMessages(current, response.data));
+      const supabase = createSupabaseClient();
+      const { data, error } = await supabase.from("mentorship_messages").insert({
+        request_id: requestId,
+        sender_id: profileId,
+        body: body.trim(),
+        is_read: false,
+      }).select().single();
+      if (error) throw error;
+      setMessages((current) => mergeMentorshipMessages(current, normalizeMentorshipMessage(data as Record<string, unknown>)));
       setMessageBody("");
     } catch (error: unknown) {
       toast.error("Message failed", { description: toError(error) });
@@ -454,14 +502,19 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
     }
   };
 
-  const offerSlots = async (requestId: number) => {
-    if (!offerSlotIds.length) {
+  const offerSlots = async (requestId: number, slotIds = offerSlotIds) => {
+    if (!slotIds.length) {
       toast.error("Select at least one slot.");
       return;
     }
     setActionBusy(`offer-${requestId}`);
     try {
-      await premiumApi.post(`/mentorship/requests/${requestId}/offer-slots`, { slot_ids: offerSlotIds });
+      const supabase = createSupabaseClient();
+      await supabase.from("mentorship_requests").update({
+        scheduled_slot_id: slotIds[0],
+        status: "scheduled",
+      }).eq("id", requestId);
+
       toast.success("Slot booking opened");
       await load();
     } catch (error: unknown) {
@@ -472,13 +525,34 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
   };
 
   const startSessionNow = async (requestId: number) => {
+    if (!profileId) return;
     setActionBusy(`start-now-${requestId}`);
     try {
-      const response = await premiumApi.post<MentorshipSession>(`/mentorship/requests/${requestId}/start-now`, {});
+      const supabase = createSupabaseClient();
+      const { data: requestData, error: reqError } = await supabase.from("mentorship_requests").select("*").eq("id", requestId).single();
+      if (reqError || !requestData) throw new Error("Request not found");
+      const slotId = Number(requestData.scheduled_slot_id || 0) || null;
+      const { data: slotData } = slotId
+        ? await supabase.from("mentorship_slots").select("*").eq("id", slotId).maybeSingle()
+        : { data: null };
+
+      const { data: sessionData, error: sessError } = await supabase.from("mentorship_sessions").insert({
+        request_id: requestId,
+        slot_id: slotId,
+        mentor_id: requestData.mentor_id,
+        user_id: requestData.user_id,
+        mode: dbMentorshipMode(requestData.preferred_mode),
+        meeting_link: slotData?.meeting_link ?? null,
+        starts_at: slotData?.starts_at ?? new Date().toISOString(),
+        ends_at: slotData?.ends_at ?? new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        status: "scheduled",
+      }).select().single();
+      if (sessError) throw sessError;
+
       toast.success("Session started");
       await load();
-      if (response.data?.id) {
-        router.push(`/mentorship/session/${response.data.id}?autojoin=1`);
+      if (sessionData?.id) {
+        router.push(`/mentorship/session/${sessionData.id}?autojoin=1`);
       }
     } catch (error: unknown) {
       toast.error("Failed to start session", { description: toError(error) });
@@ -490,7 +564,11 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
   const saveEta = async (submissionId: number) => {
     setActionBusy(`eta-${submissionId}`);
     try {
-      await premiumApi.put(`/copy-submissions/${submissionId}/eta`, { provider_eta_text: etaText || undefined, provider_note: providerNote || undefined });
+      const supabase = createSupabaseClient();
+      await supabase.from("mains_test_copy_submissions").update({
+        evaluator_note: [etaText, providerNote].filter(Boolean).join("\n\n") || null,
+        status: "under_review",
+      }).eq("id", submissionId);
       toast.success("ETA saved");
       await load();
     } catch (error: unknown) {
@@ -503,11 +581,14 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
   const submitEvaluation = async (submissionId: number) => {
     setActionBusy(`evaluation-${submissionId}`);
     try {
-      await premiumApi.put(`/copy-submissions/${submissionId}/checked-copy`, {
-        checked_copy_pdf_url: checkedCopyUrl || undefined,
-        total_marks: totalMarks ? Number(totalMarks) : undefined,
-        provider_note: providerNote || undefined,
-      });
+      const supabase = createSupabaseClient();
+      await supabase.from("mains_test_copy_submissions").update({
+        checked_copy_pdf_url: checkedCopyUrl || null,
+        total_marks: totalMarks ? Number(totalMarks) : null,
+        evaluation_text: providerNote || null,
+        status: "evaluated",
+        evaluated_at: new Date().toISOString(),
+      }).eq("id", submissionId);
       toast.success("Evaluation submitted");
       await load();
     } catch (error: unknown) {
@@ -814,7 +895,7 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
                     actionBusy={actionBusy}
                     offerableSlots={offerableSlots}
                     
-                    onSendMessage={(body) => sendMessage(selected.request.id)}
+                    onSendMessage={(body) => sendMessage(selected.request.id, body)}
                     
                     onMutateRequest={(status) => mutateRequest(selected.request.id, status)}
                     
@@ -822,9 +903,7 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
                     
                     onOfferSlots={(slotIds) => {
                       setOfferSlotIds(slotIds);
-                      // Since MentorshipChatView uses a separate state, we should pass it in or call it directly.
-                      // Wait, offerSlots function in MentorshipManagementView uses the `offerSlotIds` state.
-                      // Let's modify the local offerSlots function to take an argument if needed, or update state first.
+                      void offerSlots(selected.request.id, slotIds);
                     }}
                     
                     onPayClick={() => {

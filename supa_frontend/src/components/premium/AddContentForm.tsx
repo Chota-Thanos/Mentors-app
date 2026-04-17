@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import axios from "axios";
 
-import { premiumApi } from "@/lib/premiumApi";
+import { useProfile } from "@/context/ProfileContext";
+import { createClient } from "@/lib/supabase/client";
 import type { PremiumContentItem, QuizKind } from "@/types/premium";
 import CategorySelector from "@/components/premium/ExamCategorySelector";
 
@@ -91,8 +92,27 @@ const extractCategoryIdsForFilter = (item: PremiumContentItem, quizKind: QuizKin
   return [];
 };
 
+const toErrorMessage = (error: unknown): string => {
+  if (axios.isAxiosError(error) && typeof error.response?.data?.detail === "string") return error.response.data.detail;
+  if (axios.isAxiosError(error)) return error.message;
+  if (error instanceof Error) return error.message;
+  return "Unknown error";
+};
+
+const categoryIdsFromJoin = (value: unknown): number[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((row) => {
+      const record = row && typeof row === "object" ? (row as Record<string, unknown>) : {};
+      return Number(record.category_id);
+    })
+    .filter((id) => Number.isFinite(id) && id > 0);
+};
+
 export default function AddContentForm({ collectionId }: AddContentFormProps) {
   const router = useRouter();
+  const { profileId } = useProfile();
+  const supabase = useMemo(() => createClient(), []);
   const [mode, setMode] = useState<"existing" | "post">("existing");
   const [quizKind, setQuizKind] = useState<QuizKind>("gk");
   const [isLoading, setIsLoading] = useState(false);
@@ -120,11 +140,70 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
       if (mode !== "existing") return;
       setIsLoading(true);
       try {
-        const params: Record<string, number> = {};
-        if (existingFilterCategoryIds.length === 1) params.category_id = existingFilterCategoryIds[0];
-
-        const response = await premiumApi.get<PremiumContentItem[]>(`/quizzes/${quizKind}`, { params });
-        const rows = Array.isArray(response.data) ? response.data : [];
+        let rows: PremiumContentItem[] = [];
+        if (quizKind === "passage") {
+          let query = supabase
+            .from("passage_quizzes")
+            .select("id,passage_title,passage_text,source_reference,passage_quiz_categories(category_id)")
+            .limit(500);
+          if (existingFilterCategoryIds.length === 1) {
+            query = supabase
+              .from("passage_quizzes")
+              .select("id,passage_title,passage_text,source_reference,passage_quiz_categories!inner(category_id)")
+              .eq("passage_quiz_categories.category_id", existingFilterCategoryIds[0])
+              .limit(500);
+          }
+          const { data, error } = await query;
+          if (error) throw error;
+          rows = (data || []).map((row) => {
+            const record = row as Record<string, unknown>;
+            const categoryIds = categoryIdsFromJoin(record.passage_quiz_categories);
+            return {
+              id: Number(record.id),
+              title: String(record.passage_title || `Passage #${record.id}`),
+              type: "quiz_passage",
+              data: {
+                passage_title: record.passage_title,
+                passage_text: record.passage_text,
+                source_reference: record.source_reference,
+                category_ids: categoryIds,
+                premium_passage_category_ids: categoryIds,
+              },
+            };
+          });
+        } else {
+          let query = supabase
+            .from("quizzes")
+            .select("id,title,quiz_type,question_statement,question_prompt,quiz_categories(category_id)")
+            .eq("quiz_type", quizKind)
+            .limit(500);
+          if (existingFilterCategoryIds.length === 1) {
+            query = supabase
+              .from("quizzes")
+              .select("id,title,quiz_type,question_statement,question_prompt,quiz_categories!inner(category_id)")
+              .eq("quiz_type", quizKind)
+              .eq("quiz_categories.category_id", existingFilterCategoryIds[0])
+              .limit(500);
+          }
+          const { data, error } = await query;
+          if (error) throw error;
+          rows = (data || []).map((row) => {
+            const record = row as Record<string, unknown>;
+            const categoryIds = categoryIdsFromJoin(record.quiz_categories);
+            return {
+              id: Number(record.id),
+              title: record.title ? String(record.title) : `Quiz #${record.id}`,
+              type: quizKind === "maths" ? "quiz_maths" : "quiz_gk",
+              data: {
+                question_statement: record.question_statement,
+                question_prompt: record.question_prompt,
+                category_ids: categoryIds,
+                premium_gk_category_ids: quizKind === "gk" ? categoryIds : [],
+                premium_maths_category_ids: quizKind === "maths" ? categoryIds : [],
+              },
+            };
+          });
+        }
 
         if (existingFilterCategoryIds.length > 1) {
           const filtered = rows.filter((row) => {
@@ -136,8 +215,7 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
           setExistingQuizzes(rows);
         }
       } catch (error: unknown) {
-        const description = axios.isAxiosError(error) ? error.message : "Unknown error";
-        toast.error("Failed to load quizzes", { description });
+        toast.error("Failed to load quizzes", { description: toErrorMessage(error) });
       } finally {
         setIsLoading(false);
       }
@@ -176,16 +254,26 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
     }
     setIsLoading(true);
     try {
-      const items = selectedContentIds.map((contentItemId) => ({ content_item_id: contentItemId, order: -1 }));
-      await premiumApi.post(`/collections/${collectionId}/items/bulk-add`, { items });
+      const { count } = await supabase
+        .from("premium_collection_items")
+        .select("id", { count: "exact", head: true })
+        .eq("premium_collection_id", Number(collectionId));
+      const { error } = await supabase.from("premium_collection_items").insert(
+        selectedContentIds.map((contentItemId, index) => ({
+          premium_collection_id: Number(collectionId),
+          order_index: (count || 0) + index,
+          item_type: quizKind === "passage" ? "passage_quiz" : quizKind === "maths" ? "maths_quiz" : "gk_quiz",
+          quiz_id: quizKind === "passage" ? null : contentItemId,
+          passage_quiz_id: quizKind === "passage" ? contentItemId : null,
+          category_id: existingFilterCategoryIds[0] || null,
+        })),
+      );
+      if (error) throw error;
       toast.success("Content added to test");
       router.push(`/collections/${collectionId}`);
       router.refresh();
     } catch (error: unknown) {
-      const description = axios.isAxiosError(error)
-        ? (typeof error.response?.data?.detail === "string" ? error.response.data.detail : error.message)
-        : "Unknown error";
-      toast.error("Failed to add content", { description });
+      toast.error("Failed to add content", { description: toErrorMessage(error) });
     } finally {
       setIsLoading(false);
     }
@@ -204,6 +292,10 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
       toast.error("Select at least one category");
       return;
     }
+    if (!profileId) {
+      toast.error("Creator profile is not loaded.");
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -218,45 +310,44 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
         { label: "D", text: questionDraft.option_d },
         ...(questionDraft.option_e ? [{ label: "E", text: questionDraft.option_e }] : []),
       ];
-      await premiumApi.post(`/quizzes/${quizKind}/bulk`, {
-        title_prefix: titlePrefix || `${quizTitle} Quiz`,
-        collection_id: Number(collectionId),
-        exam_id: null,
-        items: [
-          {
-            question_statement: questionDraft.question_statement,
-            supp_question_statement: questionDraft.supp_question_statement || null,
-            supplementary_statement: questionDraft.supp_question_statement || null,
-            statements_facts: statementsFacts,
-            question_prompt: questionDraft.question_prompt || null,
-            option_a: questionDraft.option_a,
-            option_b: questionDraft.option_b,
-            option_c: questionDraft.option_c,
-            option_d: questionDraft.option_d,
-            option_e: questionDraft.option_e || null,
-            options: optionPayload,
-            correct_answer: questionDraft.correct_answer,
-            answer: questionDraft.correct_answer,
-            explanation: questionDraft.explanation || null,
-            explanation_text: questionDraft.explanation || null,
-            source_reference: questionDraft.source_reference || null,
-            source: questionDraft.source_reference || null,
-            category_ids: selectedCategoryIds,
-            premium_gk_category_ids: quizKind === "gk" ? selectedCategoryIds : [],
-            premium_maths_category_ids: quizKind === "maths" ? selectedCategoryIds : [],
-            alpha_cat_ids: alphaIds,
-          },
-        ],
+      void alphaIds;
+      const { data: quiz, error: quizError } = await supabase
+        .from("quizzes")
+        .insert({
+          quiz_type: quizKind,
+          title: titlePrefix || `${quizTitle} Quiz`,
+          question_statement: questionDraft.question_statement,
+          supp_question_statement: questionDraft.supp_question_statement || null,
+          statements_facts: statementsFacts,
+          question_prompt: questionDraft.question_prompt || null,
+          options: optionPayload,
+          correct_answer: questionDraft.correct_answer,
+          explanation: questionDraft.explanation || null,
+          sources: questionDraft.source_reference ? [{ title: "Source", url: questionDraft.source_reference }] : [],
+          author_id: profileId,
+        })
+        .select("id")
+        .single();
+      if (quizError) throw quizError;
+      const quizId = Number(quiz.id);
+      const { error: categoryError } = await supabase.from("quiz_categories").insert(
+        selectedCategoryIds.map((categoryId) => ({ quiz_id: quizId, category_id: categoryId })),
+      );
+      if (categoryError) throw categoryError;
+      const { error: itemError } = await supabase.from("premium_collection_items").insert({
+        premium_collection_id: Number(collectionId),
+        order_index: Date.now(),
+        item_type: quizKind === "maths" ? "maths_quiz" : "gk_quiz",
+        quiz_id: quizId,
+        category_id: selectedCategoryIds[0] || null,
       });
+      if (itemError) throw itemError;
       toast.success(`${quizTitle} quiz posted`);
       setQuestionDraft(EMPTY_QUESTION);
       router.push(`/collections/${collectionId}`);
       router.refresh();
     } catch (error: unknown) {
-      const description = axios.isAxiosError(error)
-        ? (typeof error.response?.data?.detail === "string" ? error.response.data.detail : error.message)
-        : "Unknown error";
-      toast.error("Failed to post quiz", { description });
+      toast.error("Failed to post quiz", { description: toErrorMessage(error) });
     } finally {
       setIsLoading(false);
     }
@@ -280,23 +371,28 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
       toast.error("Select at least one category");
       return;
     }
+    if (!profileId) {
+      toast.error("Creator profile is not loaded.");
+      return;
+    }
 
     setIsLoading(true);
     try {
       const passageAlphaIds = parseCsvToIds(passageAlphaCatIdsCsv);
-      await premiumApi.post("/quizzes/passage", {
+      void passageAlphaIds;
+      const { data: passage, error: passageError } = await supabase.from("passage_quizzes").insert({
         passage_title: passageTitle || null,
         passage_text: passageText,
         source_reference: passageSource || null,
-        category_ids: selectedCategoryIds,
-        premium_passage_category_ids: selectedCategoryIds,
-        alpha_cat_ids: passageAlphaIds,
-        collection_id: Number(collectionId),
-        exam_id: null,
-        questions: passageQuestions.map((question) => ({
+        author_id: profileId,
+      }).select("id").single();
+      if (passageError) throw passageError;
+      const passageId = Number(passage.id);
+      const { error: questionsError } = await supabase.from("passage_questions").insert(
+        passageQuestions.map((question, index) => ({
+          passage_quiz_id: passageId,
           question_statement: question.question_statement,
           supp_question_statement: question.supp_question_statement || null,
-          supplementary_statement: question.supp_question_statement || null,
           statements_facts: question.statements_facts
             ? question.statements_facts.split("\n").map((item) => item.trim()).filter(Boolean)
             : [],
@@ -310,9 +406,23 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
           ],
           correct_answer: question.correct_answer,
           explanation: question.explanation || null,
-          explanation_text: question.explanation || null,
+          category_id: selectedCategoryIds[0] || null,
+          display_order: index,
         })),
+      );
+      if (questionsError) throw questionsError;
+      const { error: categoryError } = await supabase.from("passage_quiz_categories").insert(
+        selectedCategoryIds.map((categoryId) => ({ passage_quiz_id: passageId, category_id: categoryId })),
+      );
+      if (categoryError) throw categoryError;
+      const { error: itemError } = await supabase.from("premium_collection_items").insert({
+        premium_collection_id: Number(collectionId),
+        order_index: Date.now(),
+        item_type: "passage_quiz",
+        passage_quiz_id: passageId,
+        category_id: selectedCategoryIds[0] || null,
       });
+      if (itemError) throw itemError;
       toast.success("Passage quiz posted");
       setPassageTitle("");
       setPassageText("");
@@ -322,10 +432,7 @@ export default function AddContentForm({ collectionId }: AddContentFormProps) {
       router.push(`/collections/${collectionId}`);
       router.refresh();
     } catch (error: unknown) {
-      const description = axios.isAxiosError(error)
-        ? (typeof error.response?.data?.detail === "string" ? error.response.data.detail : error.message)
-        : "Unknown error";
-      toast.error("Failed to post passage quiz", { description });
+      toast.error("Failed to post passage quiz", { description: toErrorMessage(error) });
     } finally {
       setIsLoading(false);
     }

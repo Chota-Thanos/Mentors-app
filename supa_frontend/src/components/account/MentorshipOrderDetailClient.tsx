@@ -1,6 +1,5 @@
 "use client";
 
-import axios from "axios";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -8,6 +7,7 @@ import { toast } from "sonner";
 
 import WorkflowProgressTrack from "@/components/premium/WorkflowProgressTrack";
 import RichTextContent from "@/components/ui/RichTextContent";
+import { useProfile } from "@/context/ProfileContext";
 import { loadLearnerMentorshipOrders, type LearnerMentorshipOrdersData } from "@/lib/learnerMentorshipOrders";
 import {
   buildMentorshipWorkflowSteps,
@@ -17,19 +17,19 @@ import {
   mentorshipNextActionLabel,
 } from "@/lib/mentorshipOrderFlow";
 import { offeredSlotsForRequest, requestOfferedSlotIds } from "@/lib/copyEvaluationFlow";
-import { premiumApi } from "@/lib/premiumApi";
-import { loadRazorpayCheckout, type RazorpaySuccessResponse } from "@/lib/razorpayCheckout";
+import {
+  normalizeMentorshipMessage,
+  normalizeMentorshipSlot,
+} from "@/lib/mentorshipV2";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
-import type { MentorshipMessage, MentorshipPaymentOrder, MentorshipSlot } from "@/types/premium";
+import type { MainsCopySubmission, MentorshipMessage, MentorshipSlot } from "@/types/premium";
 
 interface MentorshipOrderDetailClientProps {
   requestId: number;
 }
 
 function toError(error: unknown): string {
-  if (!axios.isAxiosError(error)) return error instanceof Error ? error.message : "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
 function isFutureSlot(slot: MentorshipSlot): boolean {
@@ -58,12 +58,6 @@ function maybeShowIncomingCallNotification(title: string, body: string): void {
   }
 }
 
-function isSafeReturnUrl(value: string | null): value is string {
-  if (!value) return false;
-  const normalized = value.trim();
-  return normalized.startsWith("mentorsappmobile://");
-}
-
 export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrderDetailClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -79,28 +73,34 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
   const [hadUnreadUpdate, setHadUnreadUpdate] = useState(false);
   const autoPayAttemptedRef = useRef(false);
 
+  const { profileId } = useProfile();
+
   const load = useCallback(async () => {
+    if (!profileId) return;
     setBusy(true);
     try {
-      const response = await loadLearnerMentorshipOrders();
+      const supabase = createSupabaseClient();
+      const response = await loadLearnerMentorshipOrders(profileId);
       setData(response);
       const request = (response.requests || []).find((row) => row.id === requestId) || null;
       if (request) {
-        const [messageResponse, slotsResponse] = await Promise.all([
-          premiumApi.get<MentorshipMessage[]>(`/mentorship/requests/${requestId}/messages`),
-          premiumApi.get<MentorshipSlot[]>("/mentorship/slots", {
-            params: { provider_user_id: request.provider_user_id, only_available: false },
-          }),
+        const [{ data: msgData }, { data: slotData }] = await Promise.all([
+          supabase.from("mentorship_messages").select("*").eq("request_id", requestId).order("created_at", { ascending: true }),
+          supabase.from("mentorship_slots").select("*").eq("mentor_id", Number(request.provider_user_id)),
         ]);
-        const nextMessages = Array.isArray(messageResponse.data) ? messageResponse.data : [];
+        const nextMessages = (msgData || []).map((row) => normalizeMentorshipMessage(row as Record<string, unknown>));
         const unreadMentorCount = nextMessages.filter(
-          (message) => !message.is_read && message.sender_user_id !== request.user_id,
+          (message) => !message.is_read && String(message.sender_user_id) !== String(request.user_id),
         ).length;
         setHadUnreadUpdate(unreadMentorCount > 0);
         setMessages(nextMessages);
-        setProviderSlots(Array.isArray(slotsResponse.data) ? slotsResponse.data : []);
+        setProviderSlots((slotData || []).map((row) => normalizeMentorshipSlot(row as Record<string, unknown>)));
         if (unreadMentorCount > 0) {
-          premiumApi.post(`/mentorship/requests/${requestId}/messages/read`).catch(() => undefined);
+          void supabase.from("mentorship_messages")
+            .update({ is_read: true })
+            .eq("request_id", requestId)
+            .neq("sender_id", profileId)
+            .then(() => undefined, () => undefined);
         }
       } else {
         setMessages([]);
@@ -115,7 +115,7 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
     } finally {
       setBusy(false);
     }
-  }, [requestId]);
+  }, [requestId, profileId]);
 
   useEffect(() => {
     void load();
@@ -139,10 +139,16 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
         (payload) => {
           const row = payload.new as MentorshipMessage | undefined;
           if (!row?.id) return;
-          setMessages((current) => mergeMentorshipMessages(current, row));
-          if (row.sender_user_id !== currentRequest.user_id && row.sender_user_id !== "system") {
+          const normalized = normalizeMentorshipMessage(row as unknown as Record<string, unknown>);
+          setMessages((current) => mergeMentorshipMessages(current, normalized));
+          if (String(normalized.sender_user_id) !== String(currentRequest.user_id)) {
             setHadUnreadUpdate(true);
-            void premiumApi.post(`/mentorship/requests/${requestId}/messages/read`).catch(() => undefined);
+            const supabase2 = createSupabaseClient();
+            void supabase2.from("mentorship_messages")
+              .update({ is_read: true })
+              .eq("request_id", requestId)
+              .neq("sender_id", profileId)
+              .then(() => undefined, () => undefined);
           }
         },
       )
@@ -184,38 +190,36 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
     return map;
   }, [data]);
 
-  const cycleByRequestId = useMemo(() => {
-    const map: Record<string, LearnerMentorshipOrdersData["tracking"]["mentorship_cycles"][number]> = {};
-    for (const cycle of data?.tracking.mentorship_cycles || []) {
-      map[String(cycle.request_id)] = cycle;
-    }
-    return map;
-  }, [data]);
-
   const request = useMemo(() => (data?.requests || []).find((row) => row.id === requestId) || null, [data?.requests, requestId]);
   const session = sessionByRequestId[String(request?.id || "")] || null;
-  const submission = request?.submission_id ? data?.submissionsById[String(request.submission_id)] || null : null;
+  const submission = (request?.submission_id ? data?.submissionsById[String(request.submission_id)] || null : null) as MainsCopySubmission | null;
   const series = request?.series_id ? data?.seriesById[String(request.series_id)] || null : null;
-  const cycle = cycleByRequestId[String(request?.id || "")] || null;
-  const mentorName = request?.provider_user_id ? data?.mentorNameByUserId[request.provider_user_id] || request.provider_user_id : "";
-  const offeredSlotCount = request ? Math.max(requestOfferedSlotIds(request).length, request.booking_open ? 1 : 0, cycle?.booking_open ? 1 : 0) : 0;
+  const mentorName = request?.provider_user_id ? data?.mentorNameById[String(request.provider_user_id)] || "Mentor" : "";
+  const offeredSlotCount = request ? Math.max(requestOfferedSlotIds(request).length, request.booking_open ? 1 : 0) : 0;
   const currentStatus = request ? mentorshipCurrentStatusLabel(request, session, submission, offeredSlotCount) : "";
   const nextAction = request ? mentorshipNextActionLabel(request, session, submission, offeredSlotCount) : "";
   const steps = request ? buildMentorshipWorkflowSteps({ request, session, submission, offeredSlotCount }) : [];
+  const cycle = { timeline: steps };
   const canJoinCallNow = Boolean(session?.join_available && (session.status === "scheduled" || session.status === "live"));
   const offeredSlots = request ? offeredSlotsForRequest(request, providerSlots).filter(isFutureSlot) : [];
   const bookableSlots = (offeredSlots.length > 0 ? offeredSlots : providerSlots.filter(isFutureSlot)).slice(0, 10);
   const canCancelRequest = request && !["cancelled", "rejected", "expired", "completed"].includes(request.status) && session?.status !== "live";
   const canDeleteRequest = request && ["cancelled", "rejected", "expired", "completed"].includes(request.status) && session?.status !== "live";
   const autoPayRequested = searchParams.get("autopay") === "1";
-  const returnToUrl = searchParams.get("return_to");
 
   const handleSendMessage = async () => {
-    if (!request || !messageBody.trim()) return;
+    if (!request || !messageBody.trim() || !profileId) return;
     setChatBusy(true);
     try {
-      const response = await premiumApi.post<MentorshipMessage>(`/mentorship/requests/${request.id}/messages`, { body: messageBody.trim() });
-      setMessages((current) => mergeMentorshipMessages(current, response.data));
+      const supabase = createSupabaseClient();
+      const { data: msgData, error } = await supabase.from("mentorship_messages").insert({
+        request_id: request.id,
+        sender_id: profileId,
+        body: messageBody.trim(),
+        is_read: false,
+      }).select().single();
+      if (error) throw error;
+      setMessages((current) => mergeMentorshipMessages(current, normalizeMentorshipMessage(msgData as Record<string, unknown>)));
       setMessageBody("");
     } catch (error: unknown) {
       toast.error("Failed to send message", { description: toError(error) });
@@ -224,74 +228,17 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
     }
   };
 
-  const handlePaymentVerified = useCallback(async (response: RazorpaySuccessResponse) => {
-    if (!request) return;
-    await premiumApi.post(`/mentorship/requests/${request.id}/payment/verify`, {
-      ...response,
-      payment_method: "razorpay",
-    });
-    toast.success("Payment completed successfully");
-    await load();
-    if (typeof window !== "undefined" && isSafeReturnUrl(returnToUrl)) {
-      window.setTimeout(() => {
-        window.location.assign(returnToUrl);
-      }, 900);
-    }
-  }, [load, request, returnToUrl]);
-
   const handlePay = useCallback(async () => {
     if (!request) return;
     setPaymentBusy(true);
     try {
-      if (request.payment_amount <= 0) {
-        await premiumApi.post(`/mentorship/requests/${request.id}/pay`, { payment_method: "complimentary" });
-        toast.success("Payment completed successfully");
-        await load();
-        return;
-      }
-
-      const orderResponse = await premiumApi.post<MentorshipPaymentOrder>(
-        `/mentorship/requests/${request.id}/payment/order`,
-        { payment_method: "razorpay" },
-      );
-      const order = orderResponse.data;
-      await loadRazorpayCheckout();
-      if (!window.Razorpay) {
-        throw new Error("Razorpay checkout is unavailable.");
-      }
-
-      const checkout = new window.Razorpay({
-        key: order.key_id,
-        amount: order.amount,
-        currency: order.currency,
-        name: order.name,
-        description: order.description,
-        order_id: order.order_id,
-        prefill: order.prefill,
-        notes: order.notes,
-        theme: { color: "#0f172a" },
-        modal: {
-          ondismiss: () => {
-            setPaymentBusy(false);
-          },
-        },
-        handler: (response) => {
-          void handlePaymentVerified(response).finally(() => {
-            setPaymentBusy(false);
-          });
-        },
-      });
-      checkout.on("payment.failed", (response) => {
-        const reason = response.error?.description || response.error?.reason || "Payment was not completed.";
-        toast.error("Payment failed", { description: reason });
-        setPaymentBusy(false);
-      });
-      checkout.open();
+      toast.info("Mentorship payments are not configured in the V2 backend yet.");
     } catch (error: unknown) {
       toast.error("Failed to complete payment", { description: toError(error) });
+    } finally {
       setPaymentBusy(false);
     }
-  }, [handlePaymentVerified, load, request]);
+  }, [request]);
 
   useEffect(() => {
     if (!request || !autoPayRequested || autoPayAttemptedRef.current || paymentBusy) return;
@@ -304,7 +251,11 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
     if (!request) return;
     setSlotBusyId(slotId);
     try {
-      await premiumApi.post(`/mentorship/requests/${request.id}/accept-slot`, { slot_id: slotId });
+      const supabase = createSupabaseClient();
+      await supabase.from("mentorship_requests").update({
+        scheduled_slot_id: slotId,
+        status: "scheduled",
+      }).eq("id", request.id);
       toast.success("Session booked");
       await load();
     } catch (error: unknown) {
@@ -319,7 +270,8 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
     if (typeof window !== "undefined" && !window.confirm("Cancel this mentorship request?")) return;
     setRequestActionBusy("cancel");
     try {
-      await premiumApi.put(`/mentorship/requests/${request.id}/status`, { status: "cancelled" });
+      const supabase = createSupabaseClient();
+      await supabase.from("mentorship_requests").update({ status: "cancelled" }).eq("id", request.id);
       toast.success("Mentorship request cancelled");
       await load();
     } catch (error: unknown) {
@@ -334,7 +286,8 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
     if (typeof window !== "undefined" && !window.confirm("Delete this mentorship request from your workspace?")) return;
     setRequestActionBusy("delete");
     try {
-      await premiumApi.delete(`/mentorship/requests/${request.id}`);
+      const supabase = createSupabaseClient();
+      await supabase.from("mentorship_requests").delete().eq("id", request.id);
       toast.success("Mentorship request deleted");
       router.push("/dashboard/requests");
       router.refresh();
@@ -414,7 +367,7 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Series</p>
-                <p className="mt-2 font-semibold text-slate-900">{series?.title || "Direct mentor request"}</p>
+                <p className="mt-2 font-semibold text-slate-900">{series?.name || "Direct mentor request"}</p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Mode / timing</p>
@@ -575,7 +528,7 @@ export default function MentorshipOrderDetailClient({ requestId }: MentorshipOrd
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
               <p>Status: <span className="font-semibold text-slate-900">{currentStatus}</span></p>
               <p className="mt-2">Next action: <span className="font-semibold text-slate-900">{nextAction}</span></p>
-              <p className="mt-2">Scheduled for: <span className="font-semibold text-slate-900">{formatWorkflowDateTime(session?.starts_at || cycle?.scheduled_for)}</span></p>
+              <p className="mt-2">Scheduled for: <span className="font-semibold text-slate-900">{formatWorkflowDateTime(session?.starts_at)}</span></p>
             </div>
             {session?.join_available ? (
               <Link href={`/mentorship/session/${session.id}?autojoin=1`} className="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700">

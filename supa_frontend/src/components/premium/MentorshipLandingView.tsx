@@ -148,24 +148,58 @@ export default function MentorshipLandingView() {
 
   useEffect(() => {
     let active = true;
-    premiumApi
-      .get<ProfessionalProfile[]>("/mentors/public", {
-        params: { only_verified: true, limit: 6, exam_id: globalExamId || undefined },
-      })
-      .then((response) => {
+
+    const loadMentors = async () => {
+      setLoading(true);
+      try {
+        const { createClient } = await import("@/lib/supabase/client");
+        const supabase = createClient();
+
+        let query = supabase
+          .from("profiles")
+          .select("*")
+          .in("role", ["prelims_expert", "mains_expert"])
+          .eq("is_active", true)
+          .eq("is_verified", true)
+          .order("created_at", { ascending: false })
+          .limit(6);
+
+        // Supabase Postgres contains array query
+        if (globalExamId) {
+          query = query.contains("creator_exam_ids", [globalExamId]);
+        }
+
+        const { data, error: fetchError } = await query;
+        if (fetchError) throw fetchError;
+
         if (!active) return;
-        const rows = Array.isArray(response.data) ? response.data : [];
-        setMentors(rows.filter((row) => matchesExamIds(row.exam_ids, globalExamId)));
+
+        const mappedMentors = (data || []).map((row: any) => ({
+          user_id: String(row.id),
+          display_name: row.display_name || "Verified Mentor",
+          profile_image_url: row.avatar_url || "",
+          headline: Array.isArray(row.highlights) && row.highlights.length > 0 ? row.highlights[0] : "Verified Expert Mentor",
+          bio: row.bio || "",
+          specialization_tags: Array.isArray(row.highlights) ? row.highlights : [],
+          credentials: [],
+          highlights: Array.isArray(row.highlights) ? row.highlights : [],
+          experiences: [],
+          meta: typeof row.payout_details === "object" ? row.payout_details : {},
+          exam_ids: Array.isArray(row.creator_exam_ids) ? row.creator_exam_ids : [],
+        })) as unknown as ProfessionalProfile[];
+
+        setMentors(mappedMentors);
         setError(null);
-      })
-      .catch((error: unknown) => {
+      } catch (err: unknown) {
         if (!active) return;
         setMentors([]);
-        setError(toErrorMessage(error));
-      })
-      .finally(() => {
+        setError(String((err as any).message || err));
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    };
+
+    void loadMentors();
 
     return () => {
       active = false;

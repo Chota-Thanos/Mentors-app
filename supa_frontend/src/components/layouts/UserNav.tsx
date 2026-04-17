@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 
 import { useAuth } from "@/context/AuthContext";
-import { getAccountRoleLabels } from "@/lib/accessControl";
+import { useProfile } from "@/context/ProfileContext";
+import { getRoleLabel } from "@/lib/accessControl";
 
 export function UserNav() {
   const router = useRouter();
-  const { user, loading, signOut } = useAuth();
-  const roleLabels = useMemo(() => getAccountRoleLabels(user), [user]);
-  const roleText = roleLabels.join(" + ");
+  const { user, loading: authLoading, signOut } = useAuth();
+  const { profile, role, loading: profileLoading } = useProfile();
+  const roleText = getRoleLabel(role);
 
   const handleSignOut = async () => {
     await signOut();
@@ -19,7 +20,7 @@ export function UserNav() {
     router.push("/login");
   };
 
-  if (loading) {
+  if (authLoading || (user && profileLoading)) {
     return <div className="h-8 w-28 rounded-full bg-[var(--app-surface-soft)]" />;
   }
 

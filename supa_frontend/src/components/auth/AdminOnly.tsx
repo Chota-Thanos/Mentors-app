@@ -4,7 +4,8 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
-import { isAdminLike } from "@/lib/accessControl";
+import { useProfile } from "@/context/ProfileContext";
+import { roleIsAdmin } from "@/lib/accessControl";
 
 type AdminOnlyProps = {
   children: React.ReactNode;
@@ -14,16 +15,17 @@ type AdminOnlyProps = {
 export default function AdminOnly({ children, redirectTo = "/ai-quiz-generator/gk" }: AdminOnlyProps) {
   const router = useRouter();
   const { user, loading, isAuthenticated } = useAuth();
-  const allowed = isAdminLike(user);
+  const { role, loading: profileLoading } = useProfile();
+  const allowed = roleIsAdmin(role);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || (user && profileLoading)) return;
     if (!isAuthenticated || !allowed) {
       router.replace(redirectTo);
     }
-  }, [allowed, isAuthenticated, loading, redirectTo, router]);
+  }, [allowed, isAuthenticated, loading, profileLoading, redirectTo, router, user]);
 
-  if (loading) {
+  if (loading || (user && profileLoading)) {
     return <div className="p-6 text-sm text-slate-500">Checking access...</div>;
   }
 

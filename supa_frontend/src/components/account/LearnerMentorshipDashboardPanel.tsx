@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { requestOfferedSlotIds } from "@/lib/copyEvaluationFlow";
 import { loadLearnerMentorshipOrders, type LearnerMentorshipOrdersData } from "@/lib/learnerMentorshipOrders";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import { useProfile } from "@/context/ProfileContext";
+import type { MainsCopySubmission } from "@/types/premium";
 import {
   formatWorkflowDateTime,
   mentorshipCurrentStatusLabel,
@@ -64,13 +66,16 @@ export default function LearnerMentorshipDashboardPanel() {
   const [busy, setBusy] = useState(true);
   const [data, setData] = useState<LearnerMentorshipOrdersData | null>(null);
 
+  const { profileId } = useProfile();
+
   useEffect(() => {
     let active = true;
 
     void (async () => {
+      if (!profileId) return;
       setBusy(true);
       try {
-        const response = await loadLearnerMentorshipOrders();
+        const response = await loadLearnerMentorshipOrders(profileId);
         if (!active) return;
         setData(response);
       } catch (error: unknown) {
@@ -85,7 +90,7 @@ export default function LearnerMentorshipDashboardPanel() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [profileId]);
 
   useEffect(() => {
     const requestIds = (data?.requests || []).map((request) => request.id);
@@ -98,7 +103,7 @@ export default function LearnerMentorshipDashboardPanel() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "mentorship_messages", filter },
         (payload) => {
-          const row = payload.new as { request_id?: number; sender_user_id?: string } | undefined;
+          const row = payload.new as { request_id?: number; sender_id?: number } | undefined;
           const requestId = Number(row?.request_id || 0);
           if (requestId <= 0) return;
           setData((current) => {
@@ -106,7 +111,7 @@ export default function LearnerMentorshipDashboardPanel() {
             return {
               ...current,
               requests: current.requests.map((request) => {
-                if (request.id !== requestId || row?.sender_user_id === request.user_id || row?.sender_user_id === "system") {
+                if (request.id !== requestId || String(row?.sender_id || "") === String(request.user_id)) {
                   return request;
                 }
                 const nextUnread = unreadMentorUpdates(request) + 1;
@@ -138,28 +143,24 @@ export default function LearnerMentorshipDashboardPanel() {
   }, [data]);
 
   const cycleByRequestId = useMemo(() => {
-    const map: Record<string, LearnerMentorshipOrdersData["tracking"]["mentorship_cycles"][number]> = {};
-    for (const cycle of data?.tracking.mentorship_cycles || []) {
-      map[String(cycle.request_id)] = cycle;
-    }
-    return map;
-  }, [data]);
+    return {} as Record<string, any>;
+  }, []);
 
   const rows = useMemo<DashboardRequestRow[]>(() => {
     return (data?.requests || [])
       .map((request) => {
         const session = sessionByRequestId[String(request.id)] || null;
         const cycle = cycleByRequestId[String(request.id)] || null;
-        const submission = request.submission_id ? data?.submissionsById[String(request.submission_id)] || null : null;
-        const offeredSlotCount = Math.max(requestOfferedSlotIds(request).length, request.booking_open ? 1 : 0, cycle?.booking_open ? 1 : 0);
+        const submission = (request.submission_id ? data?.submissionsById[String(request.submission_id)] || null : null) as MainsCopySubmission | null;
+        const offeredSlotCount = Math.max(requestOfferedSlotIds(request).length, request.booking_open ? 1 : 0);
         const stage = resolveMentorshipWorkflowStage(request, session, submission, offeredSlotCount);
         const needsPayment = request.status === "accepted" && request.payment_status !== "paid";
         return {
           id: request.id,
-          mentorName: data?.mentorNameByUserId[request.provider_user_id] || "Mentor",
+          mentorName: data?.mentorNameById[String(request.provider_user_id)] || "Mentor",
           kind: mentorshipKindLabel(request, submission),
-          status: mentorshipCurrentStatusLabel(request, session, submission, offeredSlotCount),
-          nextAction: mentorshipNextActionLabel(request, session, submission, offeredSlotCount),
+          status: mentorshipCurrentStatusLabel(request, session as any, submission, offeredSlotCount),
+          nextAction: mentorshipNextActionLabel(request, session as any, submission, offeredSlotCount),
           requestedAt: request.requested_at,
           href: session?.join_available
             ? `/mentorship/session/${session.id}?autojoin=1`
