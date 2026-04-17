@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useProfile } from "@/context/ProfileContext";
+import { profilesApi } from "@/lib/backendServices";
 import { dbMentorshipMode } from "@/lib/mentorshipV2";
 import {
   buildAvailabilityDays,
@@ -14,6 +15,7 @@ import {
   mentorshipCallLabel,
   slotIdsForDate,
 } from "@/lib/mentorAvailability";
+import { premiumApi } from "@/lib/premiumApi";
 import { createClient } from "@/lib/supabase/client";
 import { toNullableRichText } from "@/lib/richText";
 import type {
@@ -228,20 +230,13 @@ export default function MentorshipAvailabilityManager({
 
   const saveSettings = async () => {
     setSavingSettings(true);
-    const supabase = createClient();
     try {
       if (!profileId) throw new Error("Profile is not loaded yet.");
-      const { error: profileError } = await supabase.from("profiles").update({
-        display_name: displayName || undefined,
-      }).eq("id", profileId);
-      if (profileError) throw profileError;
-
-      const { error } = await supabase.from("creator_profiles").upsert({
-        user_id: profileId,
+      await premiumApi.put("/profiles/me", {
         display_name: displayName || profile?.display_name || "Mentor",
         is_public: true,
         is_active: true,
-        social_links: {
+        meta: {
           mentorship_availability_mode: availabilityMode,
           mentorship_open_scope_note: toNullableRichText(openScopeNote),
           mentorship_available_series_ids: selectedSeriesIds,
@@ -252,8 +247,8 @@ export default function MentorshipAvailabilityManager({
           copy_evaluation_configured: true,
           copy_evaluation_note: toNullableRichText(copyEvaluationNote),
         },
-      }, { onConflict: "user_id" });
-      if (error) throw error;
+      });
+      profilesApi.clearCache();
       toast.success("Mentorship settings saved");
       await onRefresh();
     } catch (error: unknown) {

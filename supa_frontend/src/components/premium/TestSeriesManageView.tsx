@@ -549,9 +549,14 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
         const { createClient } = await import("@/lib/supabase/client");
         const supabase = createClient();
         const { data, error } = await supabase
-          .from("profiles")
-          .select("*")
-          .in("role", ["prelims_expert", "mains_expert"])
+          .from("creator_profiles")
+          .select(
+            `
+              *,
+              exams:creator_profile_exams(exam_id)
+            `,
+          )
+          .eq("is_public", true)
           .eq("is_active", true)
           .order("display_name")
           .limit(200);
@@ -560,18 +565,28 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
         if (!active) return;
 
         const mappedDirectory = (data || []).map((row: any) => ({
-          user_id: String(row.id),
+          user_id: String(row.user_id),
+          role: String((row.social_links as Record<string, unknown> | undefined)?.professional_role || "mains_expert"),
           display_name: row.display_name || "Verified Mentor",
-          profile_image_url: row.avatar_url || "",
+          profile_image_url: row.profile_image_url || "",
           headline: Array.isArray(row.highlights) && row.highlights.length > 0 ? row.highlights[0] : "Verified Expert Mentor",
           bio: row.bio || "",
-          specialization_tags: Array.isArray(row.highlights) ? row.highlights : [],
-          credentials: [],
+          specialization_tags: Array.isArray(row.specialization_tags) ? row.specialization_tags : [],
+          credentials: Array.isArray(row.credentials) ? row.credentials : [],
           highlights: Array.isArray(row.highlights) ? row.highlights : [],
+          languages: Array.isArray(row.languages) ? row.languages : [],
+          contact_url: row.contact_url || null,
+          public_email: row.public_email || null,
           experiences: [],
-          meta: typeof row.payout_details === "object" ? row.payout_details : {},
-          exam_ids: Array.isArray(row.creator_exam_ids) ? row.creator_exam_ids : [],
+          meta: typeof row.social_links === "object" && row.social_links ? row.social_links : {},
+          exam_ids: Array.isArray(row.exams)
+            ? row.exams.map((item: any) => Number(item.exam_id)).filter((value: number) => Number.isFinite(value))
+            : [],
           is_verified: !!row.is_verified,
+          is_public: !!row.is_public,
+          is_active: !!row.is_active,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
         })) as unknown as ProfessionalProfile[];
 
         setMentorDirectory(mappedDirectory);

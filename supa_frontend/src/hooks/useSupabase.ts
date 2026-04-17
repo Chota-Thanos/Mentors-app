@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { profilesApi } from "@/lib/backendServices";
 import { useProfile } from "@/context/ProfileContext";
 import type {
   Category,
@@ -22,6 +23,7 @@ import type {
   Subscription,
   Payment,
   MentorshipRequest,
+  Profile,
 } from "@/types/db";
 
 type FetchState<T> = {
@@ -65,6 +67,13 @@ function useFetch<T>(fetcher: () => Promise<T | null>): FetchState<T> {
   return { data, loading, error, refetch };
 }
 
+async function loadProfilesByIds(ids: number[]): Promise<Map<number, Profile>> {
+  const uniqueIds = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
+  if (uniqueIds.length === 0) return new Map();
+  const rows = await profilesApi.batch(uniqueIds);
+  return new Map(rows.map((row) => [Number(row.id), row as Profile]));
+}
+
 // ── Categories ────────────────────────────────────────────────────────────────
 
 export function useCategories(domain?: CategoryDomain) {
@@ -102,14 +111,19 @@ export function usePublicCollections(type?: 'prelims' | 'mains' | 'mixed') {
   return useFetch<PremiumCollection[]>(async () => {
     let q = supabase
       .from("premium_collections")
-      .select("*, creator:profiles(id,display_name,avatar_url)")
+      .select("*")
       .eq("is_active", true)
       .eq("is_public", true)
       .order("created_at", { ascending: false });
     if (type) q = q.eq("collection_type", type);
     const { data, error } = await q;
     if (error) throw error;
-    return (data ?? []) as unknown as PremiumCollection[];
+    const rows = (data ?? []) as PremiumCollection[];
+    const creators = await loadProfilesByIds(rows.map((row) => row.creator_id));
+    return rows.map((row) => ({
+      ...row,
+      creator: creators.get(row.creator_id) ?? row.creator,
+    }));
   });
 }
 
@@ -121,7 +135,6 @@ export function useCollection(id: number | null) {
       .from("premium_collections")
       .select(`
         *,
-        creator:profiles(id,display_name,avatar_url,role),
         items:premium_collection_items(
           *,
           quiz:quizzes(*),
@@ -133,7 +146,8 @@ export function useCollection(id: number | null) {
       .eq("id", id)
       .single();
     if (error) throw error;
-    return data as unknown as PremiumCollection;
+    const creator = data?.creator_id ? (await loadProfilesByIds([Number(data.creator_id)])).get(Number(data.creator_id)) : null;
+    return { ...(data as unknown as PremiumCollection), creator: creator ?? data?.creator };
   });
 }
 
@@ -146,7 +160,6 @@ export function usePublicTestSeries(kind?: 'prelims' | 'mains' | 'hybrid') {
       .from("test_series")
       .select(`
         *,
-        creator:profiles(id,display_name,avatar_url),
         exams:test_series_exams(exam:exams(id,name,slug))
       `)
       .eq("is_active", true)
@@ -155,7 +168,12 @@ export function usePublicTestSeries(kind?: 'prelims' | 'mains' | 'hybrid') {
     if (kind) q = q.eq("series_kind", kind);
     const { data, error } = await q;
     if (error) throw error;
-    return (data ?? []) as unknown as TestSeries[];
+    const rows = (data ?? []) as TestSeries[];
+    const creators = await loadProfilesByIds(rows.map((row) => row.creator_id));
+    return rows.map((row) => ({
+      ...row,
+      creator: creators.get(row.creator_id) ?? row.creator,
+    }));
   });
 }
 
@@ -167,7 +185,6 @@ export function useTestSeries(id: number | null) {
       .from("test_series")
       .select(`
         *,
-        creator:profiles(id,display_name,avatar_url,role),
         exams:test_series_exams(exam:exams(id,name,slug)),
         program_units(
           *,
@@ -177,7 +194,8 @@ export function useTestSeries(id: number | null) {
       .eq("id", id)
       .single();
     if (error) throw error;
-    return data as unknown as TestSeries;
+    const creator = data?.creator_id ? (await loadProfilesByIds([Number(data.creator_id)])).get(Number(data.creator_id)) : null;
+    return { ...(data as unknown as TestSeries), creator: creator ?? data?.creator };
   });
 }
 
@@ -266,15 +284,41 @@ export function useMyMentorshipRequests(asMentor = false) {
     const field = asMentor ? "mentor_id" : "user_id";
     const { data, error } = await supabase
       .from("mentorship_requests")
-      .select(`
-        *,
-        user:profiles!mentorship_requests_user_id_fkey(id,display_name,avatar_url),
-        mentor:profiles!mentorship_requests_mentor_id_fkey(id,display_name,avatar_url)
-      `)
+      .select("*")
       .eq(field, profileId)
       .order("requested_at", { ascending: false });
     if (error) throw error;
-    return (data ?? []) as unknown as MentorshipRequest[];
+    const rows = (data ?? []) as unknown as Array<MentorshipRequest & { user?: unknown; mentor?: unknown }>;
+    const profileIds = Array.from(
+      new Set(
+        rows
+          .flatMap((row) => [Number(row.user_id || 0), Number(row.mentor_id || 0)])
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ),
+    );
+    const profiles = profileIds.length > 0 ? await profilesApi.batch(profileIds) : [];
+    const profileMap = new Map(profiles.map((row) => [row.id, row]));
+    return rows.map((row) => {
+      const userProfile = profileMap.get(Number(row.user_id || 0));
+      const mentorProfile = profileMap.get(Number(row.mentor_id || 0));
+      return {
+        ...row,
+        user: userProfile
+          ? {
+              id: userProfile.id,
+              display_name: userProfile.display_name,
+              avatar_url: userProfile.avatar_url,
+            }
+          : null,
+        mentor: mentorProfile
+          ? {
+              id: mentorProfile.id,
+              display_name: mentorProfile.display_name,
+              avatar_url: mentorProfile.avatar_url,
+            }
+          : null,
+      } as MentorshipRequest;
+    });
   });
 }
 

@@ -8,6 +8,7 @@ import CollectionContentList, { type CollectionContentListItem } from "@/compone
 import HistoryBackButton from "@/components/ui/HistoryBackButton";
 import { canAccessMainsAuthoring, canAccessManualQuizBuilder } from "@/lib/accessControl";
 import { getCollectionTestKind } from "@/lib/collectionKind";
+import { getCurrentProfile } from "@/lib/backendServer";
 import { richTextToPlainText } from "@/lib/richText";
 import { createClient } from "@/lib/supabase/server";
 import type { MainsCollectionTestPayload } from "@/types/premium";
@@ -223,13 +224,7 @@ export default async function CollectionDetailPage({ params }: PageProps) {
       return left.collection_item_id - right.collection_item_id;
     });
 
-  const { data: profile } = user
-    ? await supabase
-        .from("profiles")
-        .select("role")
-        .eq("auth_user_id", user.id)
-        .maybeSingle()
-    : { data: null };
+  const profile = user ? await getCurrentProfile<{ role: string }>() : null;
 
   const { data: programStep } = await supabase
     .from("program_unit_steps")

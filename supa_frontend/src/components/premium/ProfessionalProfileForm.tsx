@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
+import { profilesApi } from "@/lib/backendServices";
 import {
   isAdminLike,
   isCreatorLike,
@@ -199,8 +200,8 @@ export default function ProfessionalProfileForm() {
       try {
         const response = await premiumApi.get<ProfessionalProfile>("/profiles/me");
         if (!active) return;
-        const profile = response.data;
-        const normalizedRole = normalizeEditableRole(profile.role, defaultProfileRole);
+        const profile = response.data as ProfessionalProfile & { professional_role?: string };
+        const normalizedRole = normalizeEditableRole(profile.professional_role || profile.role, defaultProfileRole);
         setRole(normalizedRole);
         setDisplayName(profile.display_name || "");
         setHeadline(profile.headline || "");
@@ -337,6 +338,7 @@ export default function ProfessionalProfileForm() {
         },
       };
       await premiumApi.put("/profiles/me", payload);
+      profilesApi.clearCache();
       toast.success("Professional profile saved");
     } catch (error: unknown) {
       toast.error("Failed to save profile", { description: toError(error) });

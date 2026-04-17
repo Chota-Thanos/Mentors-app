@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import AppLayout from "@/components/layouts/AppLayout";
 import MainsQuestionRepositoryStudio from "@/components/mains/MainsQuestionRepositoryStudio";
 import { canAccessMainsAuthoring } from "@/lib/accessControl";
+import { getCurrentProfile } from "@/lib/backendServer";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function MainsQuestionRepositoryPage() {
@@ -15,11 +16,7 @@ export default async function MainsQuestionRepositoryPage() {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
+  const profile = await getCurrentProfile<{ role: string }>();
 
   const canAccess = canAccessMainsAuthoring({ role: profile?.role });
 

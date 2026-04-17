@@ -5,6 +5,7 @@ import AppLayout from "@/components/layouts/AppLayout";
 import MyTestsPageClient, {
   type MyTestsCardItem,
 } from "@/components/premium/MyTestsPageClient";
+import { getCurrentProfile } from "@/lib/backendServer";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function CollectionsPage() {
@@ -15,13 +16,7 @@ export default async function CollectionsPage() {
 
   if (!user) redirect("/login");
 
-  // ── Resolve profiles.id (bigint) from auth.users.id (uuid) ──────────────
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, role")
-    .eq("auth_user_id", user.id)
-    .single();
-
+  const profile = await getCurrentProfile<{ id: number; role: string }>();
   if (!profile) redirect("/onboarding");
 
   const profileId = profile.id;

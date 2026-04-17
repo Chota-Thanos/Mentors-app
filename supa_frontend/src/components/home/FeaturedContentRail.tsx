@@ -7,6 +7,7 @@ import { ArrowRight, Star } from "lucide-react";
 
 import { useExamContext } from "@/context/ExamContext";
 import { createClient } from "@/lib/supabase/client";
+import { profilesApi } from "@/lib/backendServices";
 
 // Mapped types for V2
 interface MappedSeries {
@@ -84,7 +85,7 @@ async function fetchPrograms(
     .from("test_series")
     .select(`
       id, name, description, price, is_paid, cover_image_url, series_kind,
-      creator:profiles(display_name),
+      creator_id,
       program_units(id)
     `)
     .eq("is_active", true)
@@ -101,6 +102,13 @@ async function fetchPrograms(
   const { data, error } = await query;
   if (error) throw error;
 
+  const creatorIds = Array.from(
+    new Set((data || []).map((row: any) => Number(row.creator_id)).filter((id) => Number.isFinite(id) && id > 0)),
+  );
+  const creators = creatorIds.length
+    ? new Map((await profilesApi.batch(creatorIds)).map((row) => [row.id, row]))
+    : new Map<number, { display_name?: string }>();
+
   return (data || []).map((row: any) => ({
     series: {
       id: row.id,
@@ -113,7 +121,7 @@ async function fetchPrograms(
       exam_ids: [], // Mocking for now, we filter by what we show directly
     },
     provider_profile: {
-      display_name: row.creator?.display_name || "Faculty",
+      display_name: creators.get(Number(row.creator_id))?.display_name || "Faculty",
     },
     category_labels: [row.series_kind],
   }));

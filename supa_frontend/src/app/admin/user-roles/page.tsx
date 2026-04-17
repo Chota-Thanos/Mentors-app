@@ -1,9 +1,5 @@
 /**
  * V2 Admin User Roles Page
- * 
- * In V2, roles are stored on public.profiles.role (not auth.users metadata).
- * This page directly queries + updates profiles.role via Supabase.
- * No backend API call needed — admin client handles this via service role.
  */
 
 "use client";
@@ -14,17 +10,11 @@ import { toast } from "sonner";
 
 import AdminOnly from "@/components/auth/AdminOnly";
 import AppLayout from "@/components/layouts/AppLayout";
-import { createClient } from "@/lib/supabase/client";
-import { getRoleLabel, getRoleBadgeColor } from "@/lib/accessControl";
+import { profilesApi } from "@/lib/backendServices";
+import { getRoleBadgeColor, getRoleLabel } from "@/lib/accessControl";
 import type { UserRole } from "@/types/db";
 
-const V2_ROLE_OPTIONS: UserRole[] = [
-  "admin",
-  "moderator",
-  "prelims_expert",
-  "mains_expert",
-  "user",
-];
+const ROLE_OPTIONS: UserRole[] = ["admin", "moderator", "prelims_expert", "mains_expert", "user"];
 
 interface UserRoleRow {
   id: number;
@@ -36,7 +26,6 @@ interface UserRoleRow {
 }
 
 export default function AdminUserRolesPage() {
-  const supabase = createClient();
   const [rows, setRows] = useState<UserRoleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -45,23 +34,16 @@ export default function AdminUserRolesPage() {
   const loadUsers = async () => {
     setLoading(true);
     try {
-      // Query profiles directly — V2 stores role on profiles table
-      let q = supabase
-        .from("profiles")
-        .select("id, auth_user_id, display_name, email, role, created_at")
-        .order("role")
-        .order("display_name")
-        .limit(300);
-
-      if (search.trim()) {
-        q = q.or(
-          `display_name.ilike.%${search.trim()}%,email.ilike.%${search.trim()}%,role.eq.${search.trim()}`,
-        );
-      }
-
-      const { data, error } = await q;
-      if (error) throw error;
-      setRows((data ?? []) as UserRoleRow[]);
+      const data = await profilesApi.all();
+      const term = search.trim().toLowerCase();
+      const filtered = term
+        ? data.filter((row) =>
+            row.display_name?.toLowerCase().includes(term) ||
+            row.email?.toLowerCase().includes(term) ||
+            row.role?.toLowerCase().includes(term),
+          )
+        : data;
+      setRows(filtered as UserRoleRow[]);
     } catch (err) {
       toast.error("Failed to load users", {
         description: String((err as Error).message),
@@ -80,16 +62,8 @@ export default function AdminUserRolesPage() {
   const updateRole = async (profileId: number, role: UserRole) => {
     setSavingById((prev) => ({ ...prev, [profileId]: true }));
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({ role })
-        .eq("id", profileId);
-
-      if (error) throw error;
-
-      setRows((prev) =>
-        prev.map((row) => (row.id === profileId ? { ...row, role } : row)),
-      );
+      await profilesApi.updateRole(profileId, role);
+      setRows((prev) => prev.map((row) => (row.id === profileId ? { ...row, role } : row)));
       toast.success(`Role updated to: ${getRoleLabel(role)}`);
     } catch (err) {
       toast.error("Failed to update role", {
@@ -149,63 +123,50 @@ export default function AdminUserRolesPage() {
                 {loading && (
                   <tr>
                     <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
-                      Loading users…
+                      Loading users...
                     </td>
                   </tr>
                 )}
 
-                {!loading &&
-                  sortedRows.map((row) => {
-                    const saving = Boolean(savingById[row.id]);
-                    return (
-                      <tr key={row.id} className="border-t border-slate-100">
-                        <td className="px-3 py-2 align-top">
-                          <p className="font-medium text-slate-900">
-                            {row.display_name || "No name"}
-                          </p>
-                          <p className="text-xs text-slate-500">{row.email}</p>
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <span
-                            className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${getRoleBadgeColor(row.role)}`}
-                          >
-                            {getRoleLabel(row.role)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <div className="flex items-center gap-2">
-                            <select
-                              value={row.role}
-                              onChange={(e) =>
-                                void updateRole(row.id, e.target.value as UserRole)
-                              }
-                              disabled={saving}
-                              className="rounded border border-slate-300 px-2 py-1 text-sm disabled:opacity-60"
-                            >
-                              {V2_ROLE_OPTIONS.map((r) => (
-                                <option key={r} value={r}>
-                                  {getRoleLabel(r)}
-                                </option>
-                              ))}
-                            </select>
-                            {saving && (
-                              <span className="text-xs text-slate-500">Saving…</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 align-top text-xs text-slate-600">
-                          {row.created_at
-                            ? new Date(row.created_at).toLocaleDateString("en-IN")
-                            : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                {!loading && sortedRows.map((row) => {
+                  const saving = Boolean(savingById[row.id]);
+                  return (
+                    <tr key={row.id} className="border-t border-slate-100">
+                      <td className="px-3 py-3">
+                        <div className="font-medium text-slate-900">{row.display_name}</div>
+                        <div className="text-xs text-slate-500">{row.email}</div>
+                        <div className="text-[11px] text-slate-400">#{row.id} · {row.auth_user_id}</div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${getRoleBadgeColor(row.role)}`}>
+                          {getRoleLabel(row.role)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <select
+                          value={row.role}
+                          disabled={saving}
+                          onChange={(e) => void updateRole(row.id, e.target.value as UserRole)}
+                          className="rounded border border-slate-300 px-2 py-1 text-sm"
+                        >
+                          {ROLE_OPTIONS.map((role) => (
+                            <option key={role} value={role}>
+                              {getRoleLabel(role)}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-3 py-3 text-slate-500">
+                        {row.created_at ? new Date(row.created_at).toLocaleString() : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
 
                 {!loading && sortedRows.length === 0 && (
                   <tr>
                     <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
-                      No users found.
+                      No users found
                     </td>
                   </tr>
                 )}

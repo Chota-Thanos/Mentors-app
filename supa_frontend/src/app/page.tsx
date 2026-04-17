@@ -434,7 +434,7 @@ function LearnerHome({ user }: { user: unknown }) {
           loadLearnerMentorshipOrders(profileIdNum),
           globalExamId ? supabase
             .from("user_content_access")
-            .select("test_series_id, test_series(series_kind, name)")
+            .select("test_series_id")
             .eq("user_id", profileIdNum)
             .eq("is_active", true)
             .not("test_series_id", "is", null)
@@ -454,12 +454,25 @@ function LearnerHome({ user }: { user: unknown }) {
         ]);
 
         if (!active) return;
-        
-        const activeSeriesRows = (activeSeriesRes.data || []).map((row: any) => ({
-          series_id: row.test_series_id,
-          series_kind: row.test_series?.series_kind,
-          title: row.test_series?.name,
-        }));
+
+        const activeSeriesIds = Array.from(
+          new Set((activeSeriesRes.data || []).map((row: any) => Number(row.test_series_id)).filter((id) => Number.isFinite(id) && id > 0)),
+        );
+        const activeSeriesDetails = activeSeriesIds.length
+          ? await supabase
+              .from("test_series")
+              .select("id, series_kind, name")
+              .in("id", activeSeriesIds)
+          : { data: [] as any[] };
+        const activeSeriesById = new Map((activeSeriesDetails.data || []).map((row: any) => [Number(row.id), row]));
+        const activeSeriesRows = activeSeriesIds.map((seriesId) => {
+          const row = activeSeriesById.get(seriesId);
+          return {
+            series_id: seriesId,
+            series_kind: row?.series_kind,
+            title: row?.name,
+          };
+        });
         
         setAnalytics({
           purchase_overview: {

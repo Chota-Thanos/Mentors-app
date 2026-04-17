@@ -4,6 +4,7 @@
  */
 
 import { createClient } from "@/lib/supabase/client";
+import { profilesApi } from "@/lib/backendServices";
 import {
   normalizeMainsCopySubmission,
   normalizeMentorshipRequest,
@@ -54,10 +55,7 @@ export async function loadLearnerMentorshipOrders(
   // Fetch mentorship requests for this learner, joined with mentor profile
   const { data: requestsData, error: reqError } = await supabase
     .from("mentorship_requests")
-    .select(`
-      *,
-      mentor:profiles!mentorship_requests_mentor_id_fkey(id, display_name, avatar_url)
-    `)
+    .select("*")
     .eq("user_id", profileId)
     .order("requested_at", { ascending: false });
 
@@ -109,9 +107,17 @@ export async function loadLearnerMentorshipOrders(
   }
 
   const mentorNameById: Record<string, string> = {};
-  for (const raw of requestsData ?? []) {
-    if (raw.mentor?.display_name) {
-      mentorNameById[String(raw.mentor_id)] = raw.mentor.display_name;
+  const mentorIds = Array.from(
+    new Set(
+      (requestsData ?? [])
+        .map((row) => Number((row as Record<string, unknown>).mentor_id || 0))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    ),
+  );
+  if (mentorIds.length > 0) {
+    const mentorProfiles = await profilesApi.batch(mentorIds);
+    for (const mentor of mentorProfiles) {
+      mentorNameById[String(mentor.id)] = mentor.display_name;
     }
   }
 

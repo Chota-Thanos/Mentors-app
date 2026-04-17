@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from .config import get_settings
-from .routers import ai_quiz, ai_mains, ai_articles, payments, pdfs, live, analytics, compat
+from .routers import ai_quiz, ai_mains, ai_articles, payments, pdfs, live, analytics, compat, profiles
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ app.include_router(pdfs.router)
 app.include_router(live.router)
 app.include_router(analytics.router)
 app.include_router(compat.router)
+app.include_router(profiles.router)
 
 
 # ── Health check ───────────────────────────────────────────────────────────────

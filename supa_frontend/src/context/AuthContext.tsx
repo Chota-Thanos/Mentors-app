@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { profilesApi } from "@/lib/backendServices";
 
 export type AuthUser = Record<string, unknown> &
   Partial<User> & {
@@ -27,6 +28,16 @@ const AuthContext = createContext<AuthContextType>({
     signOut: async () => { },
 });
 
+function areSameAuthUser(left: AuthUser | null, right: AuthUser | null): boolean {
+    if (left === right) return true;
+    if (!left || !right) return false;
+    return (
+        String(left.id || "") === String(right.id || "") &&
+        String(left.role || "") === String(right.role || "") &&
+        String(left.email || "") === String(right.email || "")
+    );
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [user, setUser] = useState<AuthUser | null>(null);
     const [loading, setLoading] = useState(true);
@@ -35,12 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const enrichUserWithProfileRole = async (nextUser: AuthUser | null): Promise<AuthUser | null> => {
         if (!nextUser?.id) return nextUser;
         try {
-            const { data: profile } = await supabase
-                .from("profiles")
-                .select("role")
-                .eq("auth_user_id", nextUser.id)
-                .maybeSingle();
-
+            const profile = await profilesApi.me();
             if (!profile?.role) return nextUser;
             return {
                 ...nextUser,
@@ -55,7 +61,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const initAuth = async () => {
             const { data: { session } } = await supabase.auth.getSession();
             const nextUser = await enrichUserWithProfileRole((session?.user as AuthUser | null) ?? null);
-            setUser(nextUser);
+            if (!nextUser) {
+                profilesApi.clearCache();
+            }
+            setUser((current) => (areSameAuthUser(current, nextUser) ? current : nextUser));
             setLoading(false);
         };
 
@@ -64,7 +73,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             void (async () => {
                 const nextUser = await enrichUserWithProfileRole((session?.user as AuthUser | null) ?? null);
-                setUser(nextUser);
+                if (!nextUser) {
+                    profilesApi.clearCache();
+                }
+                setUser((current) => (areSameAuthUser(current, nextUser) ? current : nextUser));
                 setLoading(false);
             })();
         });
@@ -75,6 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, [supabase]);
 
     const signOut = async () => {
+        profilesApi.clearCache();
         await supabase.auth.signOut();
     };
 

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useExamContext } from "@/context/ExamContext";
+import { profilesApi } from "@/lib/backendServices";
 import { premiumApi } from "@/lib/premiumApi";
 import { richTextToPlainText } from "@/lib/richText";
 import type {
@@ -489,7 +490,7 @@ export default function TestSeriesCatalogView({
           .from("test_series")
           .select(`
             id, name, description, price, is_paid, cover_image_url, series_kind, created_at,
-            creator:profiles(display_name),
+            creator_id,
             program_units(id)
           `)
           .eq("is_active", true)
@@ -521,6 +522,13 @@ export default function TestSeriesCatalogView({
         if (error) throw error;
         
         if (!active) return;
+
+        const creatorIds = Array.from(
+          new Set((data || []).map((row: any) => Number(row.creator_id)).filter((id) => Number.isFinite(id) && id > 0)),
+        );
+        const creators = creatorIds.length
+          ? new Map((await profilesApi.batch(creatorIds)).map((row) => [row.id, row]))
+          : new Map<number, { display_name?: string }>();
         
         const mappedRows = (data || []).map((row: any) => ({
           series: {
@@ -535,7 +543,7 @@ export default function TestSeriesCatalogView({
              exam_ids: [],
           },
           provider_profile: {
-             display_name: row.creator?.display_name || "Faculty",
+             display_name: creators.get(Number(row.creator_id))?.display_name || "Faculty",
              is_verified: false,
              meta: {},
           },

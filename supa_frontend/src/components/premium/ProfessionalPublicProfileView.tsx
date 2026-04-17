@@ -22,8 +22,8 @@ import RichTextContent from "@/components/ui/RichTextContent";
 import MentorshipRequestModal from "./MentorshipRequestModal";
 import { useAuth } from "@/context/AuthContext";
 import { useProfile } from "@/context/ProfileContext";
+import { premiumApi } from "@/lib/premiumApi";
 import { createClient } from "@/lib/supabase/client";
-import { toDisplayRoleLabel } from "@/lib/roleLabels";
 import type {
   MentorshipRequest,
   ProfessionalProfileReview,
@@ -145,7 +145,7 @@ export default function ProfessionalPublicProfileView({
   userId: string;
   seriesId?: number | null;
 }) {
-  const { isAuthenticated, showLoginModal, user } = useAuth();
+  const { isAuthenticated, showLoginModal } = useAuth();
   const { profileId } = useProfile();
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<ProfessionalPublicProfileDetail | null>(null);
@@ -163,169 +163,23 @@ export default function ProfessionalPublicProfileView({
       setLoading(true);
       try {
         const supabase = createClient();
-        
-        // 1. Get profile and creator details
-        // Note: userId can be auth_user_id (UUID) or profile.id (BIGINT)
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
-        
-        let query = supabase
-          .from("profiles")
-          .select(`
-            *,
-            creator:creator_profiles(*)
-          `);
-          
-        if (isUuid) {
-          query = query.eq("auth_user_id", userId);
-        } else {
-          query = query.eq("id", userId);
-        }
+        const { data: detail } = await premiumApi.get<ProfessionalPublicProfileDetail>(`/profiles/${userId}/detail`, {
+          params: { reviews_limit: 12 },
+        });
 
-        const { data: profile, error: pError } = await query.single();
-
-        if (pError) throw pError;
-        if (!profile) throw new Error("Profile not found");
-
-        const cProfile = profile.creator?.[0] || profile.creator; // Handle array or object
-        if (!cProfile) throw new Error("Creator profile not found");
-
-        // 2. Fetch Programs (Test Series)
-        const { data: seriesData, error: sError } = await supabase
-          .from("test_series")
-          .select(`
-            id, name, description, price, access_type, 
-            cover_image_url, series_kind, created_at,
-            program_units(id)
-          `)
-          .eq("creator_id", profile.id)
-          .eq("is_public", true)
-          .eq("is_active", true)
-          .order("created_at", { ascending: false });
-
-        if (sError) throw sError;
-
-        // 3. Fetch review summary and recent reviews
-        const { data: reviews, error: rError } = await supabase
-          .from("creator_profile_reviews")
-          .select(`
-            *,
-            reviewer:profiles(display_name)
-          `)
-          .eq("creator_profile_id", cProfile.id)
-          .order("created_at", { ascending: false });
-
-        if (rError) throw rError;
-
-        // 4. Check for existing active request
         let activeRequest: MentorshipRequest | null = null;
         if (isAuthenticated && profileId) {
           const { data: requestData } = await supabase
             .from("mentorship_requests")
             .select("*")
             .eq("user_id", profileId)
-            .eq("mentor_id", profile.id)
+            .eq("mentor_id", detail.profile.id)
             .in("status", ["requested", "scheduled"])
             .maybeSingle();
           activeRequest = requestData as MentorshipRequest;
         }
-
-        const totalReviews = reviews?.length || 0;
-        const avgRating = totalReviews > 0 
-          ? reviews.reduce((acc, r) => acc + r.rating, 0) / totalReviews 
-          : 0;
-
-        // 4. Get actual counts for stats
-        const seriesIdsForStats = (seriesData || []).map(s => s.id);
-        const [studentsCountRes, sessionsCountRes] = await Promise.all([
-          seriesIdsForStats.length > 0 
-            ? supabase
-                .from("user_content_access")
-                .select("id", { count: "exact", head: true })
-                .in("test_series_id", seriesIdsForStats)
-            : Promise.resolve({ count: 0 }),
-          supabase
-            .from("mentorship_sessions")
-            .select("id", { count: "exact", head: true })
-            .eq("mentor_id", profile.id)
-            .eq("status", "completed")
-        ]);
-
-        // Assemble Detail object (adapter for existing UI)
-        const assembledDetail: ProfessionalPublicProfileDetail = {
-          profile: {
-            id: cProfile.id,
-            user_id: profile.id.toString(),
-            role: profile.role,
-            display_name: cProfile.display_name,
-            headline: cProfile.headline,
-            bio: cProfile.bio,
-            years_experience: cProfile.years_experience,
-            city: cProfile.city,
-            profile_image_url: cProfile.profile_image_url || profile.avatar_url,
-            is_verified: cProfile.is_verified,
-            highlights: Array.isArray(cProfile.highlights) ? cProfile.highlights : [],
-            credentials: Array.isArray(cProfile.credentials) ? cProfile.credentials : [],
-            specialization_tags: Array.isArray(cProfile.specialization_tags) ? cProfile.specialization_tags : [],
-            languages: Array.isArray(cProfile.languages) ? cProfile.languages : [],
-            is_public: cProfile.is_public,
-            is_active: cProfile.is_active,
-            exam_ids: [], // Fetching exams would be a separate join
-            meta: cProfile.social_links || {},
-            created_at: cProfile.created_at,
-          },
-          role_label: toDisplayRoleLabel(profile.role),
-          achievements: (cProfile.highlights as any[])?.map(h => h.label) || [],
-          service_specifications: [],
-          mentorship_price: (cProfile.social_links as any)?.mentorship_price || 0,
-          copy_evaluation_price: (cProfile.social_links as any)?.copy_review_price || 0,
-          currency: (cProfile.social_links as any)?.currency || "INR",
-          response_time_text: "Replies usually in 24h",
-          exam_focus: profile.role === "prelims_expert" ? "Prelims" : "Mains",
-          students_mentored: studentsCountRes.count || 0,
-          sessions_completed: sessionsCountRes.count || 0,
-          mentorship_availability_mode: "open",
-          mentorship_available_series_ids: [],
-          mentorship_default_call_provider: "custom",
-          copy_evaluation_enabled: Boolean((cProfile.social_links as any)?.copy_evaluation_enabled),
-          provided_series: (seriesData || []).map(s => ({
-            id: s.id,
-            title: s.name,
-            description: s.description,
-            price: Number(s.price || 0),
-            access_type: s.access_type,
-            cover_image_url: s.cover_image_url,
-            series_kind: s.series_kind,
-            test_count: s.program_units?.length || 0,
-            is_public: true,
-            is_active: true,
-            created_at: s.created_at,
-            meta: {},
-            exam_ids: [],
-            provider_user_id: profile.id.toString(),
-          })) as TestSeries[],
-          assigned_series: [],
-          review_summary: {
-            average_rating: avgRating,
-            total_reviews: totalReviews,
-            rating_1: 0, rating_2: 0, rating_3: 0, rating_4: 0, rating_5: 0,
-          },
-          recent_reviews: (reviews || []).map(r => ({
-            id: r.id,
-            reviewer_label: r.reviewer?.display_name || "Mentee",
-            rating: r.rating,
-            title: r.title,
-            comment: r.comment,
-            target_user_id: profile.id.toString(),
-            reviewer_user_id: r.reviewer_id.toString(),
-            is_public: true,
-            is_active: true,
-            meta: {},
-            created_at: r.created_at,
-          })),
-        };
-
         if (active) {
-          setDetail(assembledDetail);
+          setDetail(detail);
           setExistingActiveRequest(activeRequest);
         }
       } catch (error: unknown) {
@@ -339,7 +193,7 @@ export default function ProfessionalPublicProfileView({
 
     fetchProfile();
     return () => { active = false; };
-  }, [userId]);
+  }, [isAuthenticated, profileId, userId]);
 
   
   // Check for active requests

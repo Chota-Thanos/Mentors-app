@@ -144,7 +144,6 @@ export default function MentorDirectoryView() {
         .from("creator_profiles")
         .select(`
           *,
-          profile:profiles!creator_profiles_user_id_fkey(id, display_name, avatar_url, role, city, bio, is_active),
           exams:creator_profile_exams(exam_id)
         `)
         .eq("is_public", true)
@@ -159,25 +158,26 @@ export default function MentorDirectoryView() {
             ? row.exams.map((item: any) => Number(item.exam_id)).filter((value: number) => Number.isFinite(value))
             : [];
           const highlights = Array.isArray(row.highlights) ? row.highlights : [];
+          const socialLinks = asRecord(row.social_links);
           return {
             id: row.id,
             user_id: String(row.user_id),
-            role: row.profile?.role || "mains_expert",
-            display_name: row.display_name || row.profile?.display_name || "Verified Mentor",
-            profile_image_url: row.profile_image_url || row.profile?.avatar_url || "",
+            role: String(socialLinks.professional_role || "mains_expert"),
+            display_name: row.display_name || "Verified Mentor",
+            profile_image_url: row.profile_image_url || "",
             headline: row.headline || "Verified Expert Mentor",
-            bio: row.bio || row.profile?.bio || "",
+            bio: row.bio || "",
             specialization_tags: Array.isArray(row.specialization_tags) ? row.specialization_tags : [],
             credentials: Array.isArray(row.credentials) ? row.credentials : [],
             highlights,
             languages: Array.isArray(row.languages) ? row.languages : [],
             experiences: [],
-            meta: asRecord(row.social_links),
+            meta: socialLinks,
             exam_ids: examIds,
             is_verified: !!row.is_verified,
             is_public: !!row.is_public,
             is_active: !!row.is_active,
-            city: row.city || row.profile?.city || "",
+            city: row.city || "",
             created_at: row.created_at,
             updated_at: row.updated_at,
           };

@@ -29,6 +29,9 @@ interface AccessRow {
   granted_at: string;
   expires_at: string | null;
   is_active: boolean;
+  test_series_id?: number | null;
+  collection_id?: number | null;
+  payment_id?: number | null;
   test_series?: { id: number; name: string; series_kind: string } | null;
   premium_collections?: { id: number; name: string } | null;
   payments?: { amount: number; currency: string } | null;
@@ -69,12 +72,7 @@ export default function MyPurchasesView() {
           // Purchased access
           supabase
             .from("user_content_access")
-            .select(`
-              id, access_type, granted_at, expires_at, is_active,
-              test_series:test_series(id, name, series_kind),
-              premium_collections:premium_collections(id, name),
-              payments:payments(amount, currency)
-            `)
+            .select("id, access_type, granted_at, expires_at, is_active, test_series_id, collection_id, payment_id")
             .eq("user_id", profileId)
             .eq("is_active", true)
             .order("granted_at", { ascending: false }),
@@ -82,7 +80,75 @@ export default function MyPurchasesView() {
 
         if (!active) return;
         setSubscription((subRes.data as SubscriptionRow | null) ?? null);
-        setAccessRows((accessRes.data ?? []) as unknown as AccessRow[]);
+        const baseAccessRows = (accessRes.data ?? []) as unknown as AccessRow[];
+        const testSeriesIds = Array.from(
+          new Set(
+            baseAccessRows
+              .map((row) => Number(row.test_series_id || 0))
+              .filter((id) => Number.isFinite(id) && id > 0),
+          ),
+        );
+        const collectionIds = Array.from(
+          new Set(
+            baseAccessRows
+              .map((row) => Number((row as { collection_id?: number }).collection_id || 0))
+              .filter((id) => Number.isFinite(id) && id > 0),
+          ),
+        );
+        const paymentIds = Array.from(
+          new Set(
+            baseAccessRows
+              .map((row) => Number((row as { payment_id?: number }).payment_id || 0))
+              .filter((id) => Number.isFinite(id) && id > 0),
+          ),
+        );
+        const testSeriesMap = new Map<number, { id: number; name: string; series_kind: string }>();
+        const collectionMap = new Map<number, { id: number; name: string }>();
+        const paymentMap = new Map<number, { amount: number; currency: string }>();
+        if (testSeriesIds.length > 0) {
+          const { data: seriesData } = await supabase
+            .from("test_series")
+            .select("id, name, series_kind")
+            .in("id", testSeriesIds);
+          for (const row of seriesData ?? []) {
+            const id = Number((row as { id?: number }).id || 0);
+            if (id > 0) {
+              testSeriesMap.set(id, row as { id: number; name: string; series_kind: string });
+            }
+          }
+        }
+        if (collectionIds.length > 0) {
+          const { data: collectionsData } = await supabase
+            .from("premium_collections")
+            .select("id, name")
+            .in("id", collectionIds);
+          for (const row of collectionsData ?? []) {
+            const id = Number((row as { id?: number }).id || 0);
+            if (id > 0) {
+              collectionMap.set(id, row as { id: number; name: string });
+            }
+          }
+        }
+        if (paymentIds.length > 0) {
+          const { data: paymentsData } = await supabase
+            .from("payments")
+            .select("id, amount, currency")
+            .in("id", paymentIds);
+          for (const row of paymentsData ?? []) {
+            const id = Number((row as { id?: number }).id || 0);
+            if (id > 0) {
+              paymentMap.set(id, row as { amount: number; currency: string });
+            }
+          }
+        }
+        setAccessRows(
+          baseAccessRows.map((row) => ({
+            ...row,
+            test_series: row.test_series_id ? testSeriesMap.get(Number(row.test_series_id)) || null : null,
+            premium_collections: row.collection_id ? collectionMap.get(Number(row.collection_id)) || null : null,
+            payments: row.payment_id ? paymentMap.get(Number(row.payment_id)) || null : null,
+          })),
+        );
       } catch (err) {
         toast.error("Failed to load purchases", {
           description: String((err as Error).message),

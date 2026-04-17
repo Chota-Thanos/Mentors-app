@@ -16,7 +16,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { useExamContext } from "@/context/ExamContext";
-import { premiumApi } from "@/lib/premiumApi";
 import type { ProfessionalProfile } from "@/types/premium";
 
 function toErrorMessage(error: unknown): string {
@@ -158,21 +157,20 @@ export default function MentorshipLandingView() {
         const { createClient } = await import("@/lib/supabase/client");
         const supabase = createClient();
 
-        let query = supabase
-          .from("profiles")
-          .select("*")
-          .in("role", ["prelims_expert", "mains_expert"])
+        const { data, error: fetchError } = await supabase
+          .from("creator_profiles")
+          .select(
+            `
+              *,
+              exams:creator_profile_exams(exam_id)
+            `,
+          )
+          .eq("is_public", true)
           .eq("is_active", true)
           .eq("is_verified", true)
-          .order("created_at", { ascending: false })
+          .order("display_name")
           .limit(6);
 
-        // Supabase Postgres contains array query
-        if (globalExamId) {
-          query = query.contains("creator_exam_ids", [globalExamId]);
-        }
-
-        const { data, error: fetchError } = await query;
         if (fetchError) throw fetchError;
 
         if (!active) return;
@@ -180,19 +178,33 @@ export default function MentorshipLandingView() {
         const mappedMentors = (data || []).map((row: any) => {
           const rawHighlights = Array.isArray(row.highlights) ? row.highlights : [];
           const highlightLabels = rawHighlights.map((h: any) => typeof h === "string" ? h : h.label);
+          const examIds = Array.isArray(row.exams)
+            ? row.exams.map((item: any) => Number(item.exam_id)).filter((value: number) => Number.isFinite(value))
+            : [];
+          const socialLinks = typeof row.social_links === "object" && row.social_links ? row.social_links : {};
           
           return {
-            user_id: String(row.id),
+            user_id: String(row.user_id),
+            role: String((socialLinks as Record<string, unknown>).professional_role || "mains_expert"),
             display_name: row.display_name || "Verified Mentor",
-            profile_image_url: row.avatar_url || "",
+            profile_image_url: row.profile_image_url || "",
             headline: highlightLabels.length > 0 ? highlightLabels[0] : "Verified Expert Mentor",
             bio: row.bio || "",
             specialization_tags: highlightLabels,
-            credentials: [],
+            credentials: Array.isArray(row.credentials) ? row.credentials : [],
             highlights: rawHighlights,
+            languages: Array.isArray(row.languages) ? row.languages : [],
+            contact_url: row.contact_url || null,
+            public_email: row.public_email || null,
             experiences: [],
-            meta: typeof row.payout_details === "object" ? row.payout_details : {},
-            exam_ids: Array.isArray(row.creator_exam_ids) ? row.creator_exam_ids : [],
+            meta: socialLinks,
+            exam_ids: examIds,
+            is_verified: !!row.is_verified,
+            is_public: !!row.is_public,
+            is_active: !!row.is_active,
+            city: row.city || "",
+            created_at: row.created_at,
+            updated_at: row.updated_at,
           };
         }) as unknown as ProfessionalProfile[];
 

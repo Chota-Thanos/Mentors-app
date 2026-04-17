@@ -160,6 +160,21 @@ async def upload_pdf(
     }
 
 
+@router.get("/")
+async def list_pdfs(profile: ProfileRow = Depends(require_auth)):
+    """List the authenticated user's active uploaded PDFs."""
+    admin = get_admin_client()
+    resp = (
+        admin.table("uploaded_pdfs")
+        .select("id,filename,extracted_text,page_count,used_ocr,created_at,expires_at,status,user_id")
+        .eq("user_id", profile.id)
+        .eq("status", "active")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return resp.data or []
+
+
 @router.get("/{pdf_id}")
 async def get_pdf_meta(pdf_id: int, profile: ProfileRow = Depends(require_auth)):
     """Get PDF metadata (without the full text)."""

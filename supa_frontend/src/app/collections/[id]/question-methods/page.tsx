@@ -5,6 +5,7 @@ import AppLayout from "@/components/layouts/AppLayout";
 import MainsQuestionRepositoryStudio from "@/components/mains/MainsQuestionRepositoryStudio";
 import QuestionCreationMethodsView from "@/components/premium/QuestionCreationMethodsView";
 import { canAccessMainsAuthoring, canAccessManualQuizBuilder } from "@/lib/accessControl";
+import { getCurrentProfile } from "@/lib/backendServer";
 import { createClient } from "@/lib/supabase/server";
 
 interface PageProps {
@@ -30,11 +31,7 @@ export default async function QuestionMethodsPage({ params }: PageProps) {
 
   if (!collection) return notFound();
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
+  const profile = await getCurrentProfile<{ role: string }>();
 
   const resolvedTitle = String(collection.name || `Test #${collectionId}`).trim();
   const resolvedTestKind = String(collection.collection_type || "prelims").trim().toLowerCase();

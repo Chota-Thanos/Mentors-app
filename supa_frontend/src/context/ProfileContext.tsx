@@ -23,6 +23,7 @@ import React, {
   useState,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { profilesApi } from "@/lib/backendServices";
 import type { Profile, UserRole } from "@/types/db";
 
 // ── Context shape ─────────────────────────────────────────────────────────────
@@ -56,6 +57,17 @@ const ProfileContext = createContext<ProfileContextType>({
   refreshProfile: async () => {},
 });
 
+function areSameProfile(left: Profile | null, right: Profile | null): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.id === right.id &&
+    left.updated_at === right.updated_at &&
+    left.role === right.role &&
+    left.display_name === right.display_name
+  );
+}
+
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({
@@ -66,28 +78,25 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({
   const supabase = createClient();
 
   const fetchProfile = useCallback(
-    async (authUserId: string) => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("auth_user_id", authUserId)
-        .single();
-
-      if (error || !data) {
-        setProfile(null);
-      } else {
-        setProfile(data as Profile);
+    async (force = false) => {
+      try {
+        const data = await profilesApi.me(force ? { force: true } : undefined);
+        const nextProfile = data as Profile;
+        setProfile((current) => (areSameProfile(current, nextProfile) ? current : nextProfile));
+      } catch {
+        setProfile((current) => (current === null ? current : null));
+        profilesApi.clearCache();
       }
       setLoading(false);
     },
-    [supabase],
+    [],
   );
 
   const refreshProfile = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user?.id) {
       setLoading(true);
-      await fetchProfile(session.user.id);
+      await fetchProfile(true);
     }
   }, [supabase, fetchProfile]);
 
@@ -95,9 +104,10 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({
     // Initial load
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user?.id) {
-        fetchProfile(session.user.id);
+        fetchProfile();
       } else {
         setProfile(null);
+        profilesApi.clearCache();
         setLoading(false);
       }
     });
@@ -106,9 +116,10 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         if (session?.user?.id) {
-          fetchProfile(session.user.id);
+          fetchProfile();
         } else {
           setProfile(null);
+          profilesApi.clearCache();
           setLoading(false);
         }
       },

@@ -687,10 +687,19 @@ export default function LearnerPerformanceAudit() {
   const [mainsProgramRows, setMainsProgramRows] = useState<TestSeriesDiscoverySeries[]>([]);
   const [error, setError] = useState("");
 
-  const { profileId } = useProfile();
+  const { profileId, loading: profileLoading } = useProfile();
 
   useEffect(() => {
-    if (authLoading || !isAuthenticated || !profileId) return;
+    if (authLoading || profileLoading || !isAuthenticated) return;
+
+    if (!profileId) {
+      setPayload(null);
+      setQuizProgramRows([]);
+      setMainsProgramRows([]);
+      setError("Your learner profile is not ready yet. Complete onboarding or refresh the page.");
+      return;
+    }
+
     let active = true;
 
     const supabase = createClient();
@@ -756,9 +765,9 @@ export default function LearnerPerformanceAudit() {
     return () => {
       active = false;
     };
-  }, [authLoading, globalExamId, isAuthenticated, profileId]);
+  }, [authLoading, globalExamId, isAuthenticated, profileId, profileLoading]);
 
-  const loading = authLoading || (isAuthenticated && !payload && !error);
+  const loading = authLoading || profileLoading || (isAuthenticated && profileId ? !payload && !error : false);
   const sections = useMemo(() => {
     if (!payload) return [];
     return DASHBOARD_CONTENT_TYPES.map((contentType) => payload.sections[contentType]);

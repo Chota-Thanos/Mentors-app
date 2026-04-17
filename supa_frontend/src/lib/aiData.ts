@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import { pdfsApi } from "@/lib/backendServices";
 import type {
   PremiumAIContentType,
   PremiumAIExampleAnalysis,
@@ -221,15 +222,8 @@ export function mapUploadedPdfRow(row: unknown): UploadedPDF {
 }
 
 export async function fetchUploadedPdfs(): Promise<UploadedPDF[]> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("uploaded_pdfs")
-    .select("id, user_id, filename, extracted_text, page_count, used_ocr, created_at, expires_at, status")
-    .eq("status", "active")
-    .order("created_at", { ascending: false });
-
-  if (error) throw error;
-  return (data ?? []).map((row) => mapUploadedPdfRow(row));
+  const rows = await pdfsApi.list();
+  return rows.map((row) => mapUploadedPdfRow(row));
 }
 
 export function mapPremiumCollectionRow(row: unknown): PremiumCollection {
