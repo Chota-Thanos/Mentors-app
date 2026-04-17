@@ -5,6 +5,7 @@ gunicorn==22.0.0
 python-dotenv==1.0.1
 pydantic==2.7.4
 pydantic-settings==2.3.1
+setuptools>=70,<81
 
 # Supabase
 supabase==2.5.0
