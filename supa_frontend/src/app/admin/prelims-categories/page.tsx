@@ -10,17 +10,18 @@ export default function PrelimsCategoriesPage() {
       <AppLayout adminNav>
         <div className="mx-auto max-w-5xl space-y-6">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">Prelims Categories</h1>
+            <h1 className="text-3xl font-bold text-slate-900">Exams and Prelims Categories</h1>
             <p className="mt-2 text-sm text-slate-500">
-              Manage the full prelims taxonomy for GK, Maths, and Passage. Categories are global inside each prelims
-              type, and you can now delete them in bulk from the tree below.
+              Create exams and manage the full prelims taxonomy for GK, Maths, and Passage. Exams drive higher-level
+              selection across the premium system, while categories remain global inside each prelims type in the new
+              backend schema.
             </p>
           </div>
 
           <CategoryManager
-            title="Prelims Category Manager"
-            description="Create, edit, bulk create, and bulk delete prelims categories without the rest of the premium workspace around it."
-            showExamManagement={false}
+            title="Exam and Prelims Taxonomy Manager"
+            description="Create, edit, and remove exams, then manage prelims categories with bulk create and bulk delete from one admin page."
+            showExamManagement
           />
         </div>
       </AppLayout>

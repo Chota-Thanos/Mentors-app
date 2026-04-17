@@ -24,7 +24,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     title: "Premium",
     links: [
       { label: "Premium Workspace", href: "/premium-workspace", description: "Premium operations hub" },
-      { label: "Prelims Categories", href: "/admin/prelims-categories", description: "Manage prelims taxonomy with bulk actions" },
+      { label: "Exams and Categories", href: "/admin/prelims-categories", description: "Create exams and manage prelims taxonomy" },
       { label: "Quiz Category Sources", href: "/premium-workspace#category-ai-sources", description: "Manage quiz category attachments for AI source mode" },
       { label: "Mains Taxonomy Sources", href: "/premium-workspace#mains-ai-taxonomy", description: "Manage mains categories and source attachments" },
       { label: "Premium AI Settings", href: "/admin/premium-ai-settings", description: "Instruction settings and schemas" },
