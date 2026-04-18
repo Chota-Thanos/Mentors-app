@@ -4,19 +4,30 @@ import hashlib
 import hmac
 import json
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import razorpay
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..auth import ProfileRow, require_admin, require_auth
 from ..config import get_settings
 from ..db import get_admin_client
+from ..ai_engine import (
+    evaluate_mains_answer,
+    extract_text_from_images,
+    generate_mains_question,
+    generate_quiz,
+    generate_style_profile,
+    refine_style_profile,
+)
+from .pdfs import extract_text_from_url
 
 router = APIRouter(tags=["Compatibility"])
 _settings = get_settings()
+_LEGACY_PREVIEW_JOBS: dict[str, dict[str, Any]] = {}
 
 LEGACY_AI_CONTENT_TYPES = {
     "premium_gk_quiz",
@@ -62,6 +73,113 @@ class AIInstructionWriteRequest(BaseModel):
     output_schema: dict[str, Any] | None = None
     example_output: dict[str, Any] | None = None
     style_analysis_system_prompt: str | None = None
+
+
+class LegacyQuizPreviewRequest(BaseModel):
+    content: str | None = None
+    uploaded_pdf_id: int | None = None
+    url: str | None = None
+    content_type: str | None = None
+    ai_instruction_id: int | None = None
+    example_analysis_id: int | None = None
+    ai_provider: str | None = None
+    ai_model_name: str | None = None
+    category_ids: list[int] | None = None
+    use_category_source: bool = False
+    user_instructions: str | None = None
+    formatting_instruction_text: str | None = None
+    example_question: str | None = None
+    example_questions: list[str] | None = None
+    recent_questions: list[str] | None = None
+    desired_question_count: int = Field(default=5, ge=1, le=100)
+    output_language: str | None = None
+
+
+class LegacyQuizMixPlan(BaseModel):
+    plan_id: str
+    title: str | None = None
+    example_analysis_id: int | None = None
+    desired_question_count: int = Field(default=1, ge=1, le=100)
+    user_instructions: str | None = None
+    formatting_instruction_text: str | None = None
+
+
+class LegacyQuizMixJobRequest(LegacyQuizPreviewRequest):
+    max_attempts: int = 1
+    plans: list[LegacyQuizMixPlan] = Field(default_factory=list)
+
+
+class LegacyDraftWriteRequest(BaseModel):
+    parsed_quiz_data: dict[str, Any] = Field(default_factory=dict)
+    category_ids: list[int] = Field(default_factory=list)
+    exam_id: int | None = None
+    ai_instruction_id: int | None = None
+    source_url: str | None = None
+    source_pdf_id: int | None = None
+    notes: str | None = None
+
+
+class LegacyDraftConvertRequest(BaseModel):
+    draft_quiz_id: int
+
+
+class OcrRequest(BaseModel):
+    images_base64: list[str] = Field(default_factory=list)
+    ai_provider: str | None = None
+    ai_model_name: str | None = None
+
+
+class StyleProfileRequest(BaseModel):
+    content_type: str
+    example_questions: list[str] = Field(default_factory=list)
+    ai_provider: str | None = None
+    ai_model_name: str | None = None
+
+
+class StyleProfileRefineRequest(BaseModel):
+    style_profile: dict[str, Any] = Field(default_factory=dict)
+    feedback: str
+    content_type: str | None = None
+    ai_provider: str | None = None
+    ai_model_name: str | None = None
+
+
+class MainsQuestionGenerateRequest(BaseModel):
+    content: str | None = None
+    url: str | None = None
+    mains_category_ids: list[int] | None = None
+    use_mains_category_source: bool = False
+    number_of_questions: int = Field(default=1, ge=1, le=50)
+    word_limit: int = Field(default=250, ge=50, le=1000)
+    example_format_id: int | None = None
+    sync_with_evaluator: bool = False
+    evaluation_example_id: int | None = None
+    user_instructions: str | None = None
+    recent_questions: list[str] | None = None
+    output_language: str | None = None
+    ai_provider: str | None = None
+    ai_model_name: str | None = None
+
+
+class MainsEvaluationCompatRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    mains_question_id: int | None = None
+    question_text: str
+    answer_text: str
+    model_answer: str | None = None
+    instructions: str | None = None
+    answer_formatting_guidance: str | None = None
+    example_evaluation_id: int | None = None
+    output_language: str | None = None
+    word_limit: int = 250
+    ai_provider: str | None = None
+    ai_model_name: str | None = None
+
+
+class GeneratePdfRequest(BaseModel):
+    title: str = "AI Quiz"
+    items: list[Any] = Field(default_factory=list)
 
 
 class OnboardingApplicationWriteRequest(BaseModel):
@@ -672,8 +790,882 @@ def _sort_content_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
+def _quiz_kind_to_content_type(quiz_kind: str) -> str:
+    normalized = _normalize_text(quiz_kind).lower()
+    if normalized == "maths":
+        return "premium_maths_quiz"
+    if normalized == "passage":
+        return "premium_passage_quiz"
+    if normalized == "gk":
+        return "premium_gk_quiz"
+    raise HTTPException(status_code=422, detail=f"Unsupported quiz kind: {quiz_kind}")
+
+
+def _legacy_language(value: Any) -> str:
+    normalized = _normalize_text(value).lower()
+    return "hi" if normalized in {"hi", "hindi"} else "en"
+
+
+def _clean_provider(value: Any) -> str | None:
+    normalized = _normalize_text(value).lower()
+    if normalized in {"gemini", "openai"}:
+        return normalized
+    return None
+
+
+def _clean_model(value: Any) -> str | None:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+    if normalized.startswith("gemini-"):
+        return f"models/{normalized}"
+    return normalized
+
+
+def _normalize_options(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        output: list[dict[str, Any]] = []
+        for idx, item in enumerate(value):
+            label = chr(65 + idx)
+            if isinstance(item, str):
+                output.append({"label": label, "text": item})
+                continue
+            record = _as_dict(item)
+            option_label = _normalize_text(record.get("label") or record.get("option") or label).upper()
+            if option_label.startswith("OPTION "):
+                option_label = option_label.replace("OPTION ", "").strip()
+            if option_label not in {"A", "B", "C", "D", "E"}:
+                option_label = label
+            output.append(
+                {
+                    "label": option_label,
+                    "text": _normalize_text(record.get("text") or record.get("value") or record.get("option_text")),
+                }
+            )
+        return [item for item in output if _normalize_text(item.get("text"))]
+    if isinstance(value, dict):
+        output = []
+        for key, item in value.items():
+            label = _normalize_text(key).upper()
+            if label in {"A", "B", "C", "D", "E"}:
+                output.append({"label": label, "text": _normalize_text(item)})
+        return output
+    return []
+
+
+def _normalize_quiz_question(row: Any, quiz_kind: str) -> dict[str, Any]:
+    record = _as_dict(row)
+    facts = record.get("statements_facts") or record.get("statement_facts") or []
+    if not isinstance(facts, list):
+        facts = [str(facts)] if _normalize_text(facts) else []
+    question_statement = _normalize_text(record.get("question_statement") or record.get("question"))
+    question_prompt = _normalize_text(record.get("question_prompt") or record.get("prompt"))
+    supplementary = _normalize_text(record.get("supp_question_statement") or record.get("supplementary_statement"))
+    if facts and question_statement and not question_prompt and re.search(
+        r"\b(which|what|how many|how much|select|choose|identify|find|determine)\b.+\?",
+        question_statement,
+        flags=re.IGNORECASE,
+    ):
+        question_prompt = question_statement
+        question_statement = supplementary or "Consider the following statements:"
+    elif facts and not question_statement:
+        question_statement = supplementary or "Consider the following statements:"
+
+    correct = _normalize_text(
+        record.get("correct_answer")
+        or record.get("correct_option")
+        or record.get("answer")
+        or "A"
+    ).upper()
+    if correct.startswith("OPTION "):
+        correct = correct.replace("OPTION ", "").strip()
+    if correct not in {"A", "B", "C", "D", "E"}:
+        correct = "A"
+    return {
+        "question_statement": question_statement,
+        "supp_question_statement": supplementary or None,
+        "statements_facts": facts,
+        "question_prompt": question_prompt or None,
+        "options": _normalize_options(record.get("options")),
+        "correct_answer": correct,
+        "explanation": _normalize_text(record.get("explanation") or record.get("explanation_text")) or None,
+        "passage_title": _normalize_text(record.get("passage_title")) or None,
+        "passage_text": _normalize_text(record.get("passage_text") or record.get("passage")) or None,
+        "source_reference": _normalize_text(record.get("source_reference") or record.get("source")) or None,
+        "quiz_kind": quiz_kind,
+    }
+
+
+def _extract_generated_items(payload: Any, quiz_kind: str) -> list[dict[str, Any]]:
+    root = _as_dict(payload)
+    if quiz_kind == "passage":
+        if isinstance(payload, list):
+            return [_as_dict(item) for item in payload if _as_dict(item)]
+        passages = root.get("passages")
+        if isinstance(passages, list):
+            return [_as_dict(item) for item in passages if _as_dict(item)]
+        return [root] if root else []
+    if isinstance(payload, list):
+        rows = payload
+    else:
+        questions = root.get("questions")
+        rows = questions if isinstance(questions, list) else [payload]
+    return [
+        _normalize_quiz_question(item, quiz_kind)
+        for item in rows
+        if _normalize_text(_as_dict(item).get("question_statement") or _as_dict(item).get("question"))
+    ]
+
+
+def _legacy_quiz_payload(quiz_kind: str, questions: list[dict[str, Any]]) -> dict[str, Any]:
+    if quiz_kind == "passage":
+        if len(questions) == 1:
+            return questions[0]
+        return {"passages": questions}
+    return {"questions": [_normalize_quiz_question(item, quiz_kind) for item in questions]}
+
+
+def _build_instruction_text(*segments: Any) -> str | None:
+    parts = [_normalize_text(segment) for segment in segments if _normalize_text(segment)]
+    return "\n\n".join(parts) if parts else None
+
+
+def _load_analysis_style_text(analysis_id: int | None) -> str | None:
+    if not analysis_id:
+        return None
+    admin = get_admin_client()
+    row = _first(admin.table("ai_example_analyses").select("style_profile").eq("id", analysis_id).limit(1).execute())
+    style = _as_dict((row or {}).get("style_profile"))
+    return _normalize_text(style.get("style_instructions")) or None
+
+
+def _load_instruction_config(
+    content_type: str,
+    instruction_id: int | None = None,
+) -> dict[str, Any]:
+    admin = get_admin_client()
+    row: dict[str, Any] | None = None
+    if instruction_id:
+        row = _first(
+            admin.table("ai_instructions")
+            .select("*")
+            .eq("id", instruction_id)
+            .limit(1)
+            .execute()
+        )
+    if not row:
+        scope = _content_type_to_instruction_scope(content_type)
+        row = _first(
+            admin.table("ai_instructions")
+            .select("*")
+            .eq("scope", scope)
+            .eq("is_active", True)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    if not row:
+        return {}
+    meta = _parse_instruction_meta(row.get("user_prompt_template"))
+    return {
+        "system_prompt": _normalize_text(row.get("system_prompt")) or None,
+        "provider": _clean_provider(meta.get("ai_provider")),
+        "model": _clean_model(meta.get("ai_model_name")),
+        "style_analysis_system_prompt": _normalize_text(meta.get("style_analysis_system_prompt")) or None,
+        "example_input": meta.get("example_input"),
+        "example_output": meta.get("example_output"),
+    }
+
+
+async def _resolve_legacy_source_text(
+    *,
+    content: str | None = None,
+    url: str | None = None,
+    uploaded_pdf_id: int | None = None,
+    category_ids: list[int] | None = None,
+    use_category_source: bool = False,
+) -> str:
+    if _normalize_text(content):
+        return _normalize_text(content)
+    if _normalize_text(url):
+        return await extract_text_from_url(_normalize_text(url))
+    admin = get_admin_client()
+    if uploaded_pdf_id:
+        row = _first(
+            admin.table("uploaded_pdfs")
+            .select("extracted_text")
+            .eq("id", uploaded_pdf_id)
+            .limit(1)
+            .execute()
+        )
+        text = _normalize_text((row or {}).get("extracted_text"))
+        if text:
+            return text
+    normalized_categories = _normalize_int_list(category_ids or [])
+    if use_category_source and normalized_categories:
+        rows = _rows(
+            admin.table("category_ai_source_categories")
+            .select("category_ai_sources(source_text, source_content_html, source_url)")
+            .in_("category_id", normalized_categories)
+            .execute()
+        )
+        texts: list[str] = []
+        for row in rows:
+            source = _as_dict(row.get("category_ai_sources"))
+            text = _normalize_text(source.get("source_text") or source.get("source_content_html"))
+            if text:
+                texts.append(text)
+        if texts:
+            return "\n\n".join(texts)
+    return ""
+
+
+async def _run_legacy_quiz_preview(quiz_kind: str, body: LegacyQuizPreviewRequest) -> dict[str, Any]:
+    normalized_kind = _normalize_text(quiz_kind).lower()
+    content_type = _quiz_kind_to_content_type(normalized_kind)
+    instruction = _load_instruction_config(content_type, body.ai_instruction_id)
+    source_text = await _resolve_legacy_source_text(
+        content=body.content,
+        url=body.url,
+        uploaded_pdf_id=body.uploaded_pdf_id,
+        category_ids=body.category_ids,
+        use_category_source=body.use_category_source,
+    )
+    if not source_text:
+        raise HTTPException(status_code=422, detail="Provide source content, URL, uploaded PDF, or category source.")
+
+    style_text = _load_analysis_style_text(body.example_analysis_id)
+    user_instructions = _build_instruction_text(
+        body.user_instructions,
+        body.formatting_instruction_text,
+        style_text,
+        f"Example question:\n{body.example_question}" if _normalize_text(body.example_question) else None,
+    )
+    questions = await generate_quiz(
+        domain=normalized_kind,
+        source_text=source_text,
+        count=body.desired_question_count,
+        language=_legacy_language(body.output_language),
+        user_instructions=user_instructions,
+        recent_questions=body.recent_questions or [],
+        example_questions=body.example_questions or [],
+        system_prompt_override=instruction.get("system_prompt"),
+        provider=_clean_provider(body.ai_provider) or instruction.get("provider"),
+        model=_clean_model(body.ai_model_name) or instruction.get("model"),
+    )
+    return {
+        "parsed_quiz_data": _legacy_quiz_payload(normalized_kind, questions),
+    }
+
+
+def _draft_meta(row: dict[str, Any]) -> dict[str, Any]:
+    return _as_dict(row.get("raw_ai_response"))
+
+
+def _map_ai_draft_row(row: dict[str, Any]) -> dict[str, Any]:
+    meta = _draft_meta(row)
+    return {
+        "id": _safe_int(row.get("id")),
+        "quiz_kind": _normalize_text(row.get("quiz_type")) or _content_type_to_quiz_domain(row.get("content_type")),
+        "content_type": row.get("content_type") or _quiz_kind_to_content_type(row.get("quiz_type")),
+        "parsed_quiz_data": _as_dict(row.get("parsed_quiz_data")),
+        "category_ids": _normalize_int_list(meta.get("category_ids")),
+        "exam_id": _safe_int(meta.get("exam_id")) or None,
+        "ai_instruction_id": _safe_int(row.get("ai_instruction_id")) or None,
+        "source_url": row.get("source_url"),
+        "source_pdf_id": _safe_int(row.get("source_pdf_id")) or None,
+        "notes": _normalize_text(meta.get("notes")) or None,
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def _draft_update_payload(body: LegacyDraftWriteRequest, quiz_kind: str | None = None) -> dict[str, Any]:
+    meta = {
+        "category_ids": _normalize_int_list(body.category_ids),
+        "exam_id": body.exam_id,
+        "notes": body.notes,
+    }
+    payload: dict[str, Any] = {
+        "parsed_quiz_data": body.parsed_quiz_data,
+        "raw_ai_response": meta,
+        "source_url": _normalize_text(body.source_url) or None,
+        "source_pdf_id": body.source_pdf_id,
+        "ai_instruction_id": body.ai_instruction_id,
+    }
+    if quiz_kind:
+        payload["quiz_type"] = quiz_kind
+        payload["content_type"] = _quiz_kind_to_content_type(quiz_kind)
+    return payload
+
+
+def _insert_category_links(table: str, id_field: str, owner_id: int, category_ids: list[int]) -> None:
+    rows = [{id_field: owner_id, "category_id": category_id} for category_id in category_ids if category_id > 0]
+    if not rows:
+        return
+    try:
+        get_admin_client().table(table).insert(rows).execute()
+    except Exception:
+        # Category links are secondary metadata; do not fail conversion after content insert.
+        pass
+
+
+def _convert_draft_to_content(draft: dict[str, Any], profile: ProfileRow) -> dict[str, Any]:
+    admin = get_admin_client()
+    quiz_kind = _normalize_text(draft.get("quiz_type")).lower()
+    parsed = _as_dict(draft.get("parsed_quiz_data"))
+    meta = _draft_meta(draft)
+    category_ids = _normalize_int_list(meta.get("category_ids"))
+    first_category_id = category_ids[0] if category_ids else None
+
+    if quiz_kind in {"gk", "maths"}:
+        items = _extract_generated_items(parsed, quiz_kind)
+        if not items:
+            raise HTTPException(status_code=422, detail="Draft has no quiz questions to convert.")
+        created_ids: list[int] = []
+        for item in items:
+            normalized = _normalize_quiz_question(item, quiz_kind)
+            row = _first(
+                admin.table("quizzes")
+                .insert(
+                    {
+                        "quiz_type": quiz_kind,
+                        "title": _normalize_text(normalized.get("question_statement"))[:120] or "AI Quiz",
+                        "question_statement": normalized["question_statement"] or "Untitled question",
+                        "supp_question_statement": normalized["supp_question_statement"],
+                        "statements_facts": normalized["statements_facts"],
+                        "question_prompt": normalized["question_prompt"],
+                        "options": normalized["options"],
+                        "correct_answer": normalized["correct_answer"],
+                        "explanation": normalized["explanation"],
+                        "author_id": profile.id,
+                    }
+                )
+                .execute()
+            )
+            created_id = _safe_int((row or {}).get("id"))
+            if created_id > 0:
+                created_ids.append(created_id)
+                _insert_category_links("quiz_categories", "quiz_id", created_id, category_ids)
+        if not created_ids:
+            raise HTTPException(status_code=500, detail="Conversion did not create any quiz rows.")
+        admin.table("ai_draft_quizzes").update({"status": "approved", "reviewed_by": profile.id, "reviewed_at": _now_utc().isoformat()}).eq("id", draft["id"]).execute()
+        return {"message": f"Converted {len(created_ids)} question(s).", "new_quiz_id": created_ids[0], "quiz_type": quiz_kind}
+
+    if quiz_kind == "passage":
+        passages = _extract_generated_items(parsed, "passage")
+        if not passages:
+            raise HTTPException(status_code=422, detail="Draft has no passage to convert.")
+        passage = passages[0]
+        questions = passage.get("questions") if isinstance(passage.get("questions"), list) else [passage]
+        passage_row = _first(
+            admin.table("passage_quizzes")
+            .insert(
+                {
+                    "passage_title": _normalize_text(passage.get("passage_title")) or "AI Passage Quiz",
+                    "passage_text": _normalize_text(passage.get("passage_text") or passage.get("passage")) or "Passage text",
+                    "source_reference": _normalize_text(passage.get("source_reference") or passage.get("source")) or None,
+                    "author_id": profile.id,
+                }
+            )
+            .execute()
+        )
+        passage_id = _safe_int((passage_row or {}).get("id"))
+        if passage_id <= 0:
+            raise HTTPException(status_code=500, detail="Conversion did not create a passage row.")
+        question_rows = []
+        for idx, question in enumerate(questions):
+            normalized = _normalize_quiz_question(question, "passage")
+            if not normalized["question_statement"]:
+                continue
+            question_rows.append(
+                {
+                    "passage_quiz_id": passage_id,
+                    "question_statement": normalized["question_statement"],
+                    "supp_question_statement": normalized["supp_question_statement"],
+                    "statements_facts": normalized["statements_facts"],
+                    "question_prompt": normalized["question_prompt"],
+                    "options": normalized["options"],
+                    "correct_answer": normalized["correct_answer"],
+                    "explanation": normalized["explanation"],
+                    "category_id": first_category_id,
+                    "display_order": idx,
+                }
+            )
+        if question_rows:
+            admin.table("passage_questions").insert(question_rows).execute()
+        _insert_category_links("passage_quiz_categories", "passage_quiz_id", passage_id, category_ids)
+        admin.table("ai_draft_quizzes").update({"status": "approved", "reviewed_by": profile.id, "reviewed_at": _now_utc().isoformat()}).eq("id", draft["id"]).execute()
+        return {"message": f"Converted passage with {len(question_rows)} question(s).", "new_quiz_id": passage_id, "quiz_type": "passage"}
+
+    raise HTTPException(status_code=422, detail=f"Unsupported draft quiz type: {quiz_kind}")
+
+
+def _pdf_escape(value: Any) -> str:
+    text = _normalize_text(value)
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _wrap_pdf_line(value: Any, width: int = 92) -> list[str]:
+    text = _normalize_text(value).replace("\r", "")
+    output: list[str] = []
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            output.append("")
+            continue
+        while len(line) > width:
+            cut = line.rfind(" ", 0, width)
+            if cut < 40:
+                cut = width
+            output.append(line[:cut].strip())
+            line = line[cut:].strip()
+        output.append(line)
+    return output
+
+
+def _item_to_pdf_lines(item: Any, index: int) -> list[str]:
+    record = _as_dict(item)
+    lines: list[str] = []
+    passage_title = _normalize_text(record.get("passage_title"))
+    passage_text = _normalize_text(record.get("passage_text") or record.get("passage"))
+    if passage_title or passage_text:
+        lines.append(f"Passage {index + 1}: {passage_title or 'Untitled'}")
+        lines.extend(_wrap_pdf_line(passage_text))
+        questions = record.get("questions")
+        if isinstance(questions, list):
+            for q_idx, question in enumerate(questions, start=1):
+                q = _normalize_quiz_question(question, "passage")
+                lines.append(f"Q{q_idx}. {q['question_statement']}")
+                for option in q["options"]:
+                    lines.append(f"  {option.get('label')}. {option.get('text')}")
+                lines.append(f"Answer: {q['correct_answer']}")
+                if q["explanation"]:
+                    lines.extend(_wrap_pdf_line(f"Explanation: {q['explanation']}"))
+        return lines
+
+    q = _normalize_quiz_question(record, "gk")
+    lines.append(f"Q{index + 1}. {q['question_statement'] or _normalize_text(item)}")
+    for option in q["options"]:
+        lines.append(f"  {option.get('label')}. {option.get('text')}")
+    if q["correct_answer"]:
+        lines.append(f"Answer: {q['correct_answer']}")
+    if q["explanation"]:
+        lines.extend(_wrap_pdf_line(f"Explanation: {q['explanation']}"))
+    return lines
+
+
+def _build_simple_pdf(title: str, items: list[Any]) -> bytes:
+    lines = [_normalize_text(title) or "AI Quiz", ""]
+    for index, item in enumerate(items):
+        lines.extend(_item_to_pdf_lines(item, index))
+        lines.append("")
+
+    pages: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        wrapped = _wrap_pdf_line(line)
+        for part in wrapped:
+            current.append(part)
+            if len(current) >= 42:
+                pages.append(current)
+                current = []
+    if current or not pages:
+        pages.append(current)
+
+    objects: list[bytes] = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [" + b" ".join(f"{3 + i * 2} 0 R".encode("ascii") for i in range(len(pages))) + b"] /Count " + str(len(pages)).encode("ascii") + b" >>",
+    ]
+    for idx, page_lines in enumerate(pages):
+        page_obj = 3 + idx * 2
+        content_obj = page_obj + 1
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 {3 + len(pages) * 2} 0 R >> >> /Contents {content_obj} 0 R >>".encode("ascii")
+        )
+        content_lines = ["BT", "/F1 10 Tf", "50 790 Td", "14 TL"]
+        for line in page_lines:
+            safe = _pdf_escape(line).encode("latin-1", "replace").decode("latin-1")
+            content_lines.append(f"({safe}) Tj")
+            content_lines.append("T*")
+        content_lines.append("ET")
+        stream = "\n".join(content_lines).encode("latin-1", "replace")
+        objects.append(b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream")
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj_num, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{obj_num} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+    xref_at = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n".encode("ascii")
+    )
+    return bytes(pdf)
+
+
 def _profile_role_allows_content_management(profile: ProfileRow) -> bool:
     return profile.role in {"admin", "moderator", "prelims_expert", "mains_expert"}
+
+
+@router.post("/api/v1/premium-ai-quizzes/preview/{quiz_kind}")
+async def legacy_preview_quiz(
+    quiz_kind: str,
+    body: LegacyQuizPreviewRequest,
+    _profile: ProfileRow = Depends(require_auth),
+):
+    return await _run_legacy_quiz_preview(quiz_kind, body)
+
+
+@router.post("/api/v1/premium-ai-quizzes/preview-jobs/{quiz_kind}")
+async def legacy_create_preview_job(
+    quiz_kind: str,
+    body: LegacyQuizMixJobRequest,
+    _profile: ProfileRow = Depends(require_auth),
+):
+    if not body.plans:
+        raise HTTPException(status_code=422, detail="At least one generation plan is required.")
+    job_id = str(uuid.uuid4())
+    tasks: list[dict[str, Any]] = []
+    aggregate_items: list[dict[str, Any]] = []
+    failed_tasks = 0
+    for plan in body.plans:
+        task = {
+            "plan_id": plan.plan_id,
+            "title": plan.title or "Format",
+            "requested_count": plan.desired_question_count,
+            "status": "completed",
+            "attempt": 1,
+            "max_attempts": body.max_attempts,
+            "produced_count": 0,
+            "error": None,
+        }
+        try:
+            plan_body = LegacyQuizPreviewRequest(
+                **{
+                    **body.model_dump(exclude={"plans", "max_attempts"}),
+                    "example_analysis_id": plan.example_analysis_id,
+                    "desired_question_count": plan.desired_question_count,
+                    "user_instructions": plan.user_instructions or body.user_instructions,
+                    "formatting_instruction_text": plan.formatting_instruction_text or body.formatting_instruction_text,
+                }
+            )
+            result = await _run_legacy_quiz_preview(quiz_kind, plan_body)
+            items = _extract_generated_items(result.get("parsed_quiz_data"), _normalize_text(quiz_kind).lower())
+            aggregate_items.extend(items)
+            task["produced_count"] = len(items)
+        except Exception as exc:
+            failed_tasks += 1
+            task["status"] = "failed"
+            task["error"] = str(exc)
+        tasks.append(task)
+
+    status_value = "failed" if failed_tasks == len(tasks) else ("partial" if failed_tasks else "completed")
+    now = _now_utc().isoformat()
+    snapshot = {
+        "job_id": job_id,
+        "status": status_value,
+        "total_tasks": len(tasks),
+        "completed_tasks": len(tasks) - failed_tasks,
+        "failed_tasks": failed_tasks,
+        "tasks": tasks,
+        "parsed_quiz_data": _legacy_quiz_payload(_normalize_text(quiz_kind).lower(), aggregate_items) if aggregate_items else None,
+        "warnings": [],
+        "error": "All format tasks failed." if status_value == "failed" else None,
+        "created_at": now,
+        "updated_at": now,
+        "finished_at": now,
+        "expires_at": (_now_utc() + timedelta(hours=1)).isoformat(),
+    }
+    _LEGACY_PREVIEW_JOBS[job_id] = snapshot
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "total_tasks": len(tasks),
+        "queued_at": now,
+    }
+
+
+@router.get("/api/v1/premium-ai-quizzes/preview-jobs/{job_id}")
+def legacy_get_preview_job(
+    job_id: str,
+    _profile: ProfileRow = Depends(require_auth),
+):
+    snapshot = _LEGACY_PREVIEW_JOBS.get(job_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Preview job not found or expired.")
+    return snapshot
+
+
+@router.post("/api/v1/premium-ai-quizzes/save-draft/{quiz_kind}")
+def legacy_save_ai_draft(
+    quiz_kind: str,
+    body: LegacyDraftWriteRequest,
+    profile: ProfileRow = Depends(require_auth),
+):
+    normalized_kind = _normalize_text(quiz_kind).lower()
+    admin = get_admin_client()
+    payload = {
+        **_draft_update_payload(body, normalized_kind),
+        "author_id": profile.id,
+        "status": "pending",
+    }
+    row = _first(admin.table("ai_draft_quizzes").insert(payload).execute())
+    if not row:
+        raise HTTPException(status_code=500, detail="Draft save returned no row.")
+    return _map_ai_draft_row(row)
+
+
+@router.get("/api/v1/premium-ai-quizzes/draft-quizzes")
+def legacy_list_ai_drafts(
+    content_type: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    _profile: ProfileRow = Depends(require_auth),
+):
+    admin = get_admin_client()
+    query = admin.table("ai_draft_quizzes").select("*").order("updated_at", desc=True).limit(limit)
+    if content_type:
+        query = query.eq("content_type", content_type)
+    rows = [_map_ai_draft_row(row) for row in _rows(query.execute())]
+    return {"items": rows, "total": len(rows)}
+
+
+@router.get("/api/v1/premium-ai-quizzes/draft-{quiz_kind}-quizzes/{draft_id}")
+def legacy_get_ai_draft(
+    quiz_kind: str,
+    draft_id: int,
+    _profile: ProfileRow = Depends(require_auth),
+):
+    row = _first(get_admin_client().table("ai_draft_quizzes").select("*").eq("id", draft_id).limit(1).execute())
+    if not row or _normalize_text(row.get("quiz_type")).lower() != _normalize_text(quiz_kind).lower():
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    return _map_ai_draft_row(row)
+
+
+@router.put("/api/v1/premium-ai-quizzes/draft-{quiz_kind}-quizzes/{draft_id}")
+def legacy_update_ai_draft(
+    quiz_kind: str,
+    draft_id: int,
+    body: LegacyDraftWriteRequest,
+    _profile: ProfileRow = Depends(require_auth),
+):
+    normalized_kind = _normalize_text(quiz_kind).lower()
+    admin = get_admin_client()
+    row = _first(
+        admin.table("ai_draft_quizzes")
+        .update(_draft_update_payload(body, normalized_kind))
+        .eq("id", draft_id)
+        .execute()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    return _map_ai_draft_row(row)
+
+
+@router.delete("/api/v1/premium-ai-quizzes/draft-{quiz_kind}-quizzes/{draft_id}")
+def legacy_delete_ai_draft(
+    quiz_kind: str,
+    draft_id: int,
+    _profile: ProfileRow = Depends(require_auth),
+):
+    del quiz_kind
+    get_admin_client().table("ai_draft_quizzes").delete().eq("id", draft_id).execute()
+    return {"id": draft_id, "deleted": True}
+
+
+@router.post("/api/v1/premium-ai-quizzes/convert-draft-to-premium-quiz")
+def legacy_convert_ai_draft(
+    body: LegacyDraftConvertRequest,
+    profile: ProfileRow = Depends(require_auth),
+):
+    admin = get_admin_client()
+    draft = _first(admin.table("ai_draft_quizzes").select("*").eq("id", body.draft_quiz_id).limit(1).execute())
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    return _convert_draft_to_content(draft, profile)
+
+
+@router.post("/ai-evaluation/ocr")
+async def ai_evaluation_ocr(
+    body: OcrRequest,
+    _profile: ProfileRow = Depends(require_auth),
+):
+    if not body.images_base64:
+        raise HTTPException(status_code=422, detail="At least one image is required.")
+    text = await extract_text_from_images(
+        images_base64=body.images_base64,
+        provider=_clean_provider(body.ai_provider),
+        model=_clean_model(body.ai_model_name),
+    )
+    return {"extracted_text": text}
+
+
+@router.post("/generate-pdf")
+def generate_pdf(
+    body: GeneratePdfRequest,
+    _profile: ProfileRow = Depends(require_auth),
+):
+    pdf = _build_simple_pdf(body.title, body.items)
+    filename = re.sub(r"[^a-z0-9]+", "_", body.title.lower()).strip("_") or "ai_quiz"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.pdf"'},
+    )
+
+
+@router.post("/ai/style-profile")
+async def ai_style_profile(
+    body: StyleProfileRequest,
+    _profile: ProfileRow = Depends(require_auth),
+):
+    if not body.example_questions:
+        raise HTTPException(status_code=422, detail="At least one example is required.")
+    instruction = _load_instruction_config(body.content_type)
+    profile = await generate_style_profile(
+        content_type=body.content_type,
+        example_questions=body.example_questions,
+        system_prompt_override=instruction.get("style_analysis_system_prompt") or instruction.get("system_prompt"),
+        provider=_clean_provider(body.ai_provider) or instruction.get("provider"),
+        model=_clean_model(body.ai_model_name) or instruction.get("model"),
+    )
+    return {"style_profile": profile}
+
+
+@router.post("/ai/style-profile/refine")
+async def ai_style_profile_refine(
+    body: StyleProfileRefineRequest,
+    _profile: ProfileRow = Depends(require_auth),
+):
+    profile = await refine_style_profile(
+        style_profile=body.style_profile,
+        feedback=body.feedback,
+        provider=_clean_provider(body.ai_provider),
+        model=_clean_model(body.ai_model_name),
+    )
+    return {"style_profile": profile}
+
+
+@router.post("/ai-mains-questions/generate")
+async def legacy_generate_mains_questions(
+    body: MainsQuestionGenerateRequest,
+    profile: ProfileRow = Depends(require_auth),
+):
+    source_text = await _resolve_legacy_source_text(
+        content=body.content,
+        url=body.url,
+        category_ids=body.mains_category_ids,
+        use_category_source=body.use_mains_category_source,
+    )
+    if not source_text:
+        raise HTTPException(status_code=422, detail="Provide content, URL, or category source for mains generation.")
+
+    instruction = _load_instruction_config("mains_question_generation")
+    style_text = _load_analysis_style_text(body.example_format_id)
+    user_source = _build_instruction_text(
+        source_text,
+        body.user_instructions,
+        style_text,
+        "Avoid repeating these recent questions:\n" + "\n".join(body.recent_questions or [])
+        if body.recent_questions
+        else None,
+    )
+    category_id = (body.mains_category_ids or [None])[0]
+    questions: list[dict[str, Any]] = []
+    admin = get_admin_client()
+    for _idx in range(body.number_of_questions):
+        result = await generate_mains_question(
+            source_text=user_source or source_text,
+            category_label=None,
+            word_limit=body.word_limit,
+            language=_legacy_language(body.output_language),
+            system_prompt_override=instruction.get("system_prompt"),
+            provider=_clean_provider(body.ai_provider) or instruction.get("provider"),
+            model=_clean_model(body.ai_model_name) or instruction.get("model"),
+        )
+        if not result:
+            continue
+        payload = {
+            "user_id": profile.id,
+            "question_text": _normalize_text(result.get("question_text") or source_text),
+            "answer_approach": _normalize_text(result.get("answer_approach")),
+            "model_answer": _normalize_text(result.get("model_answer")),
+            "word_limit": _safe_int(result.get("word_limit"), body.word_limit) or body.word_limit,
+            "category_id": category_id,
+            "is_saved": True,
+        }
+        saved_id: int | None = None
+        try:
+            saved = _first(admin.table("ai_mains_questions").insert(payload).execute())
+            saved_id = _safe_int((saved or {}).get("id")) or None
+        except Exception:
+            saved_id = None
+        questions.append(
+            {
+                "id": saved_id,
+                "question_text": payload["question_text"],
+                "answer_approach": payload["answer_approach"],
+                "model_answer": payload["model_answer"],
+                "word_limit": payload["word_limit"],
+                "mains_category_ids": _normalize_int_list(body.mains_category_ids or []),
+                "mains_category_id": category_id,
+                "category_ids": _normalize_int_list(body.mains_category_ids or []),
+                "created_at": _now_utc().isoformat(),
+            }
+        )
+    return {"questions": questions}
+
+
+@router.post("/ai-evaluation/evaluate-mains")
+async def legacy_evaluate_mains(
+    body: MainsEvaluationCompatRequest,
+    profile: ProfileRow = Depends(require_auth),
+):
+    instruction = _load_instruction_config("mains_evaluation")
+    extra_model_answer = _build_instruction_text(
+        body.model_answer,
+        f"Evaluation instructions:\n{body.instructions}" if body.instructions else None,
+        f"Answer formatting guidance:\n{body.answer_formatting_guidance}" if body.answer_formatting_guidance else None,
+    )
+    result = await evaluate_mains_answer(
+        question_text=body.question_text,
+        answer_text=body.answer_text,
+        word_limit=body.word_limit,
+        model_answer=extra_model_answer,
+        system_prompt_override=instruction.get("system_prompt"),
+        provider=_clean_provider(body.ai_provider) or instruction.get("provider"),
+        model=_clean_model(body.ai_model_name) or instruction.get("model"),
+    )
+    try:
+        get_admin_client().table("user_mains_evaluations").insert(
+            {
+                "user_id": profile.id,
+                "question_id": body.mains_question_id,
+                "question_text": body.question_text,
+                "answer_text": body.answer_text,
+                "word_count": len(body.answer_text.split()),
+                **result,
+            }
+        ).execute()
+    except Exception:
+        pass
+    return {
+        "score": result["ai_score"],
+        "max_score": result["ai_max_score"],
+        "feedback": result["ai_feedback"],
+        "strengths": result["ai_strengths"],
+        "weaknesses": result["ai_weaknesses"],
+        "improved_answer": result["improved_answer"],
+        "structure_score": result["ai_structure_score"],
+        "content_score": result["ai_content_score"],
+    }
 
 
 @router.get("/exams")

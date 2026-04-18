@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -22,9 +21,9 @@ import RichTextContent from "@/components/ui/RichTextContent";
 import MentorshipRequestModal from "./MentorshipRequestModal";
 import { useAuth } from "@/context/AuthContext";
 import { useProfile } from "@/context/ProfileContext";
-import { premiumApi } from "@/lib/premiumApi";
 import { createClient } from "@/lib/supabase/client";
 import type {
+  MentorshipCallProvider,
   MentorshipRequest,
   ProfessionalProfileReview,
   ProfessionalPublicProfileDetail,
@@ -52,6 +51,31 @@ function formatReviewDate(value?: string | null): string {
 function cleanBio(value?: string | null, fallback = "Mentor bio will be updated soon."): string {
   const normalized = String(value || "").trim();
   return normalized || fallback;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item : asRecord(item).label))
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function asCallProvider(value: unknown): MentorshipCallProvider {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "custom" || normalized === "zoom" || normalized === "zoom_video_sdk" || normalized === "agora") {
+    return normalized;
+  }
+  return "zoom_video_sdk";
 }
 
 function RatingStars({ rating }: { rating: number }) {
@@ -154,7 +178,7 @@ export default function ProfessionalPublicProfileView({
   
   const ownProfile = useMemo(() => {
     if (!isAuthenticated || !profileId || !detail) return false;
-    return String(profileId) === detail.profile.user_id;
+    return String(profileId) === String(detail.profile.id);
   }, [isAuthenticated, profileId, detail]);
 
   useEffect(() => {
@@ -165,17 +189,30 @@ export default function ProfessionalPublicProfileView({
         const supabase = createClient();
         
         // 1. Fetch the profile details
-        const { data: profileData, error: profileError } = await supabase
+        const profileQuery = supabase
           .from("profiles")
           .select("*")
-          .eq("auth_user_id", userId)
-          .single();
+          .limit(1);
+        const { data: profileData, error: profileError } = /^\d+$/.test(String(userId))
+          ? await profileQuery.eq("id", Number(userId)).maybeSingle()
+          : await profileQuery.eq("auth_user_id", userId).maybeSingle();
         
         if (profileError || !profileData) throw new Error("Mentor profile not found");
 
         const numericProfileId = profileData.id;
+        const { data: creatorProfile, error: creatorError } = await supabase
+          .from("creator_profiles")
+          .select(`
+            *,
+            exams:creator_profile_exams(exam_id)
+          `)
+          .eq("user_id", numericProfileId)
+          .maybeSingle();
+
+        if (creatorError) throw creatorError;
 
         // 2. Fetch associated test series and reviews in parallel
+        const creatorProfileId = Number(creatorProfile?.id || 0);
         const [seriesRes, reviewsRes] = await Promise.all([
           supabase
             .from("test_series")
@@ -183,65 +220,125 @@ export default function ProfessionalPublicProfileView({
             .eq("creator_id", numericProfileId)
             .eq("is_active", true)
             .eq("is_public", true),
-          supabase
-            .from("test_series_reviews")
-            .select("*")
-            .eq("creator_id", numericProfileId)
-            .order("created_at", { ascending: false })
-            .limit(12),
+          creatorProfileId > 0
+            ? supabase
+                .from("creator_profile_reviews")
+                .select(`
+                  *,
+                  reviewer:profiles!reviewer_id (
+                    display_name,
+                    email
+                  )
+                `)
+                .eq("creator_profile_id", creatorProfileId)
+                .order("created_at", { ascending: false })
+                .limit(12)
+            : Promise.resolve({ data: [], error: null }),
         ]);
+        if (seriesRes.error) throw seriesRes.error;
+        if (reviewsRes.error) throw reviewsRes.error;
 
-        const seriesRows = (seriesRes.data || []) as TestSeries[];
-        const reviewRows = (reviewsRes.data || []) as ProfessionalProfileReview[];
+        const meta = asRecord(creatorProfile?.social_links);
+        const baseRole = String(profileData.role || "").trim().toLowerCase();
+        const professionalRole = String(
+          meta.professional_role || (baseRole === "mains_expert" ? "mentor" : "provider"),
+        ).trim().toLowerCase();
+        const reviewRows: ProfessionalProfileReview[] = (reviewsRes.data || []).map((row: any) => ({
+          id: Number(row.id),
+          target_user_id: String(numericProfileId),
+          reviewer_user_id: String(row.reviewer_id || ""),
+          reviewer_label: row.reviewer?.display_name || row.reviewer?.email || "Learner",
+          rating: Number(row.rating || 0),
+          title: null,
+          comment: row.comment || null,
+          is_public: true,
+          is_active: true,
+          meta: {},
+          created_at: row.created_at,
+          updated_at: row.updated_at || null,
+        }));
+        const ratingCounts = [0, 0, 0, 0, 0, 0];
+        let ratingSum = 0;
+        for (const review of reviewRows) {
+          const rating = Math.max(1, Math.min(5, Math.round(Number(review.rating || 0))));
+          ratingCounts[rating] = (ratingCounts[rating] || 0) + 1;
+          ratingSum += rating;
+        }
+
+        const examIds = Array.from(new Set([
+          ...(Array.isArray(creatorProfile?.exams)
+            ? creatorProfile.exams.map((row: any) => Number(row.exam_id)).filter((value: number) => Number.isFinite(value))
+            : []),
+          ...(Array.isArray(profileData.creator_exam_ids)
+            ? profileData.creator_exam_ids.map(Number).filter((value: number) => Number.isFinite(value))
+            : []),
+        ]));
+        const providedSeries = (seriesRes.data || []).map((row: any) => ({
+          ...row,
+          id: Number(row.id),
+          title: row.name || row.title || `Program #${row.id}`,
+          access_type: row.is_paid ? "paid" : "free",
+          price: Number(row.price || 0),
+          test_count: Number(row.test_count || 0),
+          meta: row.meta || {},
+          exam_ids: [],
+        })) as TestSeries[];
 
         const detail: ProfessionalPublicProfileDetail = {
           profile: {
-            id: profileData.id,
-            user_id: profileData.auth_user_id,
-            display_name: profileData.display_name,
-            profile_image_url: profileData.avatar_url,
-            headline: (profileData as any).headline || "Professional Mentor",
-            bio: profileData.bio,
-            role: profileData.role || "mentor",
-            is_verified: true,
-            years_experience: (profileData as any).mentor_experience_years || 0,
-            specialization_tags: Array.isArray((profileData as any).specialization_tags) ? (profileData as any).specialization_tags : [],
-            highlights: [],
-            credentials: [],
-            languages: ["English"],
-            is_active: true,
-            is_public: true,
-            exam_ids: [],
-            meta: {},
+            id: numericProfileId,
+            user_id: String(numericProfileId),
+            display_name: creatorProfile?.display_name || profileData.display_name || "Verified Mentor",
+            profile_image_url: creatorProfile?.profile_image_url || profileData.avatar_url,
+            headline: creatorProfile?.headline || "Professional Mentor",
+            bio: creatorProfile?.bio || profileData.bio,
+            role: professionalRole || "mentor",
+            is_verified: Boolean(creatorProfile?.is_verified || profileData.is_verified),
+            years_experience: asNumber(creatorProfile?.years_experience, 0),
+            specialization_tags: asStringList(creatorProfile?.specialization_tags),
+            highlights: asStringList(creatorProfile?.highlights),
+            credentials: asStringList(creatorProfile?.credentials),
+            languages: asStringList(creatorProfile?.languages),
+            is_active: Boolean(creatorProfile?.is_active ?? profileData.is_active),
+            is_public: Boolean(creatorProfile?.is_public ?? true),
+            meta,
+            city: creatorProfile?.city || null,
+            contact_url: creatorProfile?.contact_url || null,
+            public_email: creatorProfile?.public_email || null,
+            exam_ids: examIds,
             created_at: profileData.created_at,
           },
-          role_label: (profileData.role || "mentor").replace("_", " ").toUpperCase(),
-          achievements: [],
-          service_specifications: [],
-          exam_focus: "UPSC & Civil Services",
-          response_time_text: "Usually within 24 hours",
-          mentorship_price: (profileData as any).mentorship_current_price || 0,
-          copy_evaluation_price: (profileData as any).copy_evaluation_price || 0,
-          copy_evaluation_enabled: !!(profileData as any).copy_evaluation_enabled,
-          currency: "INR",
-          sessions_completed: 0,
-          mentorship_availability_mode: "open",
-          mentorship_available_series_ids: [],
-          mentorship_default_call_provider: "agora",
+          role_label: professionalRole === "mentor" ? "Mains Mentor" : "Quiz Master",
+          achievements: asStringList(meta.achievements),
+          service_specifications: asStringList(meta.service_specifications),
+          exam_focus: String(meta.exam_focus || "UPSC & Civil Services"),
+          response_time_text: String(meta.response_time_text || "Usually within 24 hours"),
+          mentorship_price: asNumber(meta.mentorship_price, 0),
+          copy_evaluation_price: asNumber(meta.copy_evaluation_price, 0),
+          copy_evaluation_enabled: Boolean(meta.copy_evaluation_enabled),
+          copy_evaluation_note: typeof meta.copy_evaluation_note === "string" ? meta.copy_evaluation_note : null,
+          currency: String(meta.currency || "INR").toUpperCase(),
+          students_mentored: meta.students_mentored === undefined ? null : asNumber(meta.students_mentored),
+          sessions_completed: meta.sessions_completed === undefined ? null : asNumber(meta.sessions_completed),
+          mentorship_availability_mode: meta.mentorship_availability_mode === "open" ? "open" : "series_only",
+          mentorship_open_scope_note: typeof meta.mentorship_open_scope_note === "string" ? meta.mentorship_open_scope_note : null,
+          mentorship_available_series_ids: Array.isArray(meta.mentorship_available_series_ids)
+            ? meta.mentorship_available_series_ids.map(Number).filter((value) => Number.isFinite(value))
+            : [],
+          mentorship_default_call_provider: asCallProvider(meta.mentorship_default_call_provider),
+          mentorship_zoom_meeting_link: typeof meta.mentorship_zoom_meeting_link === "string" ? meta.mentorship_zoom_meeting_link : null,
+          mentorship_call_setup_note: typeof meta.mentorship_call_setup_note === "string" ? meta.mentorship_call_setup_note : null,
           review_summary: {
-            average_rating: (profileData as any).avg_rating || 0,
-            total_reviews: (profileData as any).total_ratings || 0,
-            rating_1: 0,
-            rating_2: 0,
-            rating_3: 0,
-            rating_4: 0,
-            rating_5: 0,
+            average_rating: reviewRows.length > 0 ? ratingSum / reviewRows.length : 0,
+            total_reviews: reviewRows.length,
+            rating_1: ratingCounts[1] || 0,
+            rating_2: ratingCounts[2] || 0,
+            rating_3: ratingCounts[3] || 0,
+            rating_4: ratingCounts[4] || 0,
+            rating_5: ratingCounts[5] || 0,
           },
-          recent_reviews: reviewRows.map(r => ({
-             ...r,
-             reviewer_label: (r as any).reviewer_label || "Student",
-          })),
-          provided_series: seriesRows,
+          recent_reviews: reviewRows,
+          provided_series: providedSeries,
           assigned_series: [],
         };
 

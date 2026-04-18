@@ -9,6 +9,7 @@ Key changes from the old version:
   - Article draft generation is a first-class function
 """
 
+import base64
 import json
 import logging
 import re
@@ -256,11 +257,12 @@ async def generate_mains_question(
     category_label: str | None = None,
     word_limit: int = 250,
     language: str = "en",
+    system_prompt_override: str | None = None,
     provider: str | None = None,
     model: str | None = None,
 ) -> dict:
     """Generate a single UPSC Mains practice question."""
-    system = MAINS_GENERATE_PROMPT
+    system = system_prompt_override or MAINS_GENERATE_PROMPT
     user = (
         f"Topic/Source: {source_text}\n"
         f"Category: {category_label or 'General Studies'}\n"
@@ -285,6 +287,7 @@ async def evaluate_mains_answer(
     answer_text: str,
     word_limit: int = 250,
     model_answer: str | None = None,
+    system_prompt_override: str | None = None,
     provider: str | None = None,
     model: str | None = None,
 ) -> dict:
@@ -293,7 +296,7 @@ async def evaluate_mains_answer(
     Returns: score, max_score, feedback, strengths, weaknesses,
              structure_score, content_score, improved_answer
     """
-    system = MAINS_EVAL_SYSTEM_PROMPT
+    system = system_prompt_override or MAINS_EVAL_SYSTEM_PROMPT
     user_parts = [
         f"QUESTION:\n{question_text}",
         f"WORD LIMIT: {word_limit}",
@@ -339,6 +342,122 @@ async def evaluate_mains_answer(
 
 
 # ── Article generation ─────────────────────────────────────────────────────────
+
+async def extract_text_from_images(
+    *,
+    images_base64: list[str],
+    provider: str | None = None,
+    model: str | None = None,
+) -> str:
+    """Extract text from uploaded page images using a multimodal provider."""
+    provider = (provider or _settings.ai_default_provider).lower()
+    if provider != "gemini":
+        provider = "gemini"
+    if not _settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY not configured")
+
+    final_model = model if model in GEMINI_MODELS else GEMINI_MODELS[0]
+    gm = genai.GenerativeModel(final_model)
+    parts: list[Any] = [
+        (
+            "Extract all readable text from these UPSC answer/question images. "
+            "Preserve page order, headings, numbering, and paragraph breaks. "
+            "Return plain text only."
+        )
+    ]
+    for image in images_base64:
+        raw = str(image or "")
+        if not raw.strip():
+            continue
+        mime_type = "image/jpeg"
+        payload = raw
+        if raw.startswith("data:") and "," in raw:
+            header, payload = raw.split(",", 1)
+            mime_type = header.split(";")[0].replace("data:", "") or mime_type
+        try:
+            parts.append({"mime_type": mime_type, "data": base64.b64decode(payload)})
+        except Exception:
+            logger.warning("Skipping invalid OCR image payload")
+
+    if len(parts) == 1:
+        return ""
+    resp = await gm.generate_content_async(parts)
+    return (resp.text or "").strip()
+
+
+async def generate_style_profile(
+    *,
+    content_type: str,
+    example_questions: list[str],
+    system_prompt_override: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """Analyze examples and return a reusable style profile."""
+    examples = "\n\n---\n\n".join(example_questions[:10])
+    system = system_prompt_override or (
+        "You analyze UPSC content examples and produce reusable generation or evaluation style guidance. "
+        "Return JSON only."
+    )
+    user = (
+        f"Content type: {content_type}\n\n"
+        f"Examples:\n{examples}\n\n"
+        "Return JSON with keys: style_instructions (string), structure_rules (list of strings), "
+        "tone_rules (list of strings), avoid_rules (list of strings)."
+    )
+    try:
+        raw = await _call_ai(system, user, provider=provider, model=model)
+        items = parse_ai_json(raw)
+        result = items[0] if items else {}
+    except Exception as exc:
+        logger.error("Style profile generation failed: %s", exc, exc_info=True)
+        result = {}
+
+    instructions = str(result.get("style_instructions") or "").strip()
+    if not instructions:
+        instructions = (
+            "Follow the supplied example style closely. Preserve the same level of difficulty, "
+            "answer structure, terminology, and explanation depth."
+        )
+    return {
+        "style_instructions": instructions,
+        "structure_rules": result.get("structure_rules") if isinstance(result.get("structure_rules"), list) else [],
+        "tone_rules": result.get("tone_rules") if isinstance(result.get("tone_rules"), list) else [],
+        "avoid_rules": result.get("avoid_rules") if isinstance(result.get("avoid_rules"), list) else [],
+    }
+
+
+async def refine_style_profile(
+    *,
+    style_profile: dict[str, Any],
+    feedback: str,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """Refine an existing style profile using user feedback."""
+    system = "Refine a UPSC AI style profile. Return JSON only."
+    user = (
+        f"Existing style profile:\n{json.dumps(style_profile, ensure_ascii=False)}\n\n"
+        f"Requested refinement:\n{feedback}\n\n"
+        "Return the full updated JSON object with at least style_instructions."
+    )
+    try:
+        raw = await _call_ai(system, user, provider=provider, model=model)
+        items = parse_ai_json(raw)
+        result = items[0] if items else {}
+    except Exception as exc:
+        logger.error("Style profile refinement failed: %s", exc, exc_info=True)
+        result = {}
+
+    merged = {**style_profile, **result}
+    if not str(merged.get("style_instructions") or "").strip():
+        merged["style_instructions"] = str(style_profile.get("style_instructions") or "").strip()
+    if feedback.strip():
+        merged["style_instructions"] = (
+            f"{str(merged.get('style_instructions') or '').strip()}\n\nRefinement: {feedback.strip()}"
+        ).strip()
+    return merged
+
 
 async def generate_article_draft(
     *,

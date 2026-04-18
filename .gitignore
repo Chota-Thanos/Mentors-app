@@ -25,4 +25,4 @@ yarn-error.log*
 .DS_Store
 
 # Split repositories
-supa_mobile/
+REBUILD_CONTEXT.md/

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
 import { profilesApi } from "@/lib/backendServices";
+import { premiumApi } from "@/lib/premiumApi";
 import {
   isAdminLike,
   isCreatorLike,
@@ -23,7 +24,6 @@ import type {
   MentorshipCallProvider,
   PremiumExam,
   ProfessionalHighlight,
-  ProfessionalProfile,
   ProfessionalProfilePayload,
   ProfessionalProfileRole,
 } from "@/types/premium";
@@ -37,10 +37,24 @@ const roleOptionLabel = (role: ProfessionalProfileRole): string => {
 };
 
 function toError(error: unknown): string {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail;
+    return typeof detail === "string" && detail.trim() ? detail : error.message;
+  }
+  if (error instanceof Error) return error.message;
+  return "Unknown error";
 }
+
+type ProfessionalProfileFormData = ProfessionalProfilePayload & {
+  id: number;
+  auth_user_id?: string | null;
+  email?: string | null;
+  avatar_url?: string | null;
+  role?: string | null;
+  professional_role?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
 
 const parseList = (value: string): string[] =>
   value
@@ -103,11 +117,7 @@ export default function ProfessionalProfileForm() {
     [user],
   );
   const defaultProfileRole = useMemo(
-    () =>
-      ((isCreatorLike(user) && "provider") ||
-        (isProviderLike(user) && "provider") ||
-        (isMentorLike(user) && "mentor") ||
-        "provider") as ProfessionalProfileRole,
+    () => (isMentorLike(user) ? "mentor" : "provider") as ProfessionalProfileRole,
     [user],
   );
 
@@ -203,26 +213,22 @@ export default function ProfessionalProfileForm() {
       }
       if (active) setBusy(true);
       try {
-        const supabase = createClient();
-        const { data, error } = await supabase
-          .from("professional_profiles")
-          .select("*")
-          .eq("user_id", user?.id)
-          .single();
-
-        if (error && error.code !== "PGRST116") throw error;
+        const { data } = await premiumApi.get<ProfessionalProfileFormData>("/profiles/me");
         if (!active) return;
 
         if (!data) {
-          // No profile yet
           setRole(defaultProfileRole);
           setDisplayName(String(userEmail).split("@")[0] || "");
           setDefaultCallProvider("zoom_video_sdk");
           return;
         }
 
-        const profile = data as any;
-        const normalizedRole = normalizeEditableRole(profile.role, defaultProfileRole);
+        const profile = data;
+        const meta = (profile.meta || {}) as Record<string, unknown>;
+        const normalizedRole = normalizeEditableRole(
+          profile.professional_role || asText(meta.professional_role) || profile.role,
+          defaultProfileRole,
+        );
         setRole(normalizedRole);
         setDisplayName(profile.display_name || "");
         setHeadline(profile.headline || "");
@@ -241,8 +247,7 @@ export default function ProfessionalProfileForm() {
         setLanguages(stringifyList(profile.languages));
         setHighlights(stringifyMixedList(profile.highlights));
         setCredentials(stringifyList(profile.credentials));
-        setIsPublic(profile.is_public);
-        const meta = (profile.meta || {}) as Record<string, unknown>;
+        setIsPublic(profile.is_public !== false);
         setAchievements(stringifyList(Array.isArray(meta.achievements) ? (meta.achievements as string[]) : []));
         setServiceSpecifications(
           stringifyList(Array.isArray(meta.service_specifications) ? (meta.service_specifications as string[]) : []),
@@ -339,6 +344,7 @@ export default function ProfessionalProfileForm() {
         is_public: isPublic,
         exam_ids: selectedExamIds,
         meta: {
+          professional_role: role,
           achievements: parseList(achievements),
           service_specifications: parseList(serviceSpecifications),
           authenticity_proof_url: authenticityProofUrl.trim() || null,
@@ -358,16 +364,7 @@ export default function ProfessionalProfileForm() {
           sessions_completed: isMentorProfile && sessionsCompleted.trim() ? Number(sessionsCompleted) : null,
         },
       };
-      const supabase = createClient();
-      const { error: saveError } = await supabase
-        .from("professional_profiles")
-        .upsert({
-          ...payload,
-          user_id: user?.id,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "user_id" });
-
-      if (saveError) throw saveError;
+      await premiumApi.put("/profiles/me", payload);
       profilesApi.clearCache();
       toast.success("Professional profile saved");
     } catch (error: unknown) {

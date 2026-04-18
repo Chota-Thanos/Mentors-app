@@ -104,17 +104,13 @@ export default function MentorshipAvailabilityManager({
       try {
         if (!profileId) throw new Error("Profile is not loaded yet.");
 
-        const { data: profileData } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", profileId)
-          .maybeSingle();
+        const { data: profileData } = await premiumApi.get<any>("/profiles/me");
 
         if (!active) return;
 
         const creatorProfile = profileData as ProfessionalProfile | null;
-        const meta = (((profileData as any)?.payout_details as Record<string, unknown>) || {});
-        const resolvedRole = String(profile?.role || "mains_expert").trim() || "mains_expert";
+        const meta = (((profileData as any)?.meta as Record<string, unknown>) || {});
+        const resolvedRole = String((profileData as any)?.professional_role || profile?.role || "mains_expert").trim() || "mains_expert";
         setRole(resolvedRole);
         setDisplayName(String(creatorProfile?.display_name || profile?.display_name || "").trim());
         setAvailabilityMode(String(meta.mentorship_availability_mode || "").toLowerCase() === "open" ? "open" : "series_only");

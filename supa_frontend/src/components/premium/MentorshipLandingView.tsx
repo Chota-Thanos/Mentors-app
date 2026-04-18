@@ -1,6 +1,5 @@
 "use client";
 
-import axios from "axios";
 import {
   ArrowRight,
   BookOpenCheck,
@@ -17,12 +16,6 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useExamContext } from "@/context/ExamContext";
 import type { ProfessionalProfile } from "@/types/premium";
-
-function toErrorMessage(error: unknown): string {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
-}
 
 function initialsFromLabel(label: string): string {
   const tokens = label.trim().split(/\s+/).filter(Boolean).slice(0, 2);
@@ -60,6 +53,10 @@ function reviewMeta(profile: ProfessionalProfile): { average: number; total: num
 
 function copyEvaluationEnabled(profile: ProfessionalProfile): boolean {
   return Boolean((profile.meta || {})?.copy_evaluation_enabled);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function matchesExamIds(examIds: number[] | undefined | null, examId: number | null): boolean {
@@ -158,13 +155,16 @@ export default function MentorshipLandingView() {
         const supabase = createClient();
 
         const { data, error: fetchError } = await supabase
-          .from("profiles")
+          .from("creator_profiles")
           .select(`
-            id, display_name, avatar_url, bio, role, creator_exam_ids, highlights
+            *,
+            profile:profiles!creator_profiles_user_id_fkey(
+              id, display_name, avatar_url, bio, role, is_active, is_verified, creator_exam_ids, highlights
+            ),
+            exams:creator_profile_exams(exam_id)
           `)
-          .in("role", ["admin", "moderator", "prelims_expert", "mains_expert"])
           .eq("is_active", true)
-          .eq("is_verified", true)
+          .eq("is_public", true)
           .order("display_name")
           .limit(6);
 
@@ -172,37 +172,97 @@ export default function MentorshipLandingView() {
 
         if (!active) return;
 
-        const mappedMentors = (data || []).map((row: any) => {
-          const rawHighlights = Array.isArray(row.highlights) ? row.highlights : [];
-          const highlightLabels = rawHighlights.map((h: any) => typeof h === "string" ? h : h.label);
-          const examIds = Array.isArray(row.creator_exam_ids)
-            ? row.creator_exam_ids.map(Number).filter((value: number) => Number.isFinite(value))
-            : [];
-          
-          return {
-            user_id: String(row.id),
-            role: String(row.role || "mains_expert"),
-            display_name: row.display_name || "Verified Mentor",
-            profile_image_url: row.avatar_url || "",
-            headline: highlightLabels.length > 0 ? highlightLabels[0] : "Verified Expert Mentor",
-            bio: row.bio || "",
-            specialization_tags: highlightLabels,
-            credentials: [],
-            highlights: rawHighlights,
-            languages: [],
-            contact_url: null,
-            public_email: null,
-            experiences: [],
-            meta: {},
-            exam_ids: examIds,
-            is_verified: true,
-            is_public: true,
-            is_active: !!row.is_active,
-            city: "",
-            created_at: row.created_at || new Date().toISOString(),
-            updated_at: row.updated_at || new Date().toISOString(),
-          };
-        }) as unknown as ProfessionalProfile[];
+        const { data: profileFallbackData } = await supabase
+          .from("profiles")
+          .select("id, display_name, avatar_url, bio, role, is_active, is_verified, creator_exam_ids, highlights, created_at, updated_at")
+          .eq("role", "mains_expert")
+          .eq("is_active", true)
+          .limit(6);
+
+        if (!active) return;
+
+        const creatorMentors = (data || [])
+          .map((row: any) => {
+            const profile = row.profile || {};
+            const baseRole = String(profile.role || "").trim().toLowerCase();
+            const meta = asRecord(row.social_links);
+            const professionalRole = String(
+              meta.professional_role || (baseRole === "mains_expert" ? "mentor" : ""),
+            ).trim().toLowerCase();
+            if (professionalRole !== "mentor" && baseRole !== "mains_expert") return null;
+
+            const rawHighlights = Array.isArray(row.highlights) ? row.highlights : [];
+            const highlightLabels = rawHighlights.map((h: any) => typeof h === "string" ? h : h.label).filter(Boolean);
+            const joinedExamIds = Array.isArray(row.exams)
+              ? row.exams.map((e: any) => Number(e.exam_id)).filter((value: number) => Number.isFinite(value))
+              : [];
+            const profileExamIds = Array.isArray(profile.creator_exam_ids)
+              ? profile.creator_exam_ids.map(Number).filter((value: number) => Number.isFinite(value))
+              : [];
+            const examIds = Array.from(new Set([...joinedExamIds, ...profileExamIds]));
+
+            return {
+              user_id: String(row.user_id),
+              role: professionalRole || "mentor",
+              display_name: row.display_name || profile.display_name || "Verified Mentor",
+              profile_image_url: row.profile_image_url || profile.avatar_url || "",
+              headline: row.headline || highlightLabels[0] || "Mains Mentor",
+              bio: row.bio || profile.bio || "",
+              specialization_tags: Array.isArray(row.specialization_tags) ? row.specialization_tags : highlightLabels,
+              credentials: Array.isArray(row.credentials) ? row.credentials : [],
+              highlights: rawHighlights,
+              languages: Array.isArray(row.languages) ? row.languages : [],
+              contact_url: row.contact_url || null,
+              public_email: row.public_email || null,
+              experiences: [],
+              meta,
+              exam_ids: examIds,
+              is_verified: !!row.is_verified || !!profile.is_verified,
+              is_public: !!row.is_public,
+              is_active: !!row.is_active && profile.is_active !== false,
+              city: row.city || "",
+              created_at: row.created_at || new Date().toISOString(),
+              updated_at: row.updated_at || new Date().toISOString(),
+            };
+          })
+          .filter(Boolean) as unknown as ProfessionalProfile[];
+
+        const creatorMentorIds = new Set(creatorMentors.map((row) => String(row.user_id)));
+        const fallbackMentors = (profileFallbackData || [])
+          .filter((row: any) => !creatorMentorIds.has(String(row.id)))
+          .map((row: any) => {
+            const rawHighlights = Array.isArray(row.highlights) ? row.highlights : [];
+            const highlightLabels = rawHighlights.map((item: any) => (typeof item === "string" ? item : item?.label)).filter(Boolean);
+            const examIds = Array.isArray(row.creator_exam_ids)
+              ? row.creator_exam_ids.map(Number).filter((value: number) => Number.isFinite(value))
+              : [];
+            return {
+              user_id: String(row.id),
+              role: "mentor",
+              display_name: row.display_name || "Verified Mentor",
+              profile_image_url: row.avatar_url || "",
+              headline: highlightLabels[0] || "Mains Mentor",
+              bio: row.bio || "",
+              specialization_tags: highlightLabels,
+              credentials: [],
+              highlights: rawHighlights,
+              languages: [],
+              contact_url: null,
+              public_email: null,
+              experiences: [],
+              meta: { professional_role: "mentor" },
+              exam_ids: examIds,
+              is_verified: !!row.is_verified,
+              is_public: true,
+              is_active: !!row.is_active,
+              city: "",
+              created_at: row.created_at || new Date().toISOString(),
+              updated_at: row.updated_at || new Date().toISOString(),
+            };
+          }) as unknown as ProfessionalProfile[];
+
+        const mappedMentors = [...creatorMentors, ...fallbackMentors]
+          .filter((row: any) => matchesExamIds(row.exam_ids, globalExamId)) as unknown as ProfessionalProfile[];
 
         setMentors(mappedMentors);
         setError(null);

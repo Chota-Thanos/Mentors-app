@@ -43,7 +43,7 @@ export default function CollectionTestRunner({ collectionId }: CollectionTestRun
   const currentQuestion = useMemo(() => payload?.questions[index], [payload, index]);
   const answeredCount = useMemo(() => Object.values(answers).filter(Boolean).length, [answers]);
   const currentQuestionAny = (currentQuestion as unknown as Record<string, unknown> | undefined) || undefined;
-  const questionText = String(currentQuestion?.question_statement || currentQuestionAny?.question || "").trim();
+  let questionText = String(currentQuestion?.question_statement || currentQuestionAny?.question || "").trim();
   const supplementaryText = String(
     currentQuestion?.supplementary_statement
       || currentQuestionAny?.supp_question_statement
@@ -55,7 +55,16 @@ export default function CollectionTestRunner({ collectionId }: CollectionTestRun
     : Array.isArray(currentQuestionAny?.statement_facts)
       ? (currentQuestionAny?.statement_facts as string[])
       : [];
-  const promptText = String(currentQuestion?.question_prompt || currentQuestionAny?.prompt || "").trim();
+  let promptText = String(currentQuestion?.question_prompt || currentQuestionAny?.prompt || "").trim();
+  const promptLikePattern = /\b(which|what|how many|how much|select|choose|identify|find|determine)\b.+\?/i;
+  if (statements.length > 0 && questionText && !promptText && promptLikePattern.test(questionText)) {
+    promptText = questionText;
+    questionText = supplementaryText || "Consider the following statements:";
+  } else if (!questionText && statements.length > 0) {
+    questionText = supplementaryText || "Consider the following statements:";
+  } else if (promptText && promptText.toLowerCase() === questionText.toLowerCase()) {
+    promptText = "";
+  }
 
   const setAnswer = (label: string) => {
     if (!currentQuestion) return;

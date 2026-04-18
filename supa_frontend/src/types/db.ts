@@ -162,6 +162,7 @@ export interface PremiumCollection {
   is_finalized: boolean;
   is_active: boolean;
   creator_id: number;
+  meta: Record<string, unknown>;
   created_at: string;
   updated_at: string;
   // Relations
@@ -204,6 +205,7 @@ export interface TestSeries {
   is_finalized: boolean;
   is_active: boolean;
   creator_id: number;
+  meta: Record<string, unknown>;
   created_at: string;
   updated_at: string;
   // Relations

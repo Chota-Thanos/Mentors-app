@@ -150,6 +150,21 @@ export default function PrelimsSeriesReviewsView({ seriesId }: { seriesId: numbe
         return;
       }
 
+      const { data: creatorProfileData, error: creatorProfileError } = await supabase
+        .from("creator_profiles")
+        .select("id")
+        .eq("user_id", targetProfileId)
+        .maybeSingle();
+
+      if (creatorProfileError) throw creatorProfileError;
+
+      const creatorProfileId = Number(creatorProfileData?.id || 0);
+      if (!creatorProfileId) {
+        setReviews([]);
+        setSummary(null);
+        return;
+      }
+
       const { data: reviewsData, error: reviewsError } = await supabase
         .from("creator_profile_reviews")
         .select(`
@@ -158,7 +173,7 @@ export default function PrelimsSeriesReviewsView({ seriesId }: { seriesId: numbe
             display_name
           )
         `)
-        .eq("creator_profile_id", targetProfileId)
+        .eq("creator_profile_id", creatorProfileId)
         .order("created_at", { ascending: false });
 
       if (reviewsError) throw reviewsError;

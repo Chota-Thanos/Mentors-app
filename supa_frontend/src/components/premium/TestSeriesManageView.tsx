@@ -811,39 +811,49 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
     setSavingTest(true);
     try {
       const supabase = createClient();
+      const normalizedTestKind = testForm.test_kind === "mains" ? "mains" : "prelims";
+      const testMeta = {
+        ...((testForm.meta || {}) as Record<string, unknown>),
+        test_label: testForm.test_label || (normalizedTestKind === "mains" ? "Mains" : "Prelims"),
+        exam_ids: testExamIds,
+        series_id: seriesId,
+      };
       if (editingTestId) {
         // 1. Update Collection
-        await supabase.from("premium_collections").update({
+        const { error: collectionError } = await supabase.from("premium_collections").update({
           name: title,
           description: testForm.description || null,
-          collection_type: testForm.test_kind === "mains" ? "mains" : "prelims",
+          collection_type: normalizedTestKind,
           is_paid: testForm.is_premium,
           price: Number(testForm.price || 0),
           is_public: testForm.is_public,
           is_finalized: testForm.is_finalized,
           image_url: testForm.thumbnail_url || null,
-          meta: testForm.meta || {},
+          meta: testMeta,
         }).eq("id", editingTestId);
+        if (collectionError) throw collectionError;
 
         // 2. Update Step
-        await supabase.from("program_unit_steps").update({
+        const { error: stepError } = await supabase.from("program_unit_steps").update({
           title,
           display_order: testForm.series_order,
+          meta: testMeta,
         }).eq("collection_id", editingTestId);
+        if (stepError) throw stepError;
 
       } else {
         // 1. Create Collection
         const { data: coll, error: collErr } = await supabase.from("premium_collections").insert({
           name: title,
           description: testForm.description || null,
-          collection_type: testForm.test_kind === "mains" ? "mains" : "prelims",
+          collection_type: normalizedTestKind,
           is_paid: testForm.is_premium,
           price: Number(testForm.price || 0),
           is_public: testForm.is_public,
           is_finalized: testForm.is_finalized,
           image_url: testForm.thumbnail_url || null,
           creator_id: profileId,
-          meta: testForm.meta || {},
+          meta: testMeta,
         }).select().single();
 
         if (collErr) throw collErr;
@@ -859,13 +869,15 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
           unit = newUnit;
         }
 
-        await supabase.from("program_unit_steps").insert({
+        const { error: stepError } = await supabase.from("program_unit_steps").insert({
           unit_id: unit!.id,
           step_type: "test",
           title,
           collection_id: coll!.id,
           display_order: testForm.series_order,
+          meta: testMeta,
         });
+        if (stepError) throw stepError;
       }
 
       toast.success(editingTestId ? "Test updated" : "Test created");
@@ -1731,6 +1743,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
           </div>
         </div>
       </div>
+      {modals}
       </>
     );
   }

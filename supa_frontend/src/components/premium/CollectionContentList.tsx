@@ -342,12 +342,22 @@ export default function CollectionContentList({ collectionId, manageHref, items 
       const statements = Array.isArray(data.statements_facts) ? data.statements_facts : Array.isArray(data.statement_facts) ? data.statement_facts : [];
       const options = normalizeOptions(data);
       const correctAnswer = asText(data.correct_answer || data.answer).toUpperCase();
+      let questionText = asText(data.question_statement);
+      let promptText = asText(data.question_prompt);
+      const supplementaryText = asText(data.supplementary_statement || data.supp_question_statement);
+      const promptLikePattern = /\b(which|what|how many|how much|select|choose|identify|find|determine)\b.+\?/i;
+      if (statements.length > 0 && questionText && !promptText && promptLikePattern.test(questionText)) {
+        promptText = questionText;
+        questionText = supplementaryText || "Consider the following statements:";
+      } else if (!questionText && statements.length > 0) {
+        questionText = supplementaryText || "Consider the following statements:";
+      }
       return (
         <div className="space-y-4">
-          <p className="text-sm text-slate-700 whitespace-pre-line">{asText(data.question_statement)}</p>
-          {asText(data.supplementary_statement || data.supp_question_statement) ? <p className="text-sm text-slate-600 whitespace-pre-line">{asText(data.supplementary_statement || data.supp_question_statement)}</p> : null}
+          <p className="text-sm text-slate-700 whitespace-pre-line">{questionText}</p>
+          {supplementaryText && supplementaryText !== questionText ? <p className="text-sm text-slate-600 whitespace-pre-line">{supplementaryText}</p> : null}
           {statements.length > 0 ? <div className="space-y-1">{statements.map((statement, index) => <p key={`${item.collection_item_id}-${index}`} className="text-sm text-slate-700">{index + 1}. {asText(statement)}</p>)}</div> : null}
-          {asText(data.question_prompt) ? <p className="text-sm text-slate-600">{asText(data.question_prompt)}</p> : null}
+          {promptText ? <p className="text-sm text-slate-600">{promptText}</p> : null}
           <div className="space-y-2">{options.map((option) => <div key={`${item.collection_item_id}-${option.label}`} className={`rounded border px-3 py-2 text-sm ${option.label === correctAnswer ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}><span className="font-semibold">{option.label}.</span> {option.text}</div>)}</div>
           {asText(data.explanation_text || data.explanation) ? <p className="text-sm text-slate-700 whitespace-pre-line">{asText(data.explanation_text || data.explanation)}</p> : null}
         </div>

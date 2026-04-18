@@ -524,11 +524,17 @@ function getQuestionRenderParts(question: JsonRecord): {
   const statements = normalizeQuestionStatements(question).map((fact) => String(fact).trim()).filter(Boolean);
   let questionText = String(question.question_statement || question.question || "").trim();
   let promptText = String(question.question_prompt || question.prompt || "").trim();
+  const promptLikePattern = /\b(which|what|how many|how much|select|choose|identify|find|determine)\b.+\?/i;
 
-  if (!questionText) {
-    questionText = promptText;
-    promptText = "";
+  if (statements.length > 0 && questionText && !promptText && promptLikePattern.test(questionText)) {
+    promptText = questionText;
+    questionText = supplementary || "Consider the following statements:";
+  } else if (!questionText && statements.length > 0) {
+    questionText = supplementary || "Consider the following statements:";
   } else if (promptText && promptText.toLowerCase() === questionText.toLowerCase()) {
+    promptText = "";
+  } else if (!questionText) {
+    questionText = promptText;
     promptText = "";
   }
 
@@ -2106,6 +2112,7 @@ export default function AIUserStudio({
 
   const buildQuestionContentData = useCallback((item: JsonRecord) => {
     const correctAnswer = resolveCorrectAnswer(item, "A");
+    const renderParts = getQuestionRenderParts(item);
     const categoryIds = normalizeCategoryIds(
       item.category_ids
       || item.premium_gk_category_ids
@@ -2118,7 +2125,7 @@ export default function AIUserStudio({
       is_correct: Boolean(option.is_correct),
     }));
     return {
-      question_statement: String(item.question_statement || item.question || "").trim(),
+      question_statement: renderParts.questionText,
       supp_question_statement: item.supp_question_statement
         ? String(item.supp_question_statement)
         : item.supplementary_statement
@@ -2131,7 +2138,7 @@ export default function AIUserStudio({
           : null,
       statements_facts: normalizeQuestionStatements(item),
       statement_facts: normalizeQuestionStatements(item),
-      question_prompt: item.question_prompt ? String(item.question_prompt) : (item.prompt ? String(item.prompt) : null),
+      question_prompt: renderParts.promptText || null,
       options,
       correct_answer: correctAnswer || "A",
       explanation: item.explanation ? String(item.explanation) : (item.explanation_text ? String(item.explanation_text) : null),
@@ -2149,6 +2156,7 @@ export default function AIUserStudio({
       .filter((q): q is JsonRecord => Boolean(q))
       .map((q) => {
         const correctAnswer = resolveCorrectAnswer(q, "A");
+        const renderParts = getQuestionRenderParts(q);
         const questionCategoryIds = normalizeCategoryIds(
           q.category_ids || q.premium_passage_category_ids || [],
         );
@@ -2158,7 +2166,7 @@ export default function AIUserStudio({
           is_correct: Boolean(option.is_correct),
         }));
         return {
-          question_statement: String(q.question_statement || q.question || "").trim(),
+          question_statement: renderParts.questionText,
           supp_question_statement: q.supp_question_statement
             ? String(q.supp_question_statement)
             : q.supplementary_statement
@@ -2171,7 +2179,7 @@ export default function AIUserStudio({
               : null,
           statements_facts: normalizeQuestionStatements(q),
           statement_facts: normalizeQuestionStatements(q),
-          question_prompt: q.question_prompt ? String(q.question_prompt) : (q.prompt ? String(q.prompt) : null),
+          question_prompt: renderParts.promptText || null,
           options,
           correct_answer: correctAnswer || "A",
           explanation: q.explanation ? String(q.explanation) : (q.explanation_text ? String(q.explanation_text) : null),
@@ -3019,12 +3027,6 @@ export default function AIUserStudio({
                     onChange={(event) => setEditingQuestionDraft((prev) => (prev ? { ...prev, supp_question_statement: event.target.value } : prev))}
                     placeholder="Supplementary statement (optional)"
                   />
-                  <input
-                    className="dark:text-white w-full rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
-                    value={editingQuestionDraft.question_prompt}
-                    onChange={(event) => setEditingQuestionDraft((prev) => (prev ? { ...prev, question_prompt: event.target.value } : prev))}
-                    placeholder="Prompt (optional)"
-                  />
                   <div className="space-y-1">
                     <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Statements / Facts</p>
                     <textarea
@@ -3034,6 +3036,12 @@ export default function AIUserStudio({
                       placeholder="One statement or fact per line"
                     />
                   </div>
+                  <input
+                    className="dark:text-white w-full rounded-md border border-emerald-200 bg-white dark:bg-[#0b1120] px-3 py-2 text-sm"
+                    value={editingQuestionDraft.question_prompt}
+                    onChange={(event) => setEditingQuestionDraft((prev) => (prev ? { ...prev, question_prompt: event.target.value } : prev))}
+                    placeholder="Question prompt (optional)"
+                  />
                   <div className="space-y-2">
                     {editingQuestionDraft.options.map((option, optionIndex) => (
                       <div key={`${currentKey}-edit-option-${option.label}`} className="grid gap-2 md:grid-cols-[48px_1fr]">

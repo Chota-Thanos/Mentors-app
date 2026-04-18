@@ -454,65 +454,17 @@ export default function DashboardPage() {
           const { data: { user: authUser } } = await supabase.auth.getUser();
           if (!authUser) throw new Error("Not authenticated");
 
-          const [seriesRes, mentorshipRes, slotsRes, profileRes, reviewsRes] = await Promise.all([
+          const [seriesRes, mentorshipRes, slotsRes, profileDetailRes] = await Promise.all([
             supabase.from("test_series").select("*").eq("creator_id", profileId).order("created_at", { ascending: false }),
             supabase.from("mentorship_requests").select("id", { count: "exact", head: true }).eq("mentor_id", profileId).eq("status", "requested"),
             supabase.from("mentorship_slots").select("id", { count: "exact", head: true }).eq("mentor_id", profileId).gte("starts_at", new Date().toISOString()),
-            supabase.from("profiles").select("*").eq("id", profileId).single(),
-            supabase.from("test_series_reviews").select("*").eq("creator_id", profileId).limit(10),
+            premiumApi.get<ProfessionalPublicProfileDetail>(`/profiles/${profileId}/detail`).catch(() => ({ data: null })),
           ]);
 
           const allSeries = (seriesRes.data || []) as TestSeries[];
-          const profileDetail: ProfessionalPublicProfileDetail | null = profileRes.data ? {
-            profile: {
-              id: profileRes.data.id,
-              user_id: profileRes.data.auth_user_id,
-              display_name: profileRes.data.display_name,
-              profile_image_url: profileRes.data.avatar_url,
-              headline: (profileRes.data as any).headline || "Professional Mentor",
-              bio: profileRes.data.bio,
-              role: profileRes.data.role || "mentor",
-              is_verified: true,
-              years_experience: (profileRes.data as any).mentor_experience_years || 0,
-              specialization_tags: Array.isArray((profileRes.data as any).specialization_tags) ? (profileRes.data as any).specialization_tags : [],
-              highlights: [],
-              credentials: [],
-              languages: ["English"],
-              is_active: true,
-              is_public: true,
-              exam_ids: [],
-              meta: {},
-              created_at: profileRes.data.created_at,
-            },
-            role_label: (profileRes.data.role || "mentor").replace("_", " ").toUpperCase(),
-            achievements: [],
-            service_specifications: [],
-            exam_focus: "UPSC & Civil Services",
-            response_time_text: "Usually within 24 hours",
-            mentorship_price: (profileRes.data as any).mentorship_current_price || 0,
-            copy_evaluation_price: (profileRes.data as any).copy_evaluation_price || 0,
-            copy_evaluation_enabled: !!(profileRes.data as any).copy_evaluation_enabled,
-            currency: "INR",
-            sessions_completed: 0,
-            mentorship_availability_mode: "open",
-            mentorship_available_series_ids: [],
-            mentorship_default_call_provider: "agora",
-            review_summary: {
-              average_rating: (profileRes.data as any).avg_rating || 0,
-              total_reviews: (profileRes.data as any).total_ratings || 0,
-              rating_1: 0,
-              rating_2: 0,
-              rating_3: 0,
-              rating_4: 0,
-              rating_5: 0,
-            },
-            recent_reviews: (reviewsRes.data || []).map(r => ({
-               ...r,
-               reviewer_label: (r as any).reviewer_label || "Student",
-            })) as any[],
-            provided_series: allSeries,
-            assigned_series: [],
-          } : null;
+          const profileDetail: ProfessionalPublicProfileDetail | null = profileDetailRes.data
+            ? { ...profileDetailRes.data, provided_series: allSeries }
+            : null;
 
           const prelimsSeries = allSeries.filter((row) => String(row.series_kind || "").toLowerCase() !== "mains");
 

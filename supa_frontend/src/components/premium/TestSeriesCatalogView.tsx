@@ -1,6 +1,5 @@
 "use client";
 
-import axios from "axios";
 import { ChevronDown, Search, SlidersHorizontal, Star } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -9,11 +8,9 @@ import { toast } from "sonner";
 
 import { useExamContext } from "@/context/ExamContext";
 import { profilesApi } from "@/lib/backendServices";
-import { premiumApi } from "@/lib/premiumApi";
 import { richTextToPlainText } from "@/lib/richText";
 import type {
   TestSeriesAccessType,
-  TestSeriesDiscoverySeries,
 } from "@/types/premium";
 
 interface TestSeriesCatalogViewProps {
@@ -44,17 +41,67 @@ function cn(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
-function matchesExamIds(examIds: number[] | undefined | null, examId: number | null): boolean {
-  if (!examId) return true;
-  // An empty exam_ids array means the item is available to all exams
-  if (!Array.isArray(examIds) || examIds.length === 0) return true;
-  return examIds.includes(examId);
-}
+type CreatorProfileRow = {
+  id: number;
+  display_name?: string | null;
+  role?: string | null;
+  professional_role?: string | null;
+  bio?: string | null;
+  headline?: string | null;
+  is_verified?: boolean;
+  meta?: Record<string, unknown>;
+};
 
-function toError(error: unknown): string {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
+type RawSeriesRow = {
+  id: number;
+  name?: string | null;
+  description?: string | null;
+  price?: number | string | null;
+  is_paid?: boolean | null;
+  cover_image_url?: string | null;
+  series_kind?: string | null;
+  created_at?: string | null;
+  creator_id?: number | string | null;
+  program_units?: Array<{ id?: number } | number | null> | null;
+};
+
+type CatalogRow = {
+  series: {
+    id: number;
+    title: string;
+    description: string;
+    price: number;
+    access_type: TestSeriesAccessType;
+    cover_image_url: string;
+    test_count: number;
+    created_at: string;
+    exam_ids: number[];
+  };
+  provider_profile: {
+    user_id: string;
+    display_name: string;
+    role: string;
+    professional_role?: string | null;
+    headline?: string | null;
+    bio: string;
+    is_verified: boolean;
+    meta: Record<string, unknown>;
+  };
+  category_labels: string[];
+  category_ids: number[];
+};
+
+function providerRoleLabel(profile: { role?: string | null; professional_role?: string | null } | null | undefined, isMains: boolean): string {
+  const role = String(profile?.professional_role || profile?.role || "").trim().toLowerCase();
+  if (role === "admin") return "Admin";
+  if (role === "moderator") return "Moderator";
+  if (role === "prelims_expert") return "Prelims Expert";
+  if (role === "mains_expert") return "Mains Expert";
+  if (role === "mentor") return "Mains Mentor";
+  if (role === "creator" || role === "provider" || role === "institute") {
+    return isMains ? "Mains Mentor" : "Quiz Master";
+  }
+  return isMains ? "Mains writing mentor" : "Objective practice mentor";
 }
 
 function formatListingPrice(value?: number | null): string {
@@ -82,7 +129,7 @@ function reviewSummaryMeta(meta: Record<string, unknown> | null | undefined): { 
   };
 }
 
-function sortRows(rows: TestSeriesDiscoverySeries[], sortBy: SortOption): TestSeriesDiscoverySeries[] {
+function sortRows(rows: CatalogRow[], sortBy: SortOption): CatalogRow[] {
   const nextRows = [...rows];
   nextRows.sort((left, right) => {
     const leftReview = reviewSummaryMeta(left.provider_profile?.meta);
@@ -318,14 +365,14 @@ function SeriesCard({
   row,
   isMains,
 }: {
-  row: TestSeriesDiscoverySeries;
+  row: CatalogRow;
   isMains: boolean;
 }) {
   const { series, provider_profile: profile, category_labels } = row;
   const review = reviewSummaryMeta(profile?.meta);
   const cover = series.cover_image_url || "";
   const providerName = profile?.display_name || (isMains ? "Mentors App Mains Faculty" : "Mentors App Prelims Faculty");
-  const providerLine = profile?.headline || profile?.role || (isMains ? "Mains writing mentor" : "Objective practice mentor");
+  const providerLine = profile?.headline || providerRoleLabel(profile, isMains);
   const providerBio = textExcerpt(profile?.bio, "");
   const categoryLine = category_labels.filter(Boolean).slice(0, 3).join(", ");
   const isPremium = series.access_type !== "free";
@@ -464,7 +511,7 @@ export default function TestSeriesCatalogView({
   description,
 }: TestSeriesCatalogViewProps) {
   const { globalExamId } = useExamContext();
-  const [seriesRows, setSeriesRows] = useState<any[]>([]);
+  const [seriesRows, setSeriesRows] = useState<CatalogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -491,8 +538,7 @@ export default function TestSeriesCatalogView({
           .select(`
             id, name, description, price, is_paid, cover_image_url, series_kind, created_at,
             creator_id,
-            program_units(id),
-            profiles(id, display_name, bio, meta)
+            program_units(id)
           `)
           .eq("is_active", true)
           .eq("is_public", true);
@@ -525,39 +571,54 @@ export default function TestSeriesCatalogView({
         if (!active) return;
 
         const creatorIds = Array.from(
-          new Set((data || []).map((row: any) => Number(row.creator_id)).filter((id) => Number.isFinite(id) && id > 0)),
+          new Set((data || []).map((row: RawSeriesRow) => Number(row.creator_id)).filter((id) => Number.isFinite(id) && id > 0)),
         );
-        const { data: profilesData } = creatorIds.length
-          ? await supabase.from("profiles").select("id, display_name").in("id", creatorIds)
-          : { data: [] };
-        const creators = new Map((profilesData || []).map((row: any) => [row.id, row]));
+        let profilesData: CreatorProfileRow[] = [];
+        if (creatorIds.length) {
+          try {
+            profilesData = (await profilesApi.batch(creatorIds)) as CreatorProfileRow[];
+          } catch {
+            const { data: fallbackProfiles } = await supabase.from("profiles").select("id, display_name, role, bio").in("id", creatorIds);
+            profilesData = (fallbackProfiles || []) as CreatorProfileRow[];
+          }
+        }
+        const creators = new Map(profilesData.map((row) => [row.id, row]));
         
-        const mappedRows = (data || []).map((row: any) => ({
-          series: {
-             id: row.id,
-             title: row.name || "",
-             description: row.description || "",
-             price: Number(row.price || 0),
-             access_type: row.is_paid ? "paid" : "free",
-             cover_image_url: row.cover_image_url || "",
-             test_count: row.program_units?.length || 0,
-             created_at: row.created_at,
-             exam_ids: [],
-          },
-          provider_profile: {
-             display_name: creators.get(Number(row.creator_id))?.display_name || "Faculty",
-             is_verified: false,
-             meta: {},
-          },
-          category_labels: [row.series_kind],
-          category_ids: [],
-        }));
+        const mappedRows = (data || []).map((row: RawSeriesRow): CatalogRow => {
+          const creatorId = Number(row.creator_id || 0);
+          const creator = creators.get(creatorId);
+          return {
+            series: {
+              id: row.id,
+              title: row.name || "",
+              description: row.description || "",
+              price: Number(row.price || 0),
+              access_type: row.is_paid ? "paid" : "free",
+              cover_image_url: row.cover_image_url || "",
+              test_count: row.program_units?.length || 0,
+              created_at: row.created_at || "",
+              exam_ids: [],
+            },
+            provider_profile: {
+              user_id: String(row.creator_id || ""),
+              display_name: creator?.display_name || "Faculty",
+              role: creator?.role || creator?.professional_role || "user",
+              professional_role: creator?.professional_role || null,
+              headline: creator?.headline || providerRoleLabel(creator, isMains),
+              bio: creator?.bio || "",
+              is_verified: Boolean(creator?.is_verified),
+              meta: creator?.meta || {},
+            },
+            category_labels: [row.series_kind || ""],
+            category_ids: [],
+          };
+        });
 
         setSeriesRows(mappedRows);
       } catch (error: unknown) {
         if (!active) return;
         setSeriesRows([]);
-        toast.error("Failed to load programs", { description: String((error as any).message || error) });
+        toast.error("Failed to load programs", { description: String((error as Error).message || error) });
       } finally {
         if (active) setLoading(false);
       }

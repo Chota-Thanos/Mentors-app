@@ -145,7 +145,7 @@ export default function MentorDirectoryView() {
         .select(`
           *,
           profile:profiles!creator_profiles_user_id_fkey(
-            id, display_name, avatar_url, bio, role, is_active
+            id, display_name, avatar_url, bio, role, is_active, is_verified, creator_exam_ids, highlights
           ),
           exams:creator_profile_exams(exam_id)
         `)
@@ -154,36 +154,49 @@ export default function MentorDirectoryView() {
 
       if (fetchError) throw fetchError;
 
-      const mentorRows = (data || [])
+      const { data: profileFallbackData } = await supabase
+        .from("profiles")
+        .select("id, display_name, avatar_url, bio, role, is_active, is_verified, creator_exam_ids, highlights, created_at, updated_at")
+        .eq("role", "mains_expert")
+        .eq("is_active", true);
+
+      const creatorMentorRows = (data || [])
         .map((row: any) => {
           const profile = row.profile || {};
-          const role = String(profile.role || "mains_expert");
-          
-          // Only show experts, exclude admin/moderator unless they have explicit expert roles
-          if (!["mains_expert", "prelims_expert"].includes(role)) return null;
+          const baseRole = String(profile.role || "").trim().toLowerCase();
+          const meta = asRecord(row.social_links);
+          const professionalRole = String(
+            meta.professional_role || (baseRole === "mains_expert" ? "mentor" : ""),
+          ).trim().toLowerCase();
 
-          const examIds = Array.isArray(row.exams)
+          if (professionalRole !== "mentor" && baseRole !== "mains_expert") return null;
+
+          const joinedExamIds = Array.isArray(row.exams)
             ? row.exams.map((e: any) => Number(e.exam_id)).filter((v: number) => Number.isFinite(v))
             : [];
+          const profileExamIds = Array.isArray(profile.creator_exam_ids)
+            ? profile.creator_exam_ids.map(Number).filter((v: number) => Number.isFinite(v))
+            : [];
+          const examIds = Array.from(new Set([...joinedExamIds, ...profileExamIds]));
             
           const highlights = Array.isArray(row.highlights) ? row.highlights : [];
           
           return {
             id: row.id,
             user_id: String(row.user_id),
-            role: role,
-            display_name: profile.display_name || "Verified Mentor",
-            profile_image_url: profile.avatar_url || "",
-            headline: highlights[0] || (role === "mains_expert" ? "Mains Expert" : "Prelims Expert"),
-            bio: profile.bio || "",
-            specialization_tags: [],
-            credentials: [],
+            role: professionalRole || "mentor",
+            display_name: row.display_name || profile.display_name || "Verified Mentor",
+            profile_image_url: row.profile_image_url || profile.avatar_url || "",
+            headline: row.headline || highlights[0] || "Mains Expert",
+            bio: row.bio || profile.bio || "",
+            specialization_tags: Array.isArray(row.specialization_tags) ? row.specialization_tags : [],
+            credentials: Array.isArray(row.credentials) ? row.credentials : [],
             highlights,
-            languages: [],
+            languages: Array.isArray(row.languages) ? row.languages : [],
             experiences: [],
-            meta: row.meta || {},
+            meta,
             exam_ids: examIds,
-            is_verified: !!row.is_verified,
+            is_verified: !!row.is_verified || !!profile.is_verified,
             is_public: !!row.is_public,
             is_active: !!row.is_active,
             city: row.city || "",
@@ -191,7 +204,42 @@ export default function MentorDirectoryView() {
             updated_at: row.updated_at,
           };
         })
-        .filter(Boolean)
+        .filter(Boolean) as unknown as ProfessionalProfile[];
+
+      const creatorMentorIds = new Set(creatorMentorRows.map((row) => String(row.user_id)));
+      const fallbackMentorRows = (profileFallbackData || [])
+        .filter((row: any) => !creatorMentorIds.has(String(row.id)))
+        .map((row: any) => {
+          const rawHighlights = Array.isArray(row.highlights) ? row.highlights : [];
+          const highlightLabels = rawHighlights.map((item: any) => (typeof item === "string" ? item : item?.label)).filter(Boolean);
+          const examIds = Array.isArray(row.creator_exam_ids)
+            ? row.creator_exam_ids.map(Number).filter((value: number) => Number.isFinite(value))
+            : [];
+          return {
+            id: Number(row.id),
+            user_id: String(row.id),
+            role: "mentor",
+            display_name: row.display_name || "Verified Mentor",
+            profile_image_url: row.avatar_url || "",
+            headline: highlightLabels[0] || "Mains Expert",
+            bio: row.bio || "",
+            specialization_tags: highlightLabels,
+            credentials: [],
+            highlights: rawHighlights,
+            languages: [],
+            experiences: [],
+            meta: { professional_role: "mentor" },
+            exam_ids: examIds,
+            is_verified: !!row.is_verified,
+            is_public: true,
+            is_active: !!row.is_active,
+            city: "",
+            created_at: row.created_at || new Date().toISOString(),
+            updated_at: row.updated_at || null,
+          };
+        }) as unknown as ProfessionalProfile[];
+
+      const mentorRows = [...creatorMentorRows, ...fallbackMentorRows]
         .filter((row: any) => matchesExamIds(row.exam_ids, globalExamId)) as unknown as ProfessionalProfile[];
 
       setRows(mentorRows);
