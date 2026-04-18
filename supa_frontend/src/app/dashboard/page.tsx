@@ -476,17 +476,34 @@ export default function DashboardPage() {
           return;
         }
 
-        const [summary, onboarding, tracking] = await Promise.all([
-          premiumApi.get<ModerationActivitySummary>("/moderation/activity-summary"),
-          premiumApi.get<ProfessionalOnboardingApplication[]>("/admin/onboarding/applications", { params: { status: "pending", limit: 100 } }),
+        const supabase = createSupabaseClient();
+        const [summary, onboardingRes, tracking] = await Promise.all([
+          premiumApi.get<ModerationActivitySummary>("/moderation/activity-summary").catch(() => ({ data: emptyModerationSummary })),
+          supabase.from("creator_applications").select("*, profiles(*)").eq("status", "pending").order("created_at", { ascending: false }).limit(10),
           premiumApi.get<LifecycleTrackingPayload>("/lifecycle/tracking", {
             params: { scope: "all", limit_cycles: 400, limit_users: 300 },
-          }),
+          }).catch(() => ({ data: emptyLifecycleTracking })),
         ]);
+        
+        let pendingOnboarding = [] as any[];
+        if (!onboardingRes.error && onboardingRes.data) {
+          pendingOnboarding = onboardingRes.data.map(row => {
+            const userObj = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+            return {
+              id: row.id,
+              user_id: String(row.user_id),
+              desired_role: (row.applied_roles || [])[0] || "creator",
+              full_name: row.full_name,
+              status: row.status,
+              created_at: row.created_at,
+              email_snapshot: userObj?.email || ""
+            };
+          });
+        }
         if (!active) return;
         setModeratorData({
           summary: summary.data || emptyModerationSummary,
-          pendingOnboarding: Array.isArray(onboarding.data) ? onboarding.data : [],
+          pendingOnboarding,
           tracking: tracking.data || emptyLifecycleTracking,
         });
         setMentorData(null);

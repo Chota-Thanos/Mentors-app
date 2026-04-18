@@ -2,6 +2,22 @@
 -- MIGRATION 14: Missing tables referenced by FastAPI routers
 -- =============================================================
 
+-- Fix: Ensure quiz_domain exists on quiz_attempt_answers for analytics
+DO $$ 
+BEGIN 
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+      AND table_name = 'quiz_attempt_answers' 
+      AND column_name = 'quiz_domain'
+  ) THEN 
+    ALTER TABLE public.quiz_attempt_answers 
+    ADD COLUMN quiz_domain TEXT CHECK (quiz_domain IN ('gk', 'maths', 'passage', 'mains'));
+    
+    CREATE INDEX IF NOT EXISTS idx_qaa_quiz_domain ON public.quiz_attempt_answers(quiz_domain);
+  END IF;
+END $$;
+
 -- ---------------------------------------------------------------
 -- AI ARTICLE STYLE GUIDES (admin-configurable editorial style)
 -- ---------------------------------------------------------------

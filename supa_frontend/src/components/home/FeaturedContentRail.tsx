@@ -130,26 +130,25 @@ async function fetchPrograms(
 async function fetchMentors(limit: number, examId?: number | null): Promise<MappedMentor[]> {
   const supabase = createClient();
   const { data, error } = await supabase
-    .from("creator_profiles")
+    .from("profiles")
     .select(`
-      user_id, display_name, profile_image_url, headline, bio,
-      specialization_tags, credentials, highlights
+      id, display_name, avatar_url, bio, role, highlights
     `)
+    .in("role", ["admin", "moderator", "prelims_expert", "mains_expert"])
     .eq("is_active", true)
-    .eq("is_public", true)
     .limit(limit);
 
   if (error) throw error;
 
   return (data || []).map((row: any) => ({
-    user_id: row.user_id,
+    user_id: row.id,
     display_name: row.display_name || "Mentor",
-    profile_image_url: row.profile_image_url || "",
-    headline: row.headline || "Mentor",
+    profile_image_url: row.avatar_url || "",
+    headline: (Array.isArray(row.highlights) && row.highlights[0]) || "Mentor",
     bio: row.bio || "",
-    specialization_tags: row.specialization_tags || [],
-    credentials: (row.credentials || []).map((c: any) => c.title),
-    highlights: (row.highlights || []).map((h: any) => typeof h === "string" ? h : h.label),
+    specialization_tags: [],
+    credentials: [],
+    highlights: (row.highlights || []).map((h: any) => typeof h === "string" ? h : String(h)),
     exam_ids: [], // Mocking for now
     mentorship_price: 500, // Hardcoded fallback for now since not in new schema
     review_summary: { average_rating: 4.8, total_reviews: 12 },

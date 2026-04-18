@@ -1,12 +1,11 @@
 "use client";
 
-import axios from "axios";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
-import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import { toNullableRichText } from "@/lib/richText";
 import { toDisplayRoleLabel } from "@/lib/roleLabels";
 import RichTextContent from "@/components/ui/RichTextContent";
@@ -35,12 +34,6 @@ const STATUS_STYLES: Record<string, string> = {
   approved: "bg-emerald-100 text-emerald-800",
   rejected: "bg-rose-100 text-rose-800",
 };
-
-function toError(error: unknown): string {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
-}
 
 function roleLabel(value: string): string {
   return toDisplayRoleLabel(value);
@@ -89,15 +82,39 @@ export default function ProfessionalOnboardingForm() {
   );
 
   const loadMyApplications = async () => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !user?.id) {
       setApplications([]);
       setBusy(false);
       return;
     }
     setBusy(true);
     try {
-      const response = await premiumApi.get<ProfessionalOnboardingApplication[]>("/onboarding/applications/me");
-      const rows = Array.isArray(response.data) ? response.data : [];
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("creator_applications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+        
+      if (error) throw error;
+      
+      const rows = (data || []).map(row => ({
+        id: row.id,
+        user_id: String(row.user_id),
+        desired_role: (row.applied_roles || [])[0] || "creator",
+        full_name: row.full_name,
+        about: row.bio || "",
+        city: "",
+        years_experience: row.experience ? parseInt(row.experience, 10) || null : null,
+        phone: "",
+        status: row.status,
+        details: row.social_links as any || { proof_documents: [], gs_preferences: [], institute_associations: [], subject_focus: [], sample_mcqs: [] },
+        reviewer_note: row.reviewer_note,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        meta: {}
+      })) as any[];
+
       setApplications(rows);
       if (rows.length > 0) {
         const latest = rows[0];
@@ -110,13 +127,13 @@ export default function ProfessionalOnboardingForm() {
         if (!about.trim()) setAbout(latest.about || "");
         const nextRole = String(latest.desired_role || "").toLowerCase();
         if (nextRole === "mentor" || nextRole === "creator") {
-          setDesiredRole(nextRole);
+          setDesiredRole(nextRole as ProfessionalOnboardingDesiredRole);
         }
       } else if (!fullName.trim()) {
         setFullName(String(user?.email || "").split("@")[0] || "");
       }
     } catch (error: unknown) {
-      toast.error("Failed to load onboarding history", { description: toError(error) });
+      toast.error("Failed to load onboarding history", { description: String(error) });
       setApplications([]);
     } finally {
       setBusy(false);
@@ -130,7 +147,7 @@ export default function ProfessionalOnboardingForm() {
   }, [loading, isAuthenticated]);
 
   const submitApplication = async () => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !user?.id) {
       toast.error("Sign in is required.");
       return;
     }
@@ -145,31 +162,34 @@ export default function ProfessionalOnboardingForm() {
       return;
     }
 
-    const payload: ProfessionalOnboardingApplicationPayload = {
-      desired_role: desiredRole,
-      full_name: safeName,
-      city: city.trim() || null,
-      years_experience: parsedExperience,
-      phone: phone.trim(),
-      about: toNullableRichText(about),
-      details: {
-        proof_documents: [],
-        gs_preferences: [],
-        institute_associations: [],
-        subject_focus: [],
-        sample_mcqs: [],
-      },
-    };
-
     setSubmitting(true);
     try {
-      await premiumApi.post("/onboarding/applications", payload);
+      const supabase = createClient();
+      const payload = {
+        user_id: user.id,
+        applied_roles: [desiredRole],
+        full_name: safeName,
+        bio: toNullableRichText(about) || null,
+        experience: parsedExperience !== null ? String(parsedExperience) : null,
+        social_links: {
+          proof_documents: [],
+          gs_preferences: [],
+          institute_associations: [],
+          subject_focus: [],
+          sample_mcqs: [],
+        } as any,
+        status: "pending"
+      };
+
+      const { error } = await supabase.from("creator_applications").insert(payload);
+      if (error) throw error;
+      
       toast.success("Onboarding form submitted", {
         description: "Your request is now visible to moderators/admin for review.",
       });
       await loadMyApplications();
     } catch (error: unknown) {
-      toast.error("Failed to submit onboarding form", { description: toError(error) });
+      toast.error("Failed to submit onboarding form", { description: String(error) });
     } finally {
       setSubmitting(false);
     }

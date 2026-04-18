@@ -158,14 +158,11 @@ export default function MentorshipLandingView() {
         const supabase = createClient();
 
         const { data, error: fetchError } = await supabase
-          .from("creator_profiles")
-          .select(
-            `
-              *,
-              exams:creator_profile_exams(exam_id)
-            `,
-          )
-          .eq("is_public", true)
+          .from("profiles")
+          .select(`
+            id, display_name, avatar_url, bio, role, creator_exam_ids, highlights
+          `)
+          .in("role", ["admin", "moderator", "prelims_expert", "mains_expert"])
           .eq("is_active", true)
           .eq("is_verified", true)
           .order("display_name")
@@ -178,33 +175,32 @@ export default function MentorshipLandingView() {
         const mappedMentors = (data || []).map((row: any) => {
           const rawHighlights = Array.isArray(row.highlights) ? row.highlights : [];
           const highlightLabels = rawHighlights.map((h: any) => typeof h === "string" ? h : h.label);
-          const examIds = Array.isArray(row.exams)
-            ? row.exams.map((item: any) => Number(item.exam_id)).filter((value: number) => Number.isFinite(value))
+          const examIds = Array.isArray(row.creator_exam_ids)
+            ? row.creator_exam_ids.map(Number).filter((value: number) => Number.isFinite(value))
             : [];
-          const socialLinks = typeof row.social_links === "object" && row.social_links ? row.social_links : {};
           
           return {
-            user_id: String(row.user_id),
-            role: String((socialLinks as Record<string, unknown>).professional_role || "mains_expert"),
+            user_id: String(row.id),
+            role: String(row.role || "mains_expert"),
             display_name: row.display_name || "Verified Mentor",
-            profile_image_url: row.profile_image_url || "",
+            profile_image_url: row.avatar_url || "",
             headline: highlightLabels.length > 0 ? highlightLabels[0] : "Verified Expert Mentor",
             bio: row.bio || "",
             specialization_tags: highlightLabels,
-            credentials: Array.isArray(row.credentials) ? row.credentials : [],
+            credentials: [],
             highlights: rawHighlights,
-            languages: Array.isArray(row.languages) ? row.languages : [],
-            contact_url: row.contact_url || null,
-            public_email: row.public_email || null,
+            languages: [],
+            contact_url: null,
+            public_email: null,
             experiences: [],
-            meta: socialLinks,
+            meta: {},
             exam_ids: examIds,
-            is_verified: !!row.is_verified,
-            is_public: !!row.is_public,
+            is_verified: true,
+            is_public: true,
             is_active: !!row.is_active,
-            city: row.city || "",
-            created_at: row.created_at,
-            updated_at: row.updated_at,
+            city: "",
+            created_at: row.created_at || new Date().toISOString(),
+            updated_at: row.updated_at || new Date().toISOString(),
           };
         }) as unknown as ProfessionalProfile[];
 

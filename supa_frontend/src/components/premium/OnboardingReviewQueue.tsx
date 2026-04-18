@@ -1,13 +1,12 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
 import { isAdminLike, isModeratorLike } from "@/lib/accessControl";
-import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import { toNullableRichText } from "@/lib/richText";
 import { toDisplayRoleLabel } from "@/lib/roleLabels";
 import RichTextContent from "@/components/ui/RichTextContent";
@@ -22,11 +21,7 @@ import type {
 
 type StatusFilter = ProfessionalOnboardingStatus | "all";
 
-function toError(error: unknown): string {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
-}
+};
 
 function AssetChips({ assets }: { assets: ProfessionalOnboardingAsset[] }) {
   if (!assets.length) return <p className="text-xs text-slate-500">No files attached.</p>;
@@ -174,16 +169,41 @@ export default function OnboardingReviewQueue() {
     }
     setBusy(true);
     try {
-      const response = await premiumApi.get<ProfessionalOnboardingApplication[]>("/admin/onboarding/applications", {
-        params: {
-          status: statusFilter,
-          limit: 300,
-        },
-      });
-      setRows(Array.isArray(response.data) ? response.data : []);
+      const supabase = createClient();
+      let query = supabase.from("creator_applications").select("*, profiles(*)");
+      
+      if (statusFilter !== "all") {
+        query = query.eq("status", statusFilter);
+      }
+      
+      const { data, error } = await query.order("created_at", { ascending: false }).limit(300);
+      if (error) throw error;
+      
+      const mapped = (data || []).map(row => {
+        const user = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+        return {
+          id: row.id,
+          user_id: String(row.user_id),
+          desired_role: (row.applied_roles || [])[0] || "creator",
+          full_name: row.full_name,
+          about: row.bio || "",
+          city: "",
+          years_experience: row.experience ? parseInt(row.experience, 10) || null : null,
+          phone: "",
+          status: row.status,
+          details: row.social_links as any || { proof_documents: [], gs_preferences: [], institute_associations: [], subject_focus: [], sample_mcqs: [] },
+          reviewer_note: row.reviewer_note,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          email_snapshot: user?.email || "",
+          meta: {}
+        };
+      }) as any[];
+      
+      setRows(mapped);
     } catch (error: unknown) {
       setRows([]);
-      toast.error("Failed to load onboarding queue", { description: toError(error) });
+      toast.error("Failed to load onboarding queue", { description: String(error) });
     } finally {
       setBusy(false);
     }
@@ -196,17 +216,32 @@ export default function OnboardingReviewQueue() {
   }, [loading, isAuthenticated, canReview, statusFilter]);
 
   const reviewApplication = async (applicationId: number, action: "approve" | "reject") => {
+    if (!user?.id) return;
     setProcessingId(applicationId);
     try {
-      await premiumApi.put(`/admin/onboarding/applications/${applicationId}/review`, {
-        action,
+      const supabase = createClient();
+      const finalStatus = action === "approve" ? "approved" : "rejected";
+      const { error } = await supabase.from("creator_applications").update({
+        status: finalStatus,
         reviewer_note: toNullableRichText(noteById[String(applicationId)] || ""),
-      });
+        reviewed_by: user.id,
+        reviewed_at: new Date().toISOString()
+      }).eq("id", applicationId);
+      if (error) throw error;
+      
+      if (action === "approve") {
+        const row = rows.find(r => r.id === applicationId);
+        if (row?.user_id && row?.desired_role) {
+          // Sync role to user profiles using RPC or just regular update since admin is here
+          await supabase.from("profiles").update({ role: row.desired_role }).eq("id", row.user_id);
+        }
+      }
+
       toast.success(action === "approve" ? "Application approved" : "Application rejected");
       setNoteById((prev) => ({ ...prev, [String(applicationId)]: "" }));
       await loadRows();
     } catch (error: unknown) {
-      toast.error("Failed to review application", { description: toError(error) });
+      toast.error("Failed to review application", { description: String(error) });
     } finally {
       setProcessingId(null);
     }

@@ -1,13 +1,12 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import axios from "axios";
 import Link from "next/link";
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
-import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import { toDisplayRoleLabel } from "@/lib/roleLabels";
 import RichTextContent from "@/components/ui/RichTextContent";
 import type {
@@ -82,12 +81,6 @@ type EditableForm = {
   about: string;
   details: EditableDetails;
 };
-
-function toError(error: unknown): string {
-  if (!axios.isAxiosError(error)) return "Unknown error";
-  const detail = error.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : error.message;
-}
 
 function normalizeRole(value: string | null | undefined): ProfessionalOnboardingDesiredRole {
   return String(value || "").trim().toLowerCase() === "mentor" ? "mentor" : "creator";
@@ -297,18 +290,43 @@ export default function ProfessionalOnboardingEligibilityForm() {
   const completedSteps = useMemo(() => getCompletedOnboardingSteps(form, desiredRole), [form, desiredRole]);
 
   const loadMyApplications = async () => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !user?.id) {
       setApplications([]);
       setBusy(false);
       return;
     }
     setBusy(true);
     try {
-      const response = await premiumApi.get<ProfessionalOnboardingApplication[]>("/onboarding/applications/me");
-      setApplications(Array.isArray(response.data) ? response.data : []);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("creator_applications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      
+      const mapped = (data || []).map(row => ({
+        id: row.id,
+        user_id: String(row.user_id),
+        desired_role: (row.applied_roles || [])[0] || "creator",
+        full_name: row.full_name,
+        about: row.bio || "",
+        city: "",
+        years_experience: row.experience ? parseInt(row.experience, 10) || null : null,
+        phone: "",
+        status: row.status,
+        details: row.social_links as ProfessionalOnboardingDetails || createEmptyDetails(),
+        reviewer_note: row.reviewer_note,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        meta: {}
+      })) as any[];
+      
+      setApplications(mapped);
     } catch (error: unknown) {
       setApplications([]);
-      toast.error("Failed to load onboarding history", { description: toError(error) });
+      toast.error("Failed to load onboarding history", { description: String(error) });
     } finally {
       setBusy(false);
     }
@@ -348,15 +366,15 @@ export default function ProfessionalOnboardingEligibilityForm() {
   };
 
   const uploadAsset = async (file: File, assetKind: "headshot" | "proof_document" | "sample_evaluation") => {
-    const formData = new FormData();
-    formData.append("asset_kind", assetKind);
-    formData.append("file", file);
-    const response = await premiumApi.post<ProfessionalOnboardingAsset>("/onboarding/assets/upload", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    });
-    return response.data;
+    const supabase = createClient();
+    const ext = file.name.split('.').pop() || 'tmp';
+    const filePath = `onboarding/${user?.id || 'anon'}_${Date.now()}_${assetKind}.${ext}`;
+    
+    const { data, error } = await supabase.storage.from("public_assets").upload(filePath, file);
+    if (error) throw error;
+    
+    const { data: urlData } = supabase.storage.from("public_assets").getPublicUrl(filePath);
+    return { url: urlData.publicUrl, path: filePath, file_name: file.name } as ProfessionalOnboardingAsset;
   };
 
   const handleHeadshotUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -467,25 +485,35 @@ export default function ProfessionalOnboardingEligibilityForm() {
       return;
     }
 
-    const payload: ProfessionalOnboardingDraftPayload = {
-      desired_role: desiredRole,
-      full_name: form.full_name.trim() || null,
-      city: form.city.trim() || null,
-      years_experience: parsedExperience,
-      phone: form.phone.trim() || null,
-      about: form.about.trim() || null,
-      details: buildNormalizedDetails(),
-    };
+    if (!user?.id) {
+      toast.error("User context missing.");
+      return;
+    }
 
     setSavingDraft(true);
     try {
-      await premiumApi.post("/onboarding/applications/draft", payload);
+      const supabase = createClient();
+      const normalizedDetails = buildNormalizedDetails();
+      
+      const payload = {
+        user_id: user.id,
+        applied_roles: [desiredRole],
+        full_name: form.full_name.trim() || user.email?.split("@")[0] || "Unknown",
+        bio: form.about.trim() || null,
+        experience: parsedExperience !== null ? String(parsedExperience) : null,
+        social_links: normalizedDetails as any,
+        status: "pending" // Saved drafts aren't fully supported in schema, so we keep status pending
+      };
+
+      const { error } = await supabase.from("creator_applications").insert(payload);
+      if (error) throw error;
+
       toast.success("Draft saved", {
         description: completedSteps.length > 0 ? `${completedSteps.length} of ${stepLabels.length} steps are complete.` : "You can continue the form later.",
       });
       await loadMyApplications();
     } catch (error: unknown) {
-      toast.error("Failed to save draft", { description: toError(error) });
+      toast.error("Failed to save draft", { description: String(error) });
     } finally {
       setSavingDraft(false);
     }
@@ -514,25 +542,35 @@ export default function ProfessionalOnboardingEligibilityForm() {
       return;
     }
 
-    const payload: ProfessionalOnboardingApplicationPayload = {
-      desired_role: desiredRole,
-      full_name: form.full_name.trim(),
-      city: form.city.trim() || null,
-      years_experience: parsedExperience,
-      phone: form.phone.trim(),
-      about: form.about.trim() || null,
-      details: buildNormalizedDetails(),
-    };
+    if (!user?.id) {
+      toast.error("User context missing.");
+      return;
+    }
 
     setSubmitting(true);
     try {
-      await premiumApi.post("/onboarding/applications", payload);
+      const supabase = createClient();
+      const normalizedDetails = buildNormalizedDetails();
+      
+      const payload = {
+        user_id: user.id,
+        applied_roles: [desiredRole],
+        full_name: form.full_name.trim() || user.email?.split("@")[0] || "Unknown",
+        bio: form.about.trim() || null,
+        experience: parsedExperience !== null ? String(parsedExperience) : null,
+        social_links: normalizedDetails as any,
+        status: "pending"
+      };
+
+      const { error } = await supabase.from("creator_applications").insert(payload);
+      if (error) throw error;
+
       toast.success("Application submitted", {
         description: "Your role request is now waiting for moderator/admin approval.",
       });
       await loadMyApplications();
     } catch (error: unknown) {
-      toast.error("Failed to submit application", { description: toError(error) });
+      toast.error("Failed to submit application", { description: String(error) });
     } finally {
       setSubmitting(false);
     }

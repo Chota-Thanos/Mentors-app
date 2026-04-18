@@ -549,14 +549,11 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
         const { createClient } = await import("@/lib/supabase/client");
         const supabase = createClient();
         const { data, error } = await supabase
-          .from("creator_profiles")
-          .select(
-            `
-              *,
-              exams:creator_profile_exams(exam_id)
-            `,
-          )
-          .eq("is_public", true)
+          .from("profiles")
+          .select(`
+            id, display_name, avatar_url, bio, role, creator_exam_ids, highlights
+          `)
+          .in("role", ["admin", "moderator", "prelims_expert", "mains_expert"])
           .eq("is_active", true)
           .order("display_name")
           .limit(200);
@@ -564,30 +561,34 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
         if (error) throw error;
         if (!active) return;
 
-        const mappedDirectory = (data || []).map((row: any) => ({
-          user_id: String(row.user_id),
-          role: String((row.social_links as Record<string, unknown> | undefined)?.professional_role || "mains_expert"),
-          display_name: row.display_name || "Verified Mentor",
-          profile_image_url: row.profile_image_url || "",
-          headline: Array.isArray(row.highlights) && row.highlights.length > 0 ? row.highlights[0] : "Verified Expert Mentor",
-          bio: row.bio || "",
-          specialization_tags: Array.isArray(row.specialization_tags) ? row.specialization_tags : [],
-          credentials: Array.isArray(row.credentials) ? row.credentials : [],
-          highlights: Array.isArray(row.highlights) ? row.highlights : [],
-          languages: Array.isArray(row.languages) ? row.languages : [],
-          contact_url: row.contact_url || null,
-          public_email: row.public_email || null,
-          experiences: [],
-          meta: typeof row.social_links === "object" && row.social_links ? row.social_links : {},
-          exam_ids: Array.isArray(row.exams)
-            ? row.exams.map((item: any) => Number(item.exam_id)).filter((value: number) => Number.isFinite(value))
-            : [],
-          is_verified: !!row.is_verified,
-          is_public: !!row.is_public,
-          is_active: !!row.is_active,
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-        })) as unknown as ProfessionalProfile[];
+        const mappedDirectory = (data || []).map((row: any) => {
+          const rawHighlights = Array.isArray(row.highlights) ? row.highlights : [];
+          const examIds = Array.isArray(row.creator_exam_ids)
+            ? row.creator_exam_ids.map(Number).filter((value: number) => Number.isFinite(value))
+            : [];
+          return {
+            user_id: String(row.id),
+            role: String(row.role || "mains_expert"),
+            display_name: row.display_name || "Verified Mentor",
+            profile_image_url: row.avatar_url || "",
+            headline: rawHighlights[0] || "Verified Expert Mentor",
+            bio: row.bio || "",
+            specialization_tags: [],
+            credentials: [],
+            highlights: rawHighlights,
+            languages: [],
+            contact_url: null,
+            public_email: null,
+            experiences: [],
+            meta: {},
+            exam_ids: examIds,
+            is_verified: true,
+            is_public: true,
+            is_active: !!row.is_active,
+            created_at: row.created_at || new Date().toISOString(),
+            updated_at: row.updated_at || new Date().toISOString(),
+          };
+        }) as unknown as ProfessionalProfile[];
 
         setMentorDirectory(mappedDirectory);
       } catch (error: unknown) {

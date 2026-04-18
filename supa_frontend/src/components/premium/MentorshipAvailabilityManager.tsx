@@ -105,15 +105,15 @@ export default function MentorshipAvailabilityManager({
         if (!profileId) throw new Error("Profile is not loaded yet.");
 
         const { data: profileData } = await supabase
-          .from("creator_profiles")
+          .from("profiles")
           .select("*")
-          .eq("user_id", profileId)
+          .eq("id", profileId)
           .maybeSingle();
 
         if (!active) return;
 
         const creatorProfile = profileData as ProfessionalProfile | null;
-        const meta = (((profileData as any)?.social_links as Record<string, unknown>) || {});
+        const meta = (((profileData as any)?.payout_details as Record<string, unknown>) || {});
         const resolvedRole = String(profile?.role || "mains_expert").trim() || "mains_expert";
         setRole(resolvedRole);
         setDisplayName(String(creatorProfile?.display_name || profile?.display_name || "").trim());
