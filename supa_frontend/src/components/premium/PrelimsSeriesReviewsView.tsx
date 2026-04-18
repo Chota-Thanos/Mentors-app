@@ -16,8 +16,9 @@ import HistoryBackButton from "@/components/ui/HistoryBackButton";
 import RoleWorkspaceSidebar from "@/components/layouts/RoleWorkspaceSidebar";
 import { getQuizMasterWorkspaceSections } from "@/components/layouts/roleWorkspaceLinks";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
+import { createClient } from "@/lib/supabase/client";
 import { isAdminLike, isProviderLike, isModeratorLike } from "@/lib/accessControl";
-import { premiumApi } from "@/lib/premiumApi";
 import type {
   ProfessionalProfileReview,
   ProfessionalProfileReviewSummary,
@@ -101,14 +102,14 @@ function ReviewCard({ review }: { review: ProfessionalProfileReview }) {
 
 export default function PrelimsSeriesReviewsView({ seriesId }: { seriesId: number }) {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
+  const { profileId } = useProfile();
   const adminLike = useMemo(() => isAdminLike(user), [user]);
   const providerLike = useMemo(() => isProviderLike(user), [user]);
   const moderatorLike = useMemo(() => isModeratorLike(user), [user]);
-  const currentUserId = String(user?.id || "").trim();
 
   const workspaceSections = useMemo(
-    () => getQuizMasterWorkspaceSections(currentUserId || undefined),
-    [currentUserId],
+    () => getQuizMasterWorkspaceSections(user?.id || undefined),
+    [user?.id],
   );
 
   const [busy, setBusy] = useState(true);
@@ -120,34 +121,76 @@ export default function PrelimsSeriesReviewsView({ seriesId }: { seriesId: numbe
   const canAccess = useMemo(() => {
     if (!series) return false;
     if (adminLike || moderatorLike) return true;
-    if (!currentUserId) return false;
-    return providerLike && series.provider_user_id === currentUserId;
-  }, [series, adminLike, moderatorLike, providerLike, currentUserId]);
+    if (!profileId) return false;
+    return providerLike && series.creator_id === profileId;
+  }, [series, adminLike, moderatorLike, providerLike, profileId]);
 
   const loadData = async () => {
     setBusy(true);
     try {
-      const seriesRes = await premiumApi.get<TestSeries>(`/programs/${seriesId}`);
-      const fetchedSeries = seriesRes.data;
+      const supabase = createClient();
+      const { data: seriesData, error: seriesError } = await supabase
+        .from("test_series")
+        .select("*")
+        .eq("id", seriesId)
+        .single();
+        
+      if (seriesError) throw seriesError;
+      
+      const fetchedSeries = {
+        ...seriesData,
+        title: seriesData.name,
+      };
       setSeries(fetchedSeries);
 
-      const targetUserId = fetchedSeries.provider_user_id;
-      if (!targetUserId) {
+      const targetProfileId = seriesData.creator_id;
+      if (!targetProfileId) {
         setReviews([]);
         setSummary(null);
         return;
       }
 
-      const [reviewsRes, summaryRes] = await Promise.allSettled([
-        premiumApi.get<ProfessionalProfileReview[]>(`/mentors/${targetUserId}/reviews`),
-        premiumApi.get<ProfessionalProfileReviewSummary>(`/mentors/${targetUserId}/reviews/summary`),
-      ]);
+      const { data: reviewsData, error: reviewsError } = await supabase
+        .from("creator_profile_reviews")
+        .select(`
+          *,
+          reviewer:profiles!reviewer_id (
+            display_name
+          )
+        `)
+        .eq("creator_profile_id", targetProfileId)
+        .order("created_at", { ascending: false });
 
-      if (reviewsRes.status === "fulfilled") {
-        setReviews(Array.isArray(reviewsRes.value.data) ? reviewsRes.value.data : []);
-      }
-      if (summaryRes.status === "fulfilled") {
-        setSummary(summaryRes.value.data ?? null);
+      if (reviewsError) throw reviewsError;
+
+      const normalizedReviews: ProfessionalProfileReview[] = (reviewsData || []).map(r => ({
+        id: Number(r.id),
+        rating: r.rating,
+        comment: r.comment,
+        reviewer_label: r.reviewer?.display_name || "learner",
+        created_at: r.created_at,
+      } as any));
+
+      setReviews(normalizedReviews);
+
+      // Compute summary
+      const total = normalizedReviews.length;
+      if (total > 0) {
+        const sum = normalizedReviews.reduce((acc, r) => acc + r.rating, 0);
+        const counts = [0, 0, 0, 0, 0, 0];
+        normalizedReviews.forEach(r => { counts[r.rating] = (counts[r.rating] || 0) + 1; });
+        
+        setSummary({
+          average_rating: sum / total,
+          total_reviews: total,
+          rating_5: counts[5],
+          rating_4: counts[4],
+          rating_3: counts[3],
+          rating_2: counts[2],
+          rating_1: counts[1],
+        });
+      } else {
+        setSummary(null);
       }
     } catch (error: unknown) {
       toast.error("Failed to load reviews", { description: toError(error) });
@@ -258,9 +301,9 @@ export default function PrelimsSeriesReviewsView({ seriesId }: { seriesId: numbe
                 <RefreshCcw className="h-4 w-4" />
                 Refresh
               </button>
-              {series.provider_user_id && (
+              {series.creator_id && (
                 <Link
-                  href={`/profiles/${series.provider_user_id}`}
+                  href={`/profiles/${series.creator_id}`}
                   className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
                 >
                   <UserCheck className="h-4 w-4" />
@@ -360,9 +403,9 @@ export default function PrelimsSeriesReviewsView({ seriesId }: { seriesId: numbe
               Learner reviews for your creator profile will appear here once they start rating
               your programs and mentorship sessions.
             </p>
-            {series.provider_user_id && (
+            {series.creator_id && (
               <Link
-                href={`/profiles/${series.provider_user_id}`}
+                href={`/profiles/${series.creator_id}`}
                 className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-indigo-950 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-800 transition"
               >
                 View Public Profile

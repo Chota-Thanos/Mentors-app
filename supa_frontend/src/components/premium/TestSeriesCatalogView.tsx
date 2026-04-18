@@ -491,7 +491,8 @@ export default function TestSeriesCatalogView({
           .select(`
             id, name, description, price, is_paid, cover_image_url, series_kind, created_at,
             creator_id,
-            program_units(id)
+            program_units(id),
+            profiles(id, display_name, bio, meta)
           `)
           .eq("is_active", true)
           .eq("is_public", true);
@@ -526,9 +527,10 @@ export default function TestSeriesCatalogView({
         const creatorIds = Array.from(
           new Set((data || []).map((row: any) => Number(row.creator_id)).filter((id) => Number.isFinite(id) && id > 0)),
         );
-        const creators = creatorIds.length
-          ? new Map((await profilesApi.batch(creatorIds)).map((row) => [row.id, row]))
-          : new Map<number, { display_name?: string }>();
+        const { data: profilesData } = creatorIds.length
+          ? await supabase.from("profiles").select("id, display_name").in("id", creatorIds)
+          : { data: [] };
+        const creators = new Map((profilesData || []).map((row: any) => [row.id, row]));
         
         const mappedRows = (data || []).map((row: any) => ({
           series: {

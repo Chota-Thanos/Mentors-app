@@ -878,7 +878,7 @@ export interface TestSeries {
   title: string;
   description?: string | null;
   cover_image_url?: string | null;
-  provider_user_id: string;
+  creator_id: number;
   series_kind: TestSeriesKind;
   access_type: TestSeriesAccessType;
   price: number;
@@ -900,7 +900,7 @@ export interface TestSeriesCreatePayload {
   price?: number;
   is_public?: boolean;
   is_active?: boolean;
-  provider_user_id?: string;
+  creator_id?: number;
   exam_ids?: number[];
   meta?: Record<string, unknown>;
 }
@@ -1125,7 +1125,7 @@ export interface ProfessionalProfilePayload {
   meta?: Record<string, unknown>;
 }
 
-export type MentorshipCallProvider = "custom" | "zoom" | "zoom_video_sdk";
+export type MentorshipCallProvider = "custom" | "zoom" | "zoom_video_sdk" | "agora";
 
 export interface ProfessionalSeriesOption {
   id: number;

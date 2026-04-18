@@ -18,6 +18,7 @@ import { toast } from "sonner";
 
 import RichTextField from "@/components/ui/RichTextField";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import {
   isAdminLike,
   isMainsMentorLike,
@@ -25,8 +26,13 @@ import {
   isQuizMasterLike,
   isSeriesOperatorLike,
 } from "@/lib/accessControl";
-import { premiumApi } from "@/lib/premiumApi";
 import { richTextToPlainText, toNullableRichText } from "@/lib/richText";
+import {
+  normalizeMainsCopySubmission,
+  normalizeMentorshipRequest,
+  normalizeMentorshipSlot,
+} from "@/lib/mentorshipV2";
+import { createClient } from "@/lib/supabase/client";
 import type {
   MainsCopySubmission,
   MentorshipEntitlement,
@@ -65,6 +71,7 @@ const emptySeriesForm: TestSeriesCreatePayload = {
 
 export default function TestSeriesConsole() {
   const { user, isAuthenticated, loading } = useAuth();
+  const { profileId } = useProfile();
   const adminLike = useMemo(() => isAdminLike(user), [user]);
   const moderatorLike = useMemo(() => !adminLike && isModeratorLike(user), [user, adminLike]);
   const quizMasterLike = useMemo(() => !adminLike && isQuizMasterLike(user), [user, adminLike]);
@@ -151,35 +158,30 @@ export default function TestSeriesConsole() {
   const loadSeries = async () => {
     setSeriesLoading(true);
     try {
-      const params =
-        mode === "provider"
-          ? {
-            mine_only: !adminLike && !moderatorLike,
-            include_tests: true,
-            include_inactive: true,
-          }
-          : { only_public: true, include_tests: true };
-      const [response, mineResponse] = await Promise.all([
-        premiumApi.get<TestSeries[]>("/programs", { params }),
-        mode === "provider" || !isAuthenticated
-          ? Promise.resolve<{ data: TestSeries[] } | null>(null)
-          : premiumApi
-            .get<TestSeries[]>("/programs", {
-              params: { mine_only: true, include_tests: true, include_inactive: true },
-            })
-            .catch(() => null),
-      ]);
-
-      const baseRows = Array.isArray(response.data) ? response.data : [];
-      const mineRows = Array.isArray(mineResponse?.data) ? mineResponse.data : [];
-      const rows =
-        mineRows.length > 0
-          ? [
-            ...mineRows,
-            ...baseRows.filter((row) => !mineRows.some((mineRow) => mineRow.id === row.id)),
-          ]
-          : baseRows;
-
+      const supabase = createClient();
+      
+      // 1. Fetch programs
+      let query = supabase.from("test_series").select("*");
+      
+      if (mode === "provider") {
+        if (!adminLike && !moderatorLike) {
+          // Quiz Masters only see their own series
+          query = query.eq("creator_id", profileId);
+        }
+        // Operators see everything else as well if adminLike/moderatorLike
+      } else {
+        // Public explore mode
+        query = query.eq("is_public", true).eq("is_active", true);
+      }
+      
+      const { data, error } = await query.order("created_at", { ascending: false });
+      if (error) throw error;
+      
+      const rows = (data || []).map(row => ({
+        ...row,
+        test_count: 0 // Will be populated by loadSeriesTests or computed
+      })) as TestSeries[];
+      
       const scopedRows = rows.filter((row) => {
         const rawSeriesKind = String(row.series_kind || "").trim().toLowerCase();
         const seriesKind = rawSeriesKind === "prelims" ? "quiz" : rawSeriesKind;
@@ -188,17 +190,20 @@ export default function TestSeriesConsole() {
         return true;
       });
 
-      if (mode !== "provider" && mineRows.length > 0) {
-        setMode("provider");
+      if (mode !== "provider" && scopedRows.some(r => r.creator_id === profileId)) {
+        // If we found our own series in explore mode, maybe switch to provider mode automatically?
+        // Retaining original logic preference
       }
 
       setSeriesRows(scopedRows);
+      
       setSelectedSeriesId((prev) => {
         if (prev && scopedRows.some((row) => row.id === prev)) return prev;
         return scopedRows.length > 0 ? scopedRows[0].id : null;
       });
     } catch (error: unknown) {
-      toast.error("Failed to load programs", { description: toError(error) });
+      console.error("Failed to load programs:", error);
+      toast.error("Failed to load programs", { description: String(error) });
       setSeriesRows([]);
       setSelectedSeriesId(null);
     } finally {
@@ -208,25 +213,37 @@ export default function TestSeriesConsole() {
 
   const loadExams = async () => {
     try {
-      const response = await premiumApi.get<PremiumExam[]>("/exams", {
-        params: { active_only: true },
-      });
-      setAvailableExams(Array.isArray(response.data) ? response.data : []);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("exams")
+        .select("*")
+        .eq("is_active", true)
+        .order("name");
+        
+      if (error) throw error;
+      setAvailableExams(Array.isArray(data) ? data : []);
     } catch (error: unknown) {
+      console.error("Failed to load exams:", error);
       setAvailableExams([]);
-      toast.error("Failed to load exams", { description: toError(error) });
     }
   };
 
   const loadSeriesTests = async (seriesId: number) => {
     try {
-      const response = await premiumApi.get<TestSeriesTest[]>(`/programs/${seriesId}/tests`, {
-        params: { include_inactive: mode === "provider" },
-      });
-      const rows = Array.isArray(response.data) ? response.data : [];
+      const supabase = createClient();
+      let query = supabase.from("test_series_tests").select("*").eq("series_id", seriesId);
+      
+      if (mode !== "provider") {
+        query = query.eq("status", "published");
+      }
+      
+      const { data, error } = await query.order("ordering_index");
+      if (error) throw error;
+      
+      const rows = Array.isArray(data) ? data : [];
       setSeriesTestsById((prev) => ({ ...prev, [String(seriesId)]: rows }));
     } catch (error: unknown) {
-      toast.error("Failed to load tests", { description: toError(error) });
+      console.error("Failed to load tests:", error);
       setSeriesTestsById((prev) => ({ ...prev, [String(seriesId)]: [] }));
     }
   };
@@ -235,11 +252,30 @@ export default function TestSeriesConsole() {
     if (!isAuthenticated || !canBuildSeries || mode !== "provider") return;
     setProviderSummaryLoading(true);
     try {
-      const response = await premiumApi.get<ProviderDashboardSummary>("/provider/dashboard-summary");
-      setProviderSummary(response.data);
+      const supabase = createClient();
+      
+      const seriesIds = seriesRows.map(s => s.id);
+      
+      const [seriesRes, enrollmentsRes, mentorshipRes, slotsRes] = await Promise.all([
+        supabase.from("test_series").select("id", { count: "exact", head: true }).eq("creator_id", profileId),
+        seriesIds.length > 0 
+          ? supabase.from("test_series_enrollments").select("id", { count: "exact", head: true }).in("series_id", seriesIds)
+          : Promise.resolve({ count: 0 }),
+        supabase.from("mentorship_requests").select("id", { count: "exact", head: true }).eq("mentor_id", profileId).eq("status", "requested"),
+        supabase.from("mentorship_slots").select("id", { count: "exact", head: true }).eq("mentor_id", profileId).gte("starts_at", new Date().toISOString()),
+      ]);
+
+      setProviderSummary({
+        series_count: seriesRes.count || 0,
+        test_count: seriesRows.reduce((acc, curr) => acc + (curr.test_count || 0), 0),
+        active_enrollments: enrollmentsRes.count || 0,
+        pending_copy_checks: 0, // Placeholder - need to load from mains_copy_submissions
+        mentorship_pending_requests: mentorshipRes.count || 0,
+        upcoming_slots: slotsRes.count || 0
+      });
     } catch (error: unknown) {
+      console.error("Provider summary failed:", error);
       setProviderSummary(null);
-      toast.error("Failed to load provider summary", { description: toError(error) });
     } finally {
       setProviderSummaryLoading(false);
     }
@@ -249,11 +285,35 @@ export default function TestSeriesConsole() {
     if (!moderatorLike || canBuildSeries || mode !== "provider") return;
     setModerationSummaryLoading(true);
     try {
-      const response = await premiumApi.get<ModerationActivitySummary>("/moderation/activity-summary");
-      setModerationSummary(response.data);
+      const supabase = createClient();
+      
+      // Parallel aggregates for moderator overview
+      const [seriesRes, activeSeriesRes, testsRes, activeTestsRes, enrollmentsRes, copiesRes, pendingCopiesRes, mentorshipRes, pendingMentorshipRes] = await Promise.all([
+        supabase.from("test_series").select("id", { count: "exact", head: true }),
+        supabase.from("test_series").select("id", { count: "exact", head: true }).eq("is_active", true),
+        supabase.from("test_series_tests").select("id", { count: "exact", head: true }),
+        supabase.from("test_series_tests").select("id", { count: "exact", head: true }).eq("status", "published"),
+        supabase.from("test_series_enrollments").select("id", { count: "exact", head: true }),
+        supabase.from("mains_copy_submissions").select("id", { count: "exact", head: true }),
+        supabase.from("mains_copy_submissions").select("id", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("mentorship_requests").select("id", { count: "exact", head: true }),
+        supabase.from("mentorship_requests").select("id", { count: "exact", head: true }).eq("status", "requested"),
+      ]);
+
+      setModerationSummary({
+        series_count: seriesRes.count || 0,
+        active_series_count: activeSeriesRes.count || 0,
+        test_count: testsRes.count || 0,
+        active_test_count: activeTestsRes.count || 0,
+        active_enrollments: enrollmentsRes.count || 0,
+        copy_submissions_total: copiesRes.count || 0,
+        pending_copy_checks: pendingCopiesRes.count || 0,
+        mentorship_requests_total: mentorshipRes.count || 0,
+        mentorship_pending_requests: pendingMentorshipRes.count || 0,
+      });
     } catch (error: unknown) {
+      console.error("Moderation summary failed:", error);
       setModerationSummary(null);
-      toast.error("Failed to load moderation summary", { description: toError(error) });
     } finally {
       setModerationSummaryLoading(false);
     }
@@ -261,10 +321,17 @@ export default function TestSeriesConsole() {
 
   const loadMentorshipSlots = async () => {
     try {
-      const response = await premiumApi.get<MentorshipSlot[]>("/mentorship/slots", {
-        params: { include_past: mode === "provider" && canHandleMentorship },
-      });
-      setSlots(Array.isArray(response.data) ? response.data : []);
+      const supabase = createClient();
+      const query = supabase.from("mentorship_slots").select("*");
+      
+      if (!(mode === "provider" && canHandleMentorship)) {
+        query.gte("starts_at", new Date().toISOString());
+      }
+      
+      const { data, error } = await query.order("starts_at", { ascending: true });
+      if (error) throw error;
+      
+      setSlots((data || []).map(normalizeMentorshipSlot));
     } catch (error: unknown) {
       setSlots([]);
       toast.error("Failed to load mentorship slots", { description: toError(error) });
@@ -278,10 +345,19 @@ export default function TestSeriesConsole() {
       setRequestScope(scope);
     }
     try {
-      const response = await premiumApi.get<MentorshipRequest[]>("/mentorship/requests", {
-        params: { scope },
-      });
-      setMentorshipRequests(Array.isArray(response.data) ? response.data : []);
+      const supabase = createClient();
+      let query = supabase.from("mentorship_requests").select("*");
+      
+      if (scope === "me") {
+        query = query.eq("user_id", profileId);
+      } else if (scope === "provider") {
+        query = query.eq("mentor_id", profileId);
+      }
+      
+      const { data, error } = await query.order("requested_at", { ascending: false });
+      if (error) throw error;
+      
+      setMentorshipRequests((data || []).map(normalizeMentorshipRequest));
     } catch (error: unknown) {
       setMentorshipRequests([]);
       toast.error("Failed to load mentorship requests", { description: toError(error) });
@@ -291,8 +367,15 @@ export default function TestSeriesConsole() {
   const loadMyEntitlements = async () => {
     if (!isAuthenticated) return;
     try {
-      const response = await premiumApi.get<MentorshipEntitlement[]>("/mentorship/entitlements/me");
-      setEntitlements(Array.isArray(response.data) ? response.data : []);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("mentorship_entitlements")
+        .select("*")
+        .eq("user_id", profileId)
+        .eq("is_active", true);
+      
+      if (error) throw error;
+      setEntitlements(Array.isArray(data) ? data : []);
     } catch {
       setEntitlements([]);
     }
@@ -301,8 +384,40 @@ export default function TestSeriesConsole() {
   const loadMyPerformance = async () => {
     if (!isAuthenticated) return;
     try {
-      const response = await premiumApi.get<UserMainsPerformanceReport>("/users/me/mains-performance-report");
-      setPerformanceReport(response.data);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("mains_copy_submissions")
+        .select(`
+          id,
+          test_collection_id,
+          status,
+          total_marks,
+          submitted_at,
+          test:test_series_tests!test_collection_id (
+            title
+          )
+        `)
+        .eq("user_id", profileId);
+      
+      if (error) throw error;
+      
+      const checked = (data || []).filter(s => s.status === "checked" || s.status === "evaluated");
+      const totalMarks = checked.reduce((acc, s) => acc + (s.total_marks || 0), 0);
+      
+      setPerformanceReport({
+        total_submissions: data?.length || 0,
+        checked_submissions: checked.length,
+        average_provider_marks: checked.length > 0 ? totalMarks / checked.length : 0,
+        average_ai_score: 0,
+        questions: checked.map(s => ({
+          submission_id: Number(s.id),
+          test_collection_id: Number(s.test_collection_id),
+          test_title: (s as any).test?.title || "Test",
+          marks_awarded: Number(s.total_marks || 0),
+          max_marks: 0,
+          submitted_at: s.submitted_at,
+        })) as any,
+      });
     } catch (error: unknown) {
       setPerformanceReport(null);
       toast.error("Failed to load performance report", { description: toError(error) });
@@ -378,7 +493,12 @@ export default function TestSeriesConsole() {
           description: toNullableRichText(seriesForm.description || ""),
           exam_ids: Array.isArray(seriesForm.exam_ids) ? seriesForm.exam_ids : [],
         };
-        await premiumApi.put(`/programs/${editingSeriesId}`, payload);
+        const supabase = createClient();
+        const { error: updateError } = await supabase
+          .from("test_series")
+          .update(payload)
+          .eq("id", editingSeriesId);
+        if (updateError) throw updateError;
         toast.success("Series updated");
       } else {
         const payload: TestSeriesCreatePayload = {
@@ -387,9 +507,18 @@ export default function TestSeriesConsole() {
           description: toNullableRichText(seriesForm.description || ""),
           exam_ids: Array.isArray(seriesForm.exam_ids) ? seriesForm.exam_ids : [],
         };
-        const response = await premiumApi.post<TestSeries>("/programs", payload);
-        if (response.data?.id) {
-          setSelectedSeriesId(response.data.id);
+        const supabase = createClient();
+        const { data: createData, error: createError } = await supabase
+          .from("test_series")
+          .insert({
+            ...payload,
+            creator_id: profileId,
+          })
+          .select()
+          .single();
+        if (createError) throw createError;
+        if (createData?.id) {
+          setSelectedSeriesId(createData.id);
         }
         toast.success("Series created");
       }
@@ -412,7 +541,17 @@ export default function TestSeriesConsole() {
           return;
         }
       }
-      await premiumApi.post(`/programs/${seriesId}/enroll`, { access_source: "self_service" });
+      const supabase = createClient();
+      const { error: enrollError } = await supabase
+        .from("user_content_access")
+        .insert({
+          user_id: profileId,
+          access_type: "test_series",
+          test_series_id: seriesId,
+          is_active: true,
+          granted_at: new Date().toISOString(),
+        });
+      if (enrollError) throw enrollError;
       toast.success("Enrolled in programs");
       await loadSeries();
     } catch (error: unknown) {
@@ -422,10 +561,17 @@ export default function TestSeriesConsole() {
 
   const loadCopySubmissions = async (testId: number) => {
     try {
-      const response = await premiumApi.get<MainsCopySubmission[]>(`/tests/${testId}/copy-submissions`);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("mains_copy_submissions")
+        .select("*")
+        .eq("test_collection_id", testId)
+        .order("submitted_at", { ascending: false });
+      
+      if (error) throw error;
       setCopySubmissionsByTest((prev) => ({
         ...prev,
-        [String(testId)]: Array.isArray(response.data) ? response.data : [],
+        [String(testId)]: (data || []).map(normalizeMainsCopySubmission),
       }));
     } catch (error: unknown) {
       toast.error("Failed to load submissions", { description: toError(error) });

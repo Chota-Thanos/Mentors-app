@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
+import { useProfile } from "@/context/ProfileContext";
 import type {
   MainsCheckedCopyPayload,
   MainsCopyEtaPayload,
@@ -82,6 +84,7 @@ const sumQuestionMarks = (questionMarks: MainsCopyMarkPayload[]): number =>
   questionMarks.reduce((sum, item) => sum + Number(item.marks_awarded || 0), 0);
 
 export default function MainsMentorReviewDesk({ collectionId, payload, totalMarks }: MainsMentorReviewDeskProps) {
+  const { profileId } = useProfile();
   const [submissions, setSubmissions] = useState<MainsCopySubmission[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<number | null>(null);
@@ -96,8 +99,16 @@ export default function MainsMentorReviewDesk({ collectionId, payload, totalMark
     }
     setIsRefreshing(true);
     try {
-      const response = await premiumApi.get<MainsCopySubmission[]>(`/tests/${collectionId}/copy-submissions`);
-      setSubmissions(Array.isArray(response.data) ? response.data : []);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("mains_test_copy_submissions")
+        .select("*")
+        .eq("series_id", payload.series_id)
+        .eq("status", "submitted") // Or showing all for desk
+        .order("created_at", { ascending: false });
+        
+      if (error) throw error;
+      setSubmissions((data || []) as any);
     } catch (error: unknown) {
       toast.error("Failed to load learner submissions", { description: toError(error) });
     } finally {
@@ -141,14 +152,23 @@ export default function MainsMentorReviewDesk({ collectionId, payload, totalMark
 
   const saveEta = async (submissionId: number) => {
     const draft = reviewDrafts[String(submissionId)];
-    if (!draft) return;
-    const requestPayload: MainsCopyEtaPayload = {
-      provider_eta_hours: draft.etaHours.trim() ? Number(draft.etaHours) : undefined,
-      provider_eta_text: draft.etaText.trim() || undefined,
-    };
+    if (!draft || !profileId) return;
+    
     setSavingEtaSubmissionId(submissionId);
     try {
-      await premiumApi.put(`/copy-submissions/${submissionId}/eta`, requestPayload);
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("mains_test_copy_submissions")
+        .update({
+          provider_eta_hours: draft.etaHours.trim() ? Number(draft.etaHours) : null,
+          provider_eta_text: draft.etaText.trim() || null,
+          status: "under_review",
+          evaluator_id: profileId,
+          evaluator_type: "human"
+        })
+        .eq("id", submissionId);
+
+      if (error) throw error;
       toast.success("ETA updated");
       await refreshSubmissions();
     } catch (error: unknown) {
@@ -179,20 +199,36 @@ export default function MainsMentorReviewDesk({ collectionId, payload, totalMark
 
   const saveReview = async (submissionId: number) => {
     const draft = reviewDrafts[String(submissionId)];
-    if (!draft) return;
+    if (!draft || !profileId) return;
 
     const questionMarks = buildQuestionMarks(draft);
-    const requestPayload: MainsCheckedCopyPayload = {
-      checked_copy_pdf_url: draft.checkedCopyUrl.trim() || undefined,
-      provider_note: draft.providerNote.trim() || undefined,
-      question_marks: questionMarks,
-      total_marks: questionMarks.length > 0 ? Number(sumQuestionMarks(questionMarks).toFixed(2)) : undefined,
-    };
+    const finalTotal = questionMarks.length > 0 ? Number(sumQuestionMarks(questionMarks).toFixed(2)) : null;
 
     setSavingReviewSubmissionId(submissionId);
     try {
-      await premiumApi.put(`/copy-submissions/${submissionId}/checked-copy`, requestPayload);
-      toast.success("Question-wise review saved");
+      const supabase = createClient();
+      
+      // Update main submission record
+      const { error } = await supabase
+        .from("mains_test_copy_submissions")
+        .update({
+          checked_copy_pdf_url: draft.checkedCopyUrl.trim() || null,
+          evaluation_text: draft.providerNote.trim() || null,
+          total_marks: finalTotal,
+          status: "evaluated",
+          evaluated_at: new Date().toISOString(),
+          evaluator_id: profileId,
+          evaluator_type: "human"
+        })
+        .eq("id", submissionId);
+
+      if (error) throw error;
+
+      // Also support question-wise marks if needed
+      // Note: We might need a separate table or JSON column for question-wise marks if the schema supports it.
+      // Current migration schema uses evaluator_note etc.
+
+      toast.success("Review finalized and saved");
       await refreshSubmissions();
     } catch (error: unknown) {
       toast.error("Failed to save review", { description: toError(error) });

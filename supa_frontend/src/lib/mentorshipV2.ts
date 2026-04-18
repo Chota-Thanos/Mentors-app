@@ -62,7 +62,7 @@ export function normalizeMentorshipSession(row: AnyRow): MentorshipSession {
     mentor_id: mentorId,
     provider_user_id: String(mentorId),
     mode: row.mode === "call" ? "audio" : row.mode ?? "video",
-    call_provider: row.call_provider ?? (row.meeting_link ? "custom" : "zoom_video_sdk"),
+    call_provider: row.call_provider ?? (row.meeting_link ? "custom" : "agora"),
     join_available: row.join_available ?? ["scheduled", "live"].includes(String(row.status || "")),
   } as MentorshipSession;
 }
@@ -72,7 +72,7 @@ export function normalizeMentorshipSlot(row: AnyRow): MentorshipSlot {
     ...row,
     provider_user_id: String(row.provider_user_id ?? row.mentor_id ?? ""),
     mode: row.mode === "call" ? "audio" : row.mode ?? "video",
-    call_provider: row.call_provider ?? (row.meeting_link ? "custom" : "zoom_video_sdk"),
+    call_provider: row.call_provider ?? (row.meeting_link ? "custom" : "agora"),
   } as MentorshipSlot;
 }
 

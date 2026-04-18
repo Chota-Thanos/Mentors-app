@@ -17,8 +17,9 @@ import HistoryBackButton from "@/components/ui/HistoryBackButton";
 import RoleWorkspaceSidebar from "@/components/layouts/RoleWorkspaceSidebar";
 import { getQuizMasterWorkspaceSections } from "@/components/layouts/roleWorkspaceLinks";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { isAdminLike, isProviderLike, isModeratorLike } from "@/lib/accessControl";
-import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import type { TestSeries, TestSeriesEnrollment, TestSeriesTest } from "@/types/premium";
 
 function toError(error: unknown): string {
@@ -102,14 +103,14 @@ function EmptyLeaderboard({ testTitle }: { testTitle: string }) {
 
 export default function PrelimsLeaderboardView({ seriesId }: { seriesId: number }) {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
+  const { profileId } = useProfile();
   const adminLike = useMemo(() => isAdminLike(user), [user]);
   const providerLike = useMemo(() => isProviderLike(user), [user]);
   const moderatorLike = useMemo(() => isModeratorLike(user), [user]);
-  const currentUserId = String(user?.id || "").trim();
 
   const workspaceSections = useMemo(
-    () => getQuizMasterWorkspaceSections(currentUserId || undefined),
-    [currentUserId],
+    () => getQuizMasterWorkspaceSections(user?.id || undefined),
+    [user?.id],
   );
 
   const [busy, setBusy] = useState(true);
@@ -123,22 +124,53 @@ export default function PrelimsLeaderboardView({ seriesId }: { seriesId: number 
   const canAccess = useMemo(() => {
     if (!series) return false;
     if (adminLike || moderatorLike) return true;
-    if (!currentUserId) return false;
-    return providerLike && series.provider_user_id === currentUserId;
-  }, [series, adminLike, moderatorLike, providerLike, currentUserId]);
+    if (!profileId) return false;
+    return providerLike && series.creator_id === profileId;
+  }, [series, adminLike, moderatorLike, providerLike, profileId]);
 
   const loadLeaderboardForTest = async (testId: number) => {
-    if (leaderboardByTest[testId] !== undefined) return; // already loaded
+    if (leaderboardByTest[testId] !== undefined) return;
     setLeaderboardLoading(true);
     try {
-      // Try to fetch the per-test quiz leaderboard  
-      const res = await premiumApi.get<LeaderboardPayload>(
-        `/programs/${seriesId}/tests/${testId}/leaderboard`,
-      );
-      const entries = Array.isArray(res.data?.entries) ? res.data.entries : [];
-      setLeaderboardByTest((prev) => ({ ...prev, [testId]: entries }));
-    } catch {
-      // If no leaderboard endpoint exists, fall back to empty
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("test_attempts")
+        .select("user_id, score, total_questions, correct_count, incorrect_count, skipped_count, created_at")
+        .eq("collection_id", testId);
+      
+      if (error) throw error;
+
+      // Aggregate by user_id
+      const userMap: Record<string, AttemptLeaderboardEntry> = {};
+      (data || []).forEach(row => {
+        const uid = String(row.user_id);
+        const score = Number(row.score || 0);
+        const total = Number(row.total_questions || 0);
+        const accuracy = total > 0 ? (Number(row.correct_count || 0) / total) * 100 : 0;
+        
+        if (!userMap[uid] || score > userMap[uid].best_score) {
+          userMap[uid] = {
+            user_id: uid,
+            best_score: score,
+            best_accuracy: accuracy,
+            correct_answers: Number(row.correct_count || 0),
+            incorrect_answers: Number(row.incorrect_count || 0),
+            unanswered: Number(row.skipped_count || 0),
+            total_questions: total,
+            attempts: (userMap[uid]?.attempts || 0) + 1,
+            last_attempted_at: row.created_at,
+          };
+        } else {
+          userMap[uid].attempts += 1;
+          if (new Date(row.created_at) > new Date(userMap[uid].last_attempted_at || 0)) {
+            userMap[uid].last_attempted_at = row.created_at;
+          }
+        }
+      });
+
+      setLeaderboardByTest((prev) => ({ ...prev, [testId]: Object.values(userMap) }));
+    } catch (error) {
+      console.error("Leaderboard error:", error);
       setLeaderboardByTest((prev) => ({ ...prev, [testId]: [] }));
     } finally {
       setLeaderboardLoading(false);
@@ -148,16 +180,22 @@ export default function PrelimsLeaderboardView({ seriesId }: { seriesId: number 
   const loadData = async () => {
     setBusy(true);
     try {
+      const supabase = createClient();
       const [seriesRes, testsRes, enrollmentsRes] = await Promise.all([
-        premiumApi.get<TestSeries>(`/programs/${seriesId}`),
-        premiumApi.get<TestSeriesTest[]>(`/programs/${seriesId}/tests`, {
-          params: { include_inactive: true },
-        }),
-        premiumApi.get<TestSeriesEnrollment[]>(`/programs/${seriesId}/enrollments`),
+        supabase.from("test_series").select("*").eq("id", seriesId).single(),
+        supabase.from("test_series_tests").select("*").eq("series_id", seriesId),
+        supabase.from("test_series_enrollments").select("*").eq("series_id", seriesId),
       ]);
-      setSeries(seriesRes.data);
+      
+      if (seriesRes.error) throw seriesRes.error;
+      
+      setSeries({
+        ...seriesRes.data,
+        title: seriesRes.data.name,
+      });
+
       const nextTests = Array.isArray(testsRes.data)
-        ? testsRes.data.filter((t) => t.test_kind === "prelims")
+        ? testsRes.data.map(t => ({ ...t, test_kind: "prelims" }))
         : [];
       setTests(nextTests);
       setEnrollments(Array.isArray(enrollmentsRes.data) ? enrollmentsRes.data : []);

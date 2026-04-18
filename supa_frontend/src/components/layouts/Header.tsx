@@ -128,7 +128,7 @@ export function SiteHeader({ hideAdminLinks = false }: { hideAdminLinks?: boolea
     if (quizMasterLike) {
       return { href: "/profile/professional", label: "Quiz Master Access Active" };
     }
-    return { href: "/onboarding", label: "Apply: Quiz Master / Mains Mentor" };
+    return { href: "/become-teacher", label: "Become a Teacher" };
   }, [mainsMentorLike, quizMasterLike]);
 
   const aiLinks = useMemo(() => {

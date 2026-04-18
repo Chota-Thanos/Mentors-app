@@ -219,10 +219,10 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   const canEditSeriesStructure = useMemo(() => {
     if (!series) return false;
     if (adminLike) return true;
-    if (!currentUserId) return false;
-    if (series.provider_user_id !== currentUserId) return false;
+    if (!profileId) return false;
+    if (series.creator_id !== profileId) return false;
     return providerLike || mentorLike;
-  }, [series, providerLike, mentorLike, adminLike, currentUserId]);
+  }, [series, providerLike, mentorLike, adminLike, profileId]);
 
   const canManage = useMemo(() => {
     if (!series) return false;
@@ -428,7 +428,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
         price: Number(seriesData.price || 0),
         is_public: seriesData.is_public,
         is_active: seriesData.is_active,
-        provider_user_id: String(seriesData.creator_id),
+        creator_id: Number(seriesData.creator_id),
         meta: seriesData.meta || {},
         exam_ids: [],
       } as any;

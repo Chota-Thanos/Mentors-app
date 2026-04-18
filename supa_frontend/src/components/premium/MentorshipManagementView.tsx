@@ -568,6 +568,8 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
       await supabase.from("mains_test_copy_submissions").update({
         evaluator_note: [etaText, providerNote].filter(Boolean).join("\n\n") || null,
         status: "under_review",
+        evaluator_id: profileId,
+        evaluator_type: "human",
       }).eq("id", submissionId);
       toast.success("ETA saved");
       await load();
@@ -588,6 +590,8 @@ export default function MentorshipManagementView({ seriesId }: MentorshipManagem
         evaluation_text: providerNote || null,
         status: "evaluated",
         evaluated_at: new Date().toISOString(),
+        evaluator_id: profileId,
+        evaluator_type: "human",
       }).eq("id", submissionId);
       toast.success("Evaluation submitted");
       await load();

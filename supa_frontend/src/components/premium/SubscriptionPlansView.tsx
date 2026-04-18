@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
-import { premiumApi } from "@/lib/premiumApi";
+import { useProfile } from "@/context/ProfileContext";
+import { createClient } from "@/lib/supabase/client";
 import type { SubscriptionPlan, UserSubscriptionStatus } from "@/types/premium";
 
 function toError(error: unknown): string {
@@ -16,6 +17,7 @@ function toError(error: unknown): string {
 
 export default function SubscriptionPlansView() {
   const { isAuthenticated } = useAuth();
+  const { profileId } = useProfile();
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [status, setStatus] = useState<UserSubscriptionStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,11 +25,24 @@ export default function SubscriptionPlansView() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const plansResponse = await premiumApi.get<SubscriptionPlan[]>("/subscriptions/plans");
-      setPlans(Array.isArray(plansResponse.data) ? plansResponse.data : []);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("subscription_plans")
+        .select("*");
+      
+      if (error) throw error;
+      setPlans(data || []);
+      
       if (isAuthenticated) {
-        const statusResponse = await premiumApi.get<UserSubscriptionStatus>("/subscriptions/me");
-        setStatus(statusResponse.data || null);
+        const { data: statusData, error: statusError } = await supabase
+          .from("subscriptions")
+          .select("*, plan:subscription_plans(name)")
+          .eq("user_id", profileId)
+          .eq("status", "active")
+          .single();
+          
+        if (statusError && statusError.code !== "PGRST116") throw statusError;
+        setStatus(statusData as any);
       } else {
         setStatus(null);
       }

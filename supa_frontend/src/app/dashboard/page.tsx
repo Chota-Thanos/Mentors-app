@@ -26,9 +26,10 @@ import {
   getQuizMasterWorkspaceSections,
 } from "@/components/layouts/roleWorkspaceLinks";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { getUserRole, isMentorLike, isModeratorLike, isProviderLike } from "@/lib/accessControl";
 import { premiumApi } from "@/lib/premiumApi";
-import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/supabase/client";
 import type {
   LifecycleTrackingIssue,
   LifecycleTrackingPayload,
@@ -353,6 +354,7 @@ function buildMentorLearnerRequestCards(
 
 export default function DashboardPage() {
   const { loading: authLoading, isAuthenticated, showLoginModal, user } = useAuth();
+  const { profileId } = useProfile();
   const kind = useMemo(() => resolveDashboardKind(user), [user]);
   const currentUserId = String(user?.id || "").trim();
   const quizMasterWorkspaceSections = useMemo(
@@ -386,6 +388,8 @@ export default function DashboardPage() {
 
     const run = async () => {
       try {
+        const supabase = createClient();
+
         if (kind === "learner") {
           if (!active) return;
           setMentorData(null);
@@ -395,25 +399,51 @@ export default function DashboardPage() {
         }
 
         if (kind === "mains_mentor") {
-          const [tracking, requests, slots, sessions, series] = await Promise.all([
-            premiumApi.get<LifecycleTrackingPayload>("/lifecycle/tracking", {
-              params: { scope: "provider", limit_cycles: 300, limit_users: 250 },
-            }),
-            premiumApi.get<MentorshipRequest[]>("/mentorship/requests", { params: { scope: "provider" } }),
-            premiumApi.get<MentorshipSlot[]>("/mentorship/slots", { params: { include_past: true } }),
-            premiumApi.get<MentorshipSession[]>("/mentorship/sessions", { params: { scope: "provider" } }),
-            premiumApi.get<TestSeries[]>("/programs", {
-              params: { mine_only: true, include_tests: true, include_inactive: true },
-            }),
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (!authUser) throw new Error("Not authenticated");
+
+          const [requestsRes, slotsRes, sessionsRes, seriesRes] = await Promise.all([
+            supabase.from("mentorship_requests").select("*").eq("mentor_id", profileId),
+            supabase.from("mentorship_slots").select("*").eq("mentor_id", profileId),
+            supabase.from("mentorship_sessions").select("*").eq("mentor_id", profileId),
+            supabase.from("test_series").select("*").eq("creator_id", profileId),
           ]);
           if (!active) return;
-          const allSeries = Array.isArray(series.data) ? series.data : [];
+
+          // Locally reconstruct tracking payload summary
+          const localTracking: LifecycleTrackingPayload = {
+            generated_at: new Date().toISOString(),
+            summary: {
+              users: 0,
+              delayed_items: 0,
+              technical_issues: 0,
+              mentorship_cycles: (requestsRes.data || []).length,
+              pending_mentorship: (requestsRes.data || []).filter(r => r.status === "requested").length,
+              scheduled_mentorship: (requestsRes.data || []).filter(r => r.status === "scheduled").length,
+              completed_mentorship: (requestsRes.data || []).filter(r => r.status === "completed").length,
+              pending_copy_checks: 0,
+            },
+            mentorship_cycles: (requestsRes.data || []).map(r => ({
+              request_id: r.id,
+              user_id: String(r.user_id),
+              provider_user_id: String(r.mentor_id),
+              request_status: r.status as any,
+              requested_at: r.created_at,
+              accepted_at: (r.meta as any)?.accepted_at || null,
+              scheduled_for: (r.meta as any)?.scheduled_for || null,
+              completed_at: (r.meta as any)?.completed_at || null,
+              timeline: [],
+              issues: [],
+            })),
+            user_rows: [],
+          };
+
           setMentorData({
-            tracking: tracking.data || emptyLifecycleTracking,
-            requests: Array.isArray(requests.data) ? requests.data : [],
-            slots: Array.isArray(slots.data) ? slots.data : [],
-            sessions: Array.isArray(sessions.data) ? sessions.data : [],
-            mainsSeries: allSeries.filter((row) => String(row.series_kind || "").toLowerCase() !== "quiz"),
+            tracking: localTracking,
+            requests: (requestsRes.data || []) as MentorshipRequest[],
+            slots: (slotsRes.data || []) as MentorshipSlot[],
+            sessions: (sessionsRes.data || []) as MentorshipSession[],
+            mainsSeries: ((seriesRes.data || []) as TestSeries[]).filter((row) => String(row.series_kind || "").toLowerCase() !== "quiz"),
           });
           setQuizMasterData(null);
           setModeratorData(null);
@@ -421,38 +451,98 @@ export default function DashboardPage() {
         }
 
         if (kind === "quiz_master") {
-          const [summary, series, trackingPayload, profileDetail] = await Promise.all([
-            premiumApi.get<ProviderDashboardSummary>("/provider/dashboard-summary"),
-            premiumApi.get<TestSeries[]>("/programs", { params: { mine_only: true, include_tests: true, include_inactive: true } }),
-            premiumApi
-              .get<LifecycleTrackingPayload>("/lifecycle/tracking", {
-                params: { scope: "provider", limit_cycles: 220, limit_users: 220 },
-              })
-              .then((response) => response.data || emptyLifecycleTracking)
-              .catch(() => emptyLifecycleTracking),
-            currentUserId
-              ? premiumApi
-                .get<ProfessionalPublicProfileDetail>(`/profiles/${currentUserId}/detail`, {
-                  params: { reviews_limit: 10 },
-                })
-                .then((response) => response.data || null)
-                .catch(() => null)
-              : Promise.resolve(null),
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (!authUser) throw new Error("Not authenticated");
+
+          const [seriesRes, mentorshipRes, slotsRes, profileRes, reviewsRes] = await Promise.all([
+            supabase.from("test_series").select("*").eq("creator_id", profileId).order("created_at", { ascending: false }),
+            supabase.from("mentorship_requests").select("id", { count: "exact", head: true }).eq("mentor_id", profileId).eq("status", "requested"),
+            supabase.from("mentorship_slots").select("id", { count: "exact", head: true }).eq("mentor_id", profileId).gte("starts_at", new Date().toISOString()),
+            supabase.from("profiles").select("*").eq("id", profileId).single(),
+            supabase.from("test_series_reviews").select("*").eq("creator_id", profileId).limit(10),
           ]);
-          if (!active) return;
-          const allSeries = Array.isArray(series.data) ? series.data : [];
+
+          const allSeries = (seriesRes.data || []) as TestSeries[];
+          const profileDetail: ProfessionalPublicProfileDetail | null = profileRes.data ? {
+            profile: {
+              id: profileRes.data.id,
+              user_id: profileRes.data.auth_user_id,
+              display_name: profileRes.data.display_name,
+              profile_image_url: profileRes.data.avatar_url,
+              headline: (profileRes.data as any).headline || "Professional Mentor",
+              bio: profileRes.data.bio,
+              role: profileRes.data.role || "mentor",
+              is_verified: true,
+              years_experience: (profileRes.data as any).mentor_experience_years || 0,
+              specialization_tags: Array.isArray((profileRes.data as any).specialization_tags) ? (profileRes.data as any).specialization_tags : [],
+              highlights: [],
+              credentials: [],
+              languages: ["English"],
+              is_active: true,
+              is_public: true,
+              exam_ids: [],
+              meta: {},
+              created_at: profileRes.data.created_at,
+            },
+            role_label: (profileRes.data.role || "mentor").replace("_", " ").toUpperCase(),
+            achievements: [],
+            service_specifications: [],
+            exam_focus: "UPSC & Civil Services",
+            response_time_text: "Usually within 24 hours",
+            mentorship_price: (profileRes.data as any).mentorship_current_price || 0,
+            copy_evaluation_price: (profileRes.data as any).copy_evaluation_price || 0,
+            copy_evaluation_enabled: !!(profileRes.data as any).copy_evaluation_enabled,
+            currency: "INR",
+            sessions_completed: 0,
+            mentorship_availability_mode: "open",
+            mentorship_available_series_ids: [],
+            mentorship_default_call_provider: "agora",
+            review_summary: {
+              average_rating: (profileRes.data as any).avg_rating || 0,
+              total_reviews: (profileRes.data as any).total_ratings || 0,
+              rating_1: 0,
+              rating_2: 0,
+              rating_3: 0,
+              rating_4: 0,
+              rating_5: 0,
+            },
+            recent_reviews: (reviewsRes.data || []).map(r => ({
+               ...r,
+               reviewer_label: (r as any).reviewer_label || "Student",
+            })) as any[],
+            provided_series: allSeries,
+            assigned_series: [],
+          } : null;
+
           const prelimsSeries = allSeries.filter((row) => String(row.series_kind || "").toLowerCase() !== "mains");
+
+          const [enrollmentsTotalRes] = await Promise.all([
+            supabase.from("test_series_enrollments").select("id", { count: "exact", head: true }).in("series_id", allSeries.length > 0 ? allSeries.map(s => s.id) : [-1]),
+          ]);
+
+          const localSummary: ProviderDashboardSummary = {
+            series_count: allSeries.length,
+            test_count: allSeries.reduce((acc, curr) => acc + (curr.test_count || 0), 0),
+            active_enrollments: enrollmentsTotalRes.count || 0,
+            pending_copy_checks: 0,
+            mentorship_pending_requests: mentorshipRes.count || 0,
+            upcoming_slots: slotsRes.count || 0
+          };
+
           const enrollmentInsights = await Promise.all(
             prelimsSeries.slice(0, 24).map(async (seriesRow): Promise<QuizMasterSeriesInsight> => {
               try {
-                const enrollmentResponse = await premiumApi.get<TestSeriesEnrollment[]>(
-                  `/programs/${seriesRow.id}/enrollments`,
-                );
-                const enrollmentRows = Array.isArray(enrollmentResponse.data) ? enrollmentResponse.data : [];
+                const { data: enrollmentRows, error } = await supabase
+                  .from("test_series_enrollments")
+                  .select("id, status")
+                  .eq("series_id", seriesRow.id);
+                
+                if (error) throw error;
+                const rows = Array.isArray(enrollmentRows) ? enrollmentRows : [];
                 return {
                   series: seriesRow,
-                  totalEnrollments: enrollmentRows.length,
-                  activeEnrollments: enrollmentRows.filter((row) => row.status === "active").length,
+                  totalEnrollments: rows.length,
+                  activeEnrollments: rows.filter((row) => row.status === "active").length,
                 };
               } catch {
                 return {
@@ -465,10 +555,10 @@ export default function DashboardPage() {
           );
           if (!active) return;
           setQuizMasterData({
-            summary: summary.data || emptyProviderSummary,
+            summary: localSummary,
             series: allSeries,
             seriesInsights: enrollmentInsights,
-            tracking: trackingPayload,
+            tracking: emptyLifecycleTracking,
             profileDetail,
           });
           setMentorData(null);
@@ -476,14 +566,50 @@ export default function DashboardPage() {
           return;
         }
 
-        const supabase = createSupabaseClient();
-        const [summary, onboardingRes, tracking] = await Promise.all([
-          premiumApi.get<ModerationActivitySummary>("/moderation/activity-summary").catch(() => ({ data: emptyModerationSummary })),
+        // Moderator block
+        const [seriesRes, enrollmentsRes, mentorshipRes, copySubmissionsRes, onboardingRes] = await Promise.all([
+          supabase.from("test_series").select("id, is_active"),
+          supabase.from("test_series_enrollments").select("id", { count: "exact" }),
+          supabase.from("mentorship_requests").select("id, status"),
+          supabase.from("mains_test_copy_submissions").select("id, status"),
           supabase.from("creator_applications").select("*, profiles(*)").eq("status", "pending").order("created_at", { ascending: false }).limit(10),
-          premiumApi.get<LifecycleTrackingPayload>("/lifecycle/tracking", {
-            params: { scope: "all", limit_cycles: 400, limit_users: 300 },
-          }).catch(() => ({ data: emptyLifecycleTracking })),
         ]);
+
+        const summary: ModerationActivitySummary = {
+          series_count: (seriesRes.data || []).length,
+          active_series_count: (seriesRes.data || []).filter(s => s.is_active).length,
+          test_count: 0,
+          active_test_count: 0,
+          active_enrollments: (enrollmentsRes.count || 0),
+          copy_submissions_total: (copySubmissionsRes.data || []).length,
+          pending_copy_checks: (copySubmissionsRes.data || []).filter(c => c.status === "pending").length,
+          mentorship_requests_total: (mentorshipRes.data || []).length,
+          mentorship_pending_requests: (mentorshipRes.data || []).filter(m => m.status === "requested").length,
+        };
+
+        const localTracking: LifecycleTrackingPayload = {
+          generated_at: new Date().toISOString(),
+          summary: {
+            users: (enrollmentsRes.count || 0),
+            delayed_items: 0,
+            technical_issues: 0,
+            mentorship_cycles: (mentorshipRes.data || []).length,
+            pending_mentorship: (mentorshipRes.data || []).filter(m => m.status === "requested").length,
+            scheduled_mentorship: (mentorshipRes.data || []).filter(m => m.status === "scheduled").length,
+            completed_mentorship: (mentorshipRes.data || []).filter(m => m.status === "completed").length,
+            pending_copy_checks: (copySubmissionsRes.data || []).filter(c => c.status === "pending").length,
+          },
+          mentorship_cycles: (mentorshipRes.data || []).slice(0, 50).map((m: any) => ({
+            request_id: m.id,
+            user_id: String(m.user_id),
+            provider_user_id: String(m.mentor_id),
+            request_status: m.status as any,
+            requested_at: m.created_at,
+            timeline: [],
+            issues: [],
+          })),
+          user_rows: [],
+        };
         
         let pendingOnboarding = [] as any[];
         if (!onboardingRes.error && onboardingRes.data) {
@@ -502,9 +628,9 @@ export default function DashboardPage() {
         }
         if (!active) return;
         setModeratorData({
-          summary: summary.data || emptyModerationSummary,
+          summary: summary,
           pendingOnboarding,
-          tracking: tracking.data || emptyLifecycleTracking,
+          tracking: localTracking,
         });
         setMentorData(null);
         setQuizMasterData(null);
@@ -756,13 +882,13 @@ export default function DashboardPage() {
     const requestIds = (mentorData?.requests ?? []).map((request) => request.id);
     const filter = buildRealtimeRequestFilter(requestIds);
     if (!filter || !currentUserId) return;
-    const supabase = createSupabaseClient();
+    const supabase = createClient();
     const channel = supabase
       .channel(`mentor-dashboard-requests-${requestIds.join("-")}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "mentorship_messages", filter },
-        (payload) => {
+        (payload: any) => {
           const row = payload.new as { request_id?: number; sender_user_id?: string } | undefined;
           const requestId = Number(row?.request_id || 0);
           if (requestId <= 0 || row?.sender_user_id === currentUserId || row?.sender_user_id === "system") return;

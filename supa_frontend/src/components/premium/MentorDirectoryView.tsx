@@ -141,46 +141,58 @@ export default function MentorDirectoryView() {
       const supabase = createClient();
 
       const { data, error: fetchError } = await supabase
-        .from("profiles")
+        .from("creator_profiles")
         .select(`
-          id, display_name, avatar_url, bio, role, creator_exam_ids, highlights
+          *,
+          profile:profiles!creator_profiles_user_id_fkey(
+            id, display_name, avatar_url, bio, role, is_active
+          ),
+          exams:creator_profile_exams(exam_id)
         `)
-        .in("role", ["admin", "moderator", "prelims_expert", "mains_expert"])
-        .eq("is_active", true)
-        .order("display_name");
+        .eq("is_public", true)
+        .eq("is_active", true);
 
       if (fetchError) throw fetchError;
 
       const mentorRows = (data || [])
         .map((row: any) => {
-          const examIds = Array.isArray(row.creator_exam_ids)
-            ? row.creator_exam_ids.map(Number).filter((value: number) => Number.isFinite(value))
+          const profile = row.profile || {};
+          const role = String(profile.role || "mains_expert");
+          
+          // Only show experts, exclude admin/moderator unless they have explicit expert roles
+          if (!["mains_expert", "prelims_expert"].includes(role)) return null;
+
+          const examIds = Array.isArray(row.exams)
+            ? row.exams.map((e: any) => Number(e.exam_id)).filter((v: number) => Number.isFinite(v))
             : [];
+            
           const highlights = Array.isArray(row.highlights) ? row.highlights : [];
+          
           return {
             id: row.id,
-            user_id: String(row.id),
-            role: String(row.role || "mains_expert"),
-            display_name: row.display_name || "Verified Mentor",
-            profile_image_url: row.avatar_url || "",
-            headline: highlights[0] || "Verified Expert Mentor",
-            bio: row.bio || "",
+            user_id: String(row.user_id),
+            role: role,
+            display_name: profile.display_name || "Verified Mentor",
+            profile_image_url: profile.avatar_url || "",
+            headline: highlights[0] || (role === "mains_expert" ? "Mains Expert" : "Prelims Expert"),
+            bio: profile.bio || "",
             specialization_tags: [],
             credentials: [],
             highlights,
             languages: [],
             experiences: [],
-            meta: {},
+            meta: row.meta || {},
             exam_ids: examIds,
-            is_verified: true,
-            is_public: true,
+            is_verified: !!row.is_verified,
+            is_public: !!row.is_public,
             is_active: !!row.is_active,
-            city: "",
-            created_at: row.created_at || new Date().toISOString(),
-            updated_at: row.updated_at || new Date().toISOString(),
+            city: row.city || "",
+            created_at: row.created_at,
+            updated_at: row.updated_at,
           };
         })
-        .filter((row) => matchesExamIds(row.exam_ids, globalExamId)) as unknown as ProfessionalProfile[];
+        .filter(Boolean)
+        .filter((row: any) => matchesExamIds(row.exam_ids, globalExamId)) as unknown as ProfessionalProfile[];
 
       setRows(mentorRows);
 

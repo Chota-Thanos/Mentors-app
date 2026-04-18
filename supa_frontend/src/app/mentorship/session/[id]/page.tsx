@@ -27,7 +27,7 @@ import {
 
 import { premiumApi } from "@/lib/premiumApi";
 
-type MentorshipCallProvider = "custom" | "zoom" | "zoom_video_sdk";
+type MentorshipCallProvider = "custom" | "zoom" | "zoom_video_sdk" | "agora";
 type MentorshipMode = "video" | "audio";
 
 type MentorshipCallContext = {
@@ -85,7 +85,7 @@ const describeError = (error: unknown, fallback: string): string => {
 };
 
 const providerLabel = (provider: MentorshipCallProvider): string => {
-  if (provider === "zoom_video_sdk") return "Agora room";
+  if (provider === "agora" || provider === "zoom_video_sdk") return "Agora room";
   if (provider === "zoom") return "Zoom meeting";
   return "External call link";
 };
@@ -126,7 +126,9 @@ export default function MentorshipSessionRoom() {
   const autoJoinAttemptedRef = useRef<string>("");
 
   const isAgoraRoom = Boolean(
-    context?.call_provider === "zoom_video_sdk" && context.agora_app_id && context.agora_channel,
+    (context?.call_provider === "agora" || context?.call_provider === "zoom_video_sdk") &&
+    context.agora_app_id &&
+    context.agora_channel,
   );
   const autoJoinRequested = searchParams.get("autojoin") === "1";
   const isHost = Boolean(context && (context.sdk_role_type === 1 || context.host_url));

@@ -34,7 +34,9 @@ import {
   isModeratorLike,
   isQuizMasterLike,
 } from "@/lib/accessControl";
+import { backendRoot } from "@/lib/backendUrl";
 import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import { loadLearnerMentorshipOrders, type LearnerMentorshipOrdersData } from "@/lib/learnerMentorshipOrders";
 import type {
   DashboardAnalyticsPayload,
@@ -572,21 +574,22 @@ function LearnerHome({ user }: { user: unknown }) {
       };
     }
 
-    void Promise.allSettled(
-      Array.from(new Set(activeSeriesRows.map((series) => Number(series.series_id || 0)).filter((id) => id > 0))).map((seriesId) =>
-        premiumApi.get<TestSeries>(`/programs/${seriesId}`),
-      ),
-    ).then((results) => {
-      if (!active) return;
-      const nextMap: Record<string, number[]> = {};
-      for (const result of results) {
-        if (result.status !== "fulfilled") continue;
-        const row = result.value.data;
-        if (!row?.id) continue;
-        nextMap[String(row.id)] = Array.isArray(row.exam_ids) ? row.exam_ids : [];
-      }
-      setActiveSeriesExamIdsById(nextMap);
-    });
+    const targetIds = Array.from(new Set(activeSeriesRows.map((series) => Number(series.series_id || 0)).filter((id) => id > 0)));
+    if (targetIds.length === 0) return;
+
+    const supabase = createClient();
+    supabase
+      .from("test_series")
+      .select("id, exam_ids")
+      .in("id", targetIds)
+      .then(({ data }) => {
+        if (!active) return;
+        const nextMap: Record<string, number[]> = {};
+        for (const row of data || []) {
+          nextMap[String(row.id)] = Array.isArray(row.exam_ids) ? row.exam_ids : [];
+        }
+        setActiveSeriesExamIdsById(nextMap);
+      });
 
     return () => {
       active = false;
@@ -1087,6 +1090,7 @@ function MinimalCreatorHome({
   actions: HomeAction[];
 }) {
   const { isAuthenticated } = useAuth();
+  const { profileId } = useProfile();
   const [snapshot, setSnapshot] = useState<CreatorSnapshot>({ series: [], requests: [], activeEnrollments: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -1099,26 +1103,27 @@ function MinimalCreatorHome({
       setLoading(true);
       setError("");
       try {
-        const [seriesRes, summaryRes, requestsRes] = await Promise.all([
-          premiumApi.get<TestSeries[]>("/programs", {
-            params: { mine_only: true, include_tests: true, include_inactive: true },
-          }),
-          // Preserve the response shape so Promise.all does not widen `data` to `{}`.
-          premiumApi.get<{ active_enrollments?: number }>("/provider/dashboard-summary").catch(() => ({
-            data: { active_enrollments: 0 } as { active_enrollments?: number },
-          })),
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not authenticated");
+
+        const [seriesRes, mentorshipRes] = await Promise.all([
+          supabase.from("test_series").select("*").eq("creator_id", profileId).order("created_at", { ascending: false }),
           kind === "mains_mentor"
-            ? premiumApi.get<MentorshipRequest[]>("/mentorship/requests", {
-              params: { scope: "provider" },
-            })
+            ? supabase.from("mentorship_requests").select("*").eq("mentor_id", profileId)
             : Promise.resolve({ data: [] as MentorshipRequest[] }),
         ]);
 
+        const mineSeriesIds = (seriesRes.data || []).map(s => s.id);
+        const { count: enrollmentsCount } = mineSeriesIds.length > 0
+          ? await supabase.from("test_series_enrollments").select("id", { count: "exact", head: true }).in("series_id", mineSeriesIds)
+          : { count: 0 };
+
         if (cancelled) return;
         setSnapshot({
-          series: Array.isArray(seriesRes.data) ? seriesRes.data : [],
-          requests: Array.isArray(requestsRes.data) ? requestsRes.data : [],
-          activeEnrollments: Number(summaryRes.data?.active_enrollments || 0),
+          series: (seriesRes.data || []) as TestSeries[],
+          requests: (mentorshipRes.data || []) as MentorshipRequest[],
+          activeEnrollments: enrollmentsCount || 0,
         });
       } catch (loadError: unknown) {
         if (cancelled) return;
@@ -1132,7 +1137,7 @@ function MinimalCreatorHome({
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, kind]);
+  }, [isAuthenticated, kind, profileId]);
 
   const orderedRequests = useMemo(
     () =>

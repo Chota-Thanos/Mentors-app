@@ -163,9 +163,87 @@ export default function ProfessionalPublicProfileView({
       setLoading(true);
       try {
         const supabase = createClient();
-        const { data: detail } = await premiumApi.get<ProfessionalPublicProfileDetail>(`/profiles/${userId}/detail`, {
-          params: { reviews_limit: 12 },
-        });
+        
+        // 1. Fetch the profile details
+        const { data: profileData, error: profileError } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("auth_user_id", userId)
+          .single();
+        
+        if (profileError || !profileData) throw new Error("Mentor profile not found");
+
+        const numericProfileId = profileData.id;
+
+        // 2. Fetch associated test series and reviews in parallel
+        const [seriesRes, reviewsRes] = await Promise.all([
+          supabase
+            .from("test_series")
+            .select("*")
+            .eq("creator_id", numericProfileId)
+            .eq("is_active", true)
+            .eq("is_public", true),
+          supabase
+            .from("test_series_reviews")
+            .select("*")
+            .eq("creator_id", numericProfileId)
+            .order("created_at", { ascending: false })
+            .limit(12),
+        ]);
+
+        const seriesRows = (seriesRes.data || []) as TestSeries[];
+        const reviewRows = (reviewsRes.data || []) as ProfessionalProfileReview[];
+
+        const detail: ProfessionalPublicProfileDetail = {
+          profile: {
+            id: profileData.id,
+            user_id: profileData.auth_user_id,
+            display_name: profileData.display_name,
+            profile_image_url: profileData.avatar_url,
+            headline: (profileData as any).headline || "Professional Mentor",
+            bio: profileData.bio,
+            role: profileData.role || "mentor",
+            is_verified: true,
+            years_experience: (profileData as any).mentor_experience_years || 0,
+            specialization_tags: Array.isArray((profileData as any).specialization_tags) ? (profileData as any).specialization_tags : [],
+            highlights: [],
+            credentials: [],
+            languages: ["English"],
+            is_active: true,
+            is_public: true,
+            exam_ids: [],
+            meta: {},
+            created_at: profileData.created_at,
+          },
+          role_label: (profileData.role || "mentor").replace("_", " ").toUpperCase(),
+          achievements: [],
+          service_specifications: [],
+          exam_focus: "UPSC & Civil Services",
+          response_time_text: "Usually within 24 hours",
+          mentorship_price: (profileData as any).mentorship_current_price || 0,
+          copy_evaluation_price: (profileData as any).copy_evaluation_price || 0,
+          copy_evaluation_enabled: !!(profileData as any).copy_evaluation_enabled,
+          currency: "INR",
+          sessions_completed: 0,
+          mentorship_availability_mode: "open",
+          mentorship_available_series_ids: [],
+          mentorship_default_call_provider: "agora",
+          review_summary: {
+            average_rating: (profileData as any).avg_rating || 0,
+            total_reviews: (profileData as any).total_ratings || 0,
+            rating_1: 0,
+            rating_2: 0,
+            rating_3: 0,
+            rating_4: 0,
+            rating_5: 0,
+          },
+          recent_reviews: reviewRows.map(r => ({
+             ...r,
+             reviewer_label: (r as any).reviewer_label || "Student",
+          })),
+          provided_series: seriesRows,
+          assigned_series: [],
+        };
 
         let activeRequest: MentorshipRequest | null = null;
         if (isAuthenticated && profileId) {
@@ -173,7 +251,7 @@ export default function ProfessionalPublicProfileView({
             .from("mentorship_requests")
             .select("*")
             .eq("user_id", profileId)
-            .eq("mentor_id", detail.profile.id)
+            .eq("mentor_id", numericProfileId)
             .in("status", ["requested", "scheduled"])
             .maybeSingle();
           activeRequest = requestData as MentorshipRequest;

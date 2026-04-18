@@ -1,11 +1,14 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
+import axios from "axios";
 import Link from "next/link";
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { createClient } from "@/lib/supabase/client";
 import { toDisplayRoleLabel } from "@/lib/roleLabels";
 import RichTextContent from "@/components/ui/RichTextContent";
@@ -19,6 +22,12 @@ import type {
   QuizMasterSampleMcq,
 } from "@/types/premium";
 
+const toError = (error: unknown): string => {
+  if (!axios.isAxiosError(error)) return "Unknown error";
+  const detail = error.response?.data?.detail;
+  return typeof detail === "string" && detail.trim() ? detail : error.message;
+};
+
 type RoleOption = {
   value: ProfessionalOnboardingDesiredRole;
   label: string;
@@ -29,22 +38,22 @@ type RoleOption = {
 const ROLE_OPTIONS: RoleOption[] = [
   {
     value: "creator",
-    label: "Quiz Master",
-    description: "Prelims-focused content creators who can frame high-signal UPSC MCQs and programs.",
+    label: "Prelims Expert (Quiz Master)",
+    description: "Frame high-signal UPSC MCQs and create Prelims programs for serious aspirants.",
     highlights: [
-      "Submit verified Prelims credentials and proof documents.",
-      "Share subject focus areas, prior content experience, and a short public bio.",
-      "Add a preparation strategy note that learners can read on your profile.",
+      "Provision: Create and sell Prelims Programs & MCQs.",
+      "Eligibility: Cleared UPSC Prelims (Roll Number required).",
+      "Upload subject focus areas and a preparation strategy note.",
     ],
   },
   {
     value: "mentor",
-    label: "Mains Mentor",
-    description: "Answer-writing evaluators who can review subjective copies and guide learners through Mains.",
+    label: "Mains Expert (Mains Mentor)",
+    description: "Provide active mentorship, evaluate subjective copies, and run Mains guidance programs.",
     highlights: [
-      "Submit verified Mains or interview credentials with marksheets.",
-      "Add optional or GS expertise plus mentoring background.",
-      "Upload a sample evaluation and intro video for review.",
+      "Provision: Sell Mains Programs, Mentorship & Copy Evaluation.",
+      "Eligibility: Cleared UPSC Mains or faced Interview (Marksheet required).",
+      "Upload sample evaluations and an intro video for review.",
     ],
   },
 ];
@@ -217,39 +226,10 @@ function getOnboardingStepValidationMessage(
 ): string | null {
   if (step === 0) {
     if (!form.full_name.trim()) return "Full name is required.";
-    if (!form.phone.trim()) return "Active phone number is required.";
-    if (!form.details.current_occupation?.trim()) return "Current occupation is required.";
-    if (!form.details.professional_headshot) return "Upload a professional headshot before continuing.";
+    if (!form.about.trim()) return "Application summary / description is required.";
     return null;
   }
-  if (step === 1) {
-    if (!form.details.upsc_roll_number?.trim()) return "UPSC roll number is required.";
-    if (!form.details.upsc_years?.trim()) return "UPSC year details are required.";
-    if ((form.details.proof_documents || []).length === 0) return "Upload at least one official proof document.";
-    if (desiredRole === "mentor") {
-      if (form.details.mains_written_count === null || form.details.mains_written_count === undefined) return "Add the number of UPSC Mains written.";
-      if (form.details.interview_faced_count === null || form.details.interview_faced_count === undefined) return "Add the number of UPSC interviews faced.";
-    } else {
-      if (form.details.prelims_cleared_count === null || form.details.prelims_cleared_count === undefined) return "Add the number of UPSC Prelims cleared.";
-      if (!form.details.highest_prelims_score?.trim()) return "Highest Prelims score is required.";
-    }
-    return null;
-  }
-  if (step === 2) {
-    if (desiredRole === "mentor") {
-      if (!form.details.optional_subject?.trim() && (form.details.gs_preferences || []).length === 0) return "Add optional subject or at least one GS preference.";
-      if (form.details.mentorship_years === null || form.details.mentorship_years === undefined) return "Mentorship years are required.";
-    } else {
-      if ((form.details.subject_focus || []).length === 0) return "Select at least one subject focus.";
-      if (!form.details.content_experience?.trim()) return "Content experience is required.";
-    }
-    return null;
-  }
-  if (desiredRole === "mentor") {
-    if (!form.details.sample_evaluation) return "Upload a sample evaluated Mains copy.";
-    if (!form.details.intro_video_url?.trim()) return "Introduction video link is required.";
-    return null;
-  }
+  // All other steps are optional
   return null;
 }
 
@@ -268,7 +248,11 @@ function onboardingTimestamp(application: ProfessionalOnboardingApplication): st
 }
 
 export default function ProfessionalOnboardingEligibilityForm() {
-  const { user, isAuthenticated, loading } = useAuth();
+  const searchParams = useSearchParams();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const { profileId, loading: profileLoading } = useProfile();
+  
+  const loading = authLoading || profileLoading;
   const [busy, setBusy] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -276,6 +260,7 @@ export default function ProfessionalOnboardingEligibilityForm() {
   const [applications, setApplications] = useState<ProfessionalOnboardingApplication[]>([]);
   const [desiredRole, setDesiredRole] = useState<ProfessionalOnboardingDesiredRole>("creator");
   const [stepIndex, setStepIndex] = useState(0);
+  const [isEditing, setIsEditing] = useState(false);
   const [form, setForm] = useState<EditableForm>(() => buildFormFromApplication(null, "", "creator"));
 
   const userEmail = String(user?.email || "").trim();
@@ -289,6 +274,29 @@ export default function ProfessionalOnboardingEligibilityForm() {
   const stepLabels = useMemo(() => getStepLabelsForRole(desiredRole), [desiredRole]);
   const completedSteps = useMemo(() => getCompletedOnboardingSteps(form, desiredRole), [form, desiredRole]);
 
+  // Default to non-editing if we have a pending application
+  useEffect(() => {
+    if (!loading && selectedRoleApplication) {
+      const status = String(selectedRoleApplication.status || "").toLowerCase();
+      if (status === "pending" || status === "approved") {
+        setIsEditing(false);
+      } else {
+        setIsEditing(true);
+      }
+    }
+  }, [loading, selectedRoleApplication]);
+
+  // Pre-select role from search params
+  useEffect(() => {
+    const roleParam = searchParams.get("role");
+    if (roleParam === "mentor") {
+      setDesiredRole("mentor");
+    } else if (roleParam === "creator") {
+      setDesiredRole("creator");
+    }
+  }, [searchParams]);
+
+
   const loadMyApplications = async () => {
     if (!isAuthenticated || !user?.id) {
       setApplications([]);
@@ -301,7 +309,7 @@ export default function ProfessionalOnboardingEligibilityForm() {
       const { data, error } = await supabase
         .from("creator_applications")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", profileId)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -485,8 +493,8 @@ export default function ProfessionalOnboardingEligibilityForm() {
       return;
     }
 
-    if (!user?.id) {
-      toast.error("User context missing.");
+    if (!profileId) {
+      toast.error("Profile context missing.");
       return;
     }
 
@@ -496,9 +504,9 @@ export default function ProfessionalOnboardingEligibilityForm() {
       const normalizedDetails = buildNormalizedDetails();
       
       const payload = {
-        user_id: user.id,
+        user_id: profileId,
         applied_roles: [desiredRole],
-        full_name: form.full_name.trim() || user.email?.split("@")[0] || "Unknown",
+        full_name: form.full_name.trim() || user?.email?.split("@")[0] || "Unknown",
         bio: form.about.trim() || null,
         experience: parsedExperience !== null ? String(parsedExperience) : null,
         social_links: normalizedDetails as any,
@@ -542,8 +550,8 @@ export default function ProfessionalOnboardingEligibilityForm() {
       return;
     }
 
-    if (!user?.id) {
-      toast.error("User context missing.");
+    if (!profileId) {
+      toast.error("Profile context missing.");
       return;
     }
 
@@ -553,9 +561,9 @@ export default function ProfessionalOnboardingEligibilityForm() {
       const normalizedDetails = buildNormalizedDetails();
       
       const payload = {
-        user_id: user.id,
+        user_id: profileId,
         applied_roles: [desiredRole],
-        full_name: form.full_name.trim() || user.email?.split("@")[0] || "Unknown",
+        full_name: form.full_name.trim() || user?.email?.split("@")[0] || "Unknown",
         bio: form.about.trim() || null,
         experience: parsedExperience !== null ? String(parsedExperience) : null,
         social_links: normalizedDetails as any,
@@ -593,123 +601,170 @@ export default function ProfessionalOnboardingEligibilityForm() {
   }
 
   return (
-    <div className="space-y-5">
-      <section className="rounded-[28px] border border-slate-200 bg-[radial-gradient(circle_at_top_right,_#dbeafe,_transparent_28%),linear-gradient(135deg,#ffffff,#f8fafc)] p-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Application Portal</p>
-        <h1 className="mt-2 text-3xl font-bold text-slate-900">Quiz Master / Mains Mentor Eligibility</h1>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Fill the role-specific steps, upload the required proofs, and submit once. A moderator or admin will review the request and activate the role after approval.
-        </p>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {ROLE_OPTIONS.map((option) => {
-            const active = option.value === desiredRole;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setDesiredRole(option.value)}
-                aria-pressed={active}
-                className={`rounded-2xl border px-4 py-3 text-left transition ${active ? "border-slate-900 bg-slate-900 text-white shadow-sm" : "border-slate-200 bg-white text-slate-900 hover:border-slate-300"}`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-base font-semibold">{option.label}</p>
-                  {active ? (
-                    <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
-                      Selected
-                    </span>
-                  ) : null}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      {selectedRoleApplication ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-5">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-semibold text-slate-900">Latest {roleConfig.label} Request</h2>
-            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLES[String(selectedRoleApplication.status).toLowerCase()] || "bg-slate-100 text-slate-700"}`}>
-              {applicationStatusLabel(selectedRoleApplication)}
-            </span>
+    <div className="mx-auto max-w-5xl space-y-8 pb-20">
+      {/* --- Premium Header Section --- */}
+      <section className="relative overflow-hidden rounded-[32px] border border-slate-200 bg-white p-8 shadow-sm transition-all hover:shadow-md">
+        <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-blue-50/50 blur-3xl" />
+        <div className="absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-indigo-50/30 blur-3xl" />
+        
+        <div className="relative">
+          <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50/50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-600">
+            <span className="flex h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+            Teacher Portal
           </div>
-          <p className="mt-2 text-xs text-slate-500">
-            {String(selectedRoleApplication.status || "").trim().toLowerCase() === "draft" ? "Saved" : "Submitted"}: {new Date(onboardingTimestamp(selectedRoleApplication)).toLocaleString()} | Requested role: {roleLabel(selectedRoleApplication.desired_role)}
+          <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-slate-900 md:text-5xl">
+            Join our <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Expert Network</span>
+          </h1>
+          <p className="mt-4 max-w-2xl text-lg text-slate-600">
+            Share your expertise with thousands of serious UPSC aspirants. Apply for specialized mentoring or content creation roles.
           </p>
-          <p className="mt-1 text-sm text-slate-600">{applicationStatusHint(selectedRoleApplication)}</p>
-          {selectedRoleApplication.reviewer_note ? (
-            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Reviewer note</p>
-              <RichTextContent value={selectedRoleApplication.reviewer_note} className="mt-2 text-sm text-slate-700 [&_p]:my-1" />
-            </div>
-          ) : null}
-        </section>
-      ) : null}
 
-      <section className="rounded-[28px] border border-slate-200 bg-white p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Step {stepIndex + 1} of {stepLabels.length}</p>
-            <h2 className="mt-1 text-2xl font-bold text-slate-900">
-              {roleConfig.label}: {stepLabels[stepIndex]}
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            {stepLabels.map((label, index) => {
-              const active = index === stepIndex;
-              const done = completedSteps.includes(index);
+          <div className="mt-8 flex flex-wrap gap-4">
+            {ROLE_OPTIONS.map((option) => {
+              const active = option.value === desiredRole;
               return (
-                <button key={label} type="button" onClick={() => setStepIndex(index)} className="flex flex-col items-center gap-1">
-                  <span className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold ${done ? "bg-emerald-100 text-emerald-700" : active ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"}`}>
-                    {index + 1}
-                  </span>
-                  <span className={`text-[11px] font-medium ${active ? "text-slate-900" : "text-slate-500"}`}>{label}</span>
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    setDesiredRole(option.value);
+                    if (!selectedRoleApplication) setIsEditing(true);
+                  }}
+                  className={`relative flex min-w-[240px] flex-col rounded-2xl border p-5 transition-all duration-300 ${
+                    active 
+                      ? "border-blue-600 bg-slate-900 text-white shadow-xl shadow-blue-900/10 ring-4 ring-blue-50" 
+                      : "border-slate-200 bg-white text-slate-900 hover:border-slate-300 hover:bg-slate-50"
+                  }`}
+                >
+                  <p className={`text-xs font-bold uppercase tracking-widest ${active ? "text-blue-400" : "text-slate-500"}`}>
+                    {option.value === "creator" ? "Prelims" : "Mains"}
+                  </p>
+                  <p className="mt-1 text-lg font-bold">{option.label}</p>
+                  {active && (
+                    <div className="mt-3 flex gap-1">
+                      <div className="h-1 w-8 rounded-full bg-blue-500" />
+                      <div className="h-1 w-2 rounded-full bg-blue-400/50" />
+                    </div>
+                  )}
                 </button>
               );
             })}
           </div>
         </div>
+      </section>
 
-        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Selected track</p>
-          <h3 className="mt-2 text-lg font-semibold text-slate-900">{roleConfig.label}</h3>
-          <p className="mt-1 text-sm text-slate-600">{roleConfig.description}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {roleConfig.highlights.map((item) => (
-              <span key={item} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700">
-                {item}
-              </span>
-            ))}
+      {/* --- Application Flow Logic --- */}
+      {selectedRoleApplication && !isEditing ? (
+        <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm">
+            <div className={`h-2 w-full ${selectedRoleApplication.status === "approved" ? "bg-emerald-500" : selectedRoleApplication.status === "pending" ? "bg-amber-500" : "bg-rose-500"}`} />
+            
+            <div className="p-8">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Application Status</p>
+                  <h2 className="text-3xl font-black text-slate-900">
+                    {applicationStatusLabel(selectedRoleApplication)}
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-900 transition hover:bg-slate-50 hover:shadow-sm"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                  Edit Application
+                </button>
+              </div>
+
+              <div className="mt-8 rounded-3xl bg-slate-50 p-6 md:p-8">
+                <p className="text-lg font-medium leading-relaxed text-slate-700">
+                  {applicationStatusHint(selectedRoleApplication)}
+                </p>
+                
+                {selectedRoleApplication.reviewer_note && (
+                  <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50/30 p-5">
+                    <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-blue-600">
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" /></svg>
+                      Moderator Note
+                    </p>
+                    <RichTextContent value={selectedRoleApplication.reviewer_note} className="mt-3 text-slate-700" />
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-8 flex items-center gap-6 border-t border-slate-100 pt-8 text-sm text-slate-500">
+                <div>
+                  <p className="font-bold text-slate-900">Submitted On</p>
+                  <p>{new Date(onboardingTimestamp(selectedRoleApplication)).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                </div>
+                <div>
+                  <p className="font-bold text-slate-900">Reference ID</p>
+                  <p>#{selectedRoleApplication.id}</p>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+        </section>
+      ) : (
+        <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm">
+            {/* --- Stepper Header --- */}
+            <div className="border-b border-slate-100 bg-slate-50/50 px-8 py-6">
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600">Step {stepIndex + 1} of {stepLabels.length}</p>
+                  <h3 className="text-xl font-bold text-slate-900">{stepLabels[stepIndex]} Details</h3>
+                </div>
+                
+                <div className="hidden items-center gap-3 md:flex">
+                  {stepLabels.map((_, idx) => (
+                    <div 
+                      key={idx}
+                      className={`h-1.5 w-12 rounded-full transition-all duration-300 ${idx === stepIndex ? "bg-blue-600" : idx < stepIndex || completedSteps.includes(idx) ? "bg-emerald-400" : "bg-slate-200"}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
 
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <div className="p-8">
+              {/* --- Form Section --- */}
+<div className="mt-5 grid gap-4 md:grid-cols-2">
           {stepIndex === 0 ? (
             <>
               <div>
-                <label className="text-sm font-semibold text-slate-700">Full name</label>
+                <label className="text-sm font-semibold text-slate-700">Full name <span className="text-rose-500">*</span></label>
                 <input value={form.full_name} onChange={(event) => setForm((current) => ({ ...current, full_name: event.target.value }))} className={INPUT_CLASS} placeholder="As per government ID" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">Email</label>
+                <label className="text-sm font-semibold text-slate-700">Email (Verified)</label>
                 <input value={userEmail} disabled className={`${INPUT_CLASS} bg-slate-50 text-slate-500`} />
               </div>
+              <div className="md:col-span-2">
+                <label className="text-sm font-semibold text-slate-700">Application summary / Description <span className="text-rose-500">*</span></label>
+                <textarea 
+                  value={form.about} 
+                  onChange={(event) => setForm((current) => ({ ...current, about: event.target.value }))} 
+                  className={TEXTAREA_CLASS} 
+                  placeholder="Describe your background, domain strength, mentoring or teaching experience, and why you are applying." 
+                />
+                <p className="mt-1 text-xs text-slate-500">This is the main narrative section moderators review. Please provide sufficient detail.</p>
+              </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">Active phone number</label>
+                <label className="text-sm font-semibold text-slate-700">Phone (optional)</label>
                 <input value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} className={INPUT_CLASS} placeholder="+91 90000 00000" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">City / location</label>
+                <label className="text-sm font-semibold text-slate-700">City / location (optional)</label>
                 <input value={form.city} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} className={INPUT_CLASS} placeholder="City" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">Current occupation</label>
+                <label className="text-sm font-semibold text-slate-700">Current occupation (optional)</label>
                 <input value={form.details.current_occupation || ""} onChange={(event) => updateDetails("current_occupation", event.target.value)} className={INPUT_CLASS} placeholder="Current role / occupation" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">Years of experience</label>
-                <input value={form.years_experience} onChange={(event) => setForm((current) => ({ ...current, years_experience: event.target.value }))} className={INPUT_CLASS} type="number" min={0} placeholder="Optional general experience" />
+                <label className="text-sm font-semibold text-slate-700">Years of experience (optional)</label>
+                <input value={form.years_experience} onChange={(event) => setForm((current) => ({ ...current, years_experience: event.target.value }))} className={INPUT_CLASS} type="number" min={0} placeholder="Total mentoring/teaching years" />
               </div>
               <div className="md:col-span-2">
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
@@ -720,8 +775,8 @@ export default function ProfessionalOnboardingEligibilityForm() {
                       <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white text-xs text-slate-400">No image</div>
                     )}
                     <div className="space-y-2">
-                      <p className="text-sm font-semibold text-slate-900">Professional headshot</p>
-                      <p className="text-xs text-slate-500">JPG, PNG, or WEBP. This image later becomes the public profile photo after approval.</p>
+                      <p className="text-sm font-semibold text-slate-900">Professional headshot (optional)</p>
+                      <p className="text-xs text-slate-500">JPG, PNG, or WEBP. Becomes your profile photo after approval.</p>
                       <label className="inline-flex cursor-pointer rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
                         {uploadButtonLabel(uploadingKey, "headshot", "Upload headshot")}
                         <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void handleHeadshotUpload(event)} />
@@ -736,19 +791,19 @@ export default function ProfessionalOnboardingEligibilityForm() {
           {stepIndex === 1 && desiredRole === "mentor" ? (
             <>
               <div>
-                <label className="text-sm font-semibold text-slate-700">UPSC Mains written</label>
+                <label className="text-sm font-semibold text-slate-700">UPSC Mains written (optional)</label>
                 <input type="number" min={0} value={form.details.mains_written_count ?? ""} onChange={(event) => updateDetails("mains_written_count", event.target.value === "" ? null : Number(event.target.value))} className={INPUT_CLASS} placeholder="0" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">UPSC interviews faced</label>
+                <label className="text-sm font-semibold text-slate-700">UPSC interviews faced (optional)</label>
                 <input type="number" min={0} value={form.details.interview_faced_count ?? ""} onChange={(event) => updateDetails("interview_faced_count", event.target.value === "" ? null : Number(event.target.value))} className={INPUT_CLASS} placeholder="0" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">UPSC roll number</label>
+                <label className="text-sm font-semibold text-slate-700">UPSC roll number (optional)</label>
                 <input value={form.details.upsc_roll_number || ""} onChange={(event) => updateDetails("upsc_roll_number", event.target.value)} className={INPUT_CLASS} placeholder="Roll number used for verification" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">Years / attempts</label>
+                <label className="text-sm font-semibold text-slate-700">Years / attempts (optional)</label>
                 <input value={form.details.upsc_years || ""} onChange={(event) => updateDetails("upsc_years", event.target.value)} className={INPUT_CLASS} placeholder="Example: 2022, 2023, 2024" />
               </div>
             </>
@@ -757,19 +812,19 @@ export default function ProfessionalOnboardingEligibilityForm() {
           {stepIndex === 1 && desiredRole === "creator" ? (
             <>
               <div>
-                <label className="text-sm font-semibold text-slate-700">UPSC Prelims cleared</label>
+                <label className="text-sm font-semibold text-slate-700">UPSC Prelims cleared (optional)</label>
                 <input type="number" min={0} value={form.details.prelims_cleared_count ?? ""} onChange={(event) => updateDetails("prelims_cleared_count", event.target.value === "" ? null : Number(event.target.value))} className={INPUT_CLASS} placeholder="0" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">Highest Prelims score</label>
+                <label className="text-sm font-semibold text-slate-700">Highest Prelims score (optional)</label>
                 <input value={form.details.highest_prelims_score || ""} onChange={(event) => updateDetails("highest_prelims_score", event.target.value)} className={INPUT_CLASS} placeholder="Highest verified score" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">UPSC roll number</label>
+                <label className="text-sm font-semibold text-slate-700">UPSC roll number (optional)</label>
                 <input value={form.details.upsc_roll_number || ""} onChange={(event) => updateDetails("upsc_roll_number", event.target.value)} className={INPUT_CLASS} placeholder="Roll number used for verification" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">Years / attempts</label>
+                <label className="text-sm font-semibold text-slate-700">Years / attempts (optional)</label>
                 <input value={form.details.upsc_years || ""} onChange={(event) => updateDetails("upsc_years", event.target.value)} className={INPUT_CLASS} placeholder="Example: 2021, 2022, 2024" />
               </div>
             </>
@@ -780,7 +835,7 @@ export default function ProfessionalOnboardingEligibilityForm() {
               <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="grow">
-                    <p className="text-sm font-semibold text-slate-900">Official proof documents</p>
+                    <p className="text-sm font-semibold text-slate-900">Official proof documents (optional)</p>
                     <p className="text-xs text-slate-500">Upload official marksheets or stage proofs used for moderator verification.</p>
                   </div>
                   <label className="inline-flex cursor-pointer rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
@@ -803,20 +858,29 @@ export default function ProfessionalOnboardingEligibilityForm() {
           {stepIndex === 2 && desiredRole === "mentor" ? (
             <>
               <div>
-                <label className="text-sm font-semibold text-slate-700">Optional subject</label>
-                <input value={form.details.optional_subject || ""} onChange={(event) => updateDetails("optional_subject", event.target.value)} className={INPUT_CLASS} placeholder="Optional subject you can evaluate" />
+                <label className="text-sm font-bold text-slate-700">Optional subject (optional)</label>
+                <input value={form.details.optional_subject || ""} onChange={(event) => updateDetails("optional_subject", event.target.value)} className={INPUT_CLASS} placeholder="Optional subject for evaluation" />
               </div>
               <div>
-                <label className="text-sm font-semibold text-slate-700">Mentorship years</label>
-                <input type="number" min={0} value={form.details.mentorship_years ?? ""} onChange={(event) => updateDetails("mentorship_years", event.target.value === "" ? null : Number(event.target.value))} className={INPUT_CLASS} placeholder="Years spent teaching / mentoring" />
+                <label className="text-sm font-bold text-slate-700">Mentorship years (optional)</label>
+                <input type="number" min={0} value={form.details.mentorship_years ?? ""} onChange={(event) => updateDetails("mentorship_years", event.target.value === "" ? null : Number(event.target.value))} className={INPUT_CLASS} placeholder="Total active mentoring years" />
               </div>
               <div className="md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700">GS preferences</label>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <label className="text-sm font-bold text-slate-700">GS preferences (optional)</label>
+                <div className="mt-3 flex flex-wrap gap-2">
                   {GS_OPTIONS.map((option) => {
                     const active = (form.details.gs_preferences || []).includes(option);
                     return (
-                      <button key={option} type="button" onClick={() => toggleStringListValue("gs_preferences", option)} className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${active ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
+                      <button 
+                        key={option} 
+                        type="button" 
+                        onClick={() => toggleStringListValue("gs_preferences", option)} 
+                        className={`rounded-xl border px-4 py-2 text-xs font-bold transition-all ${
+                          active 
+                            ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-200" 
+                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                      >
                         {option}
                       </button>
                     );
@@ -824,8 +888,13 @@ export default function ProfessionalOnboardingEligibilityForm() {
                 </div>
               </div>
               <div className="md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700">Past institute associations</label>
-                <textarea value={(form.details.institute_associations || []).join("\n")} onChange={(event) => updateDetails("institute_associations", event.target.value.split("\n"))} className={TEXTAREA_CLASS} placeholder="One institute / mentorship association per line" />
+                <label className="text-sm font-bold text-slate-700">Past institute associations (optional)</label>
+                <textarea 
+                  value={(form.details.institute_associations || []).join("\n")} 
+                  onChange={(event) => updateDetails("institute_associations", event.target.value.split("\n"))} 
+                  className={TEXTAREA_CLASS} 
+                  placeholder="Example: Vision IAS, ForumIAS (One per line)" 
+                />
               </div>
             </>
           ) : null}
@@ -833,12 +902,21 @@ export default function ProfessionalOnboardingEligibilityForm() {
           {stepIndex === 2 && desiredRole === "creator" ? (
             <>
               <div className="md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700">Subject focus</label>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <label className="text-sm font-bold text-slate-700">Subject focus (optional)</label>
+                <div className="mt-3 flex flex-wrap gap-2">
                   {SUBJECT_FOCUS_OPTIONS.map((option) => {
                     const active = (form.details.subject_focus || []).includes(option);
                     return (
-                      <button key={option} type="button" onClick={() => toggleStringListValue("subject_focus", option)} className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${active ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
+                      <button 
+                        key={option} 
+                        type="button" 
+                        onClick={() => toggleStringListValue("subject_focus", option)} 
+                        className={`rounded-xl border px-4 py-2 text-xs font-bold transition-all ${
+                          active 
+                            ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-200" 
+                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                      >
                         {option}
                       </button>
                     );
@@ -846,107 +924,105 @@ export default function ProfessionalOnboardingEligibilityForm() {
                 </div>
               </div>
               <div className="md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700">Content experience</label>
-                <textarea value={form.details.content_experience || ""} onChange={(event) => updateDetails("content_experience", event.target.value)} className={TEXTAREA_CLASS} placeholder="Mention previous EdTech/test-series/content-writing work and the depth of your Prelims coverage." />
+                <label className="text-sm font-bold text-slate-700">Content experience (optional)</label>
+                <textarea value={form.details.content_experience || ""} onChange={(event) => updateDetails("content_experience", event.target.value)} className={TEXTAREA_CLASS} placeholder="Describe your experience in question framing or content writing." />
               </div>
               <div className="md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700">Short bio</label>
-                <textarea value={form.details.short_bio || ""} onChange={(event) => updateDetails("short_bio", event.target.value)} className={TEXTAREA_CLASS} placeholder="Write a short public bio that can appear on your program cards." />
+                <label className="text-sm font-bold text-slate-700">Public bio card (optional)</label>
+                <textarea value={form.details.short_bio || ""} onChange={(event) => updateDetails("short_bio", event.target.value)} className={TEXTAREA_CLASS} placeholder="A short bio that learners see on your programs." />
               </div>
               <div className="md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700">Preparation strategy</label>
-                <textarea value={form.details.preparation_strategy || ""} onChange={(event) => updateDetails("preparation_strategy", event.target.value)} className={TEXTAREA_CLASS} placeholder="Add a longer preparation strategy note for learners. This can explain your approach, source discipline, revision method, and scoring framework." />
-              </div>
-              <div className="md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700">Additional note for reviewers</label>
-                <textarea value={form.about} onChange={(event) => setForm((current) => ({ ...current, about: event.target.value }))} className={TEXTAREA_CLASS} placeholder="Optional note on your question-setting approach, availability, or editorial standards." />
+                <label className="text-sm font-bold text-slate-700">Preparation strategy (optional)</label>
+                <textarea value={form.details.preparation_strategy || ""} onChange={(event) => updateDetails("preparation_strategy", event.target.value)} className={TEXTAREA_CLASS} placeholder="Explain your approach to UPSC preparation." />
               </div>
             </>
           ) : null}
 
-          {stepIndex === 3 && desiredRole === "mentor" ? (
-            <>
-              <div className="md:col-span-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="grow">
-                    <p className="text-sm font-semibold text-slate-900">Sample evaluated Mains copy</p>
-                    <p className="text-xs text-slate-500">Upload one evaluated copy that shows the quality of your annotations and feedback.</p>
+              {/* --- Step 3 (Mains Mentor Only) --- */}
+              {stepIndex === 3 && desiredRole === "mentor" ? (
+                <>
+                  <div className="md:col-span-2">
+                    <div className="rounded-[32px] border border-dashed border-slate-200 bg-slate-50/50 p-8 text-center">
+                      <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-blue-600">
+                        <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                      </div>
+                      <h4 className="text-lg font-bold text-slate-900">Sample evaluated Mains copy (optional)</h4>
+                      <p className="mt-1 text-sm text-slate-500">Upload one evaluated copy that shows the quality of your feedback.</p>
+                      
+                      <div className="mt-6 flex flex-col items-center gap-4">
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl bg-slate-900 px-8 py-3 text-sm font-black text-white shadow-lg transition hover:bg-black hover:scale-[1.02] active:scale-95">
+                          {uploadButtonLabel(uploadingKey, "sample", "Select PDF File")}
+                          <input type="file" accept="application/pdf" className="hidden" onChange={(event) => void handleSampleEvaluationUpload(event)} />
+                        </label>
+                        
+                        {form.details.sample_evaluation && (
+                          <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 pr-4 shadow-sm">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-100 text-red-600">
+                              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20"><path d="M4 18V4c0-1.1.9-2 2-2h5l5 5v11c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2z" /></svg>
+                            </div>
+                            <span className="text-sm font-bold text-slate-700">{form.details.sample_evaluation.file_name}</span>
+                            <button type="button" onClick={() => updateDetails("sample_evaluation", null)} className="ml-2 text-slate-400 hover:text-rose-600">
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <label className="inline-flex cursor-pointer rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-                    {uploadButtonLabel(uploadingKey, "sample", "Upload sample copy")}
-                    <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void handleSampleEvaluationUpload(event)} />
-                  </label>
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-bold text-slate-700">Introduction video link (optional)</label>
+                    <input value={form.details.intro_video_url || ""} onChange={(event) => updateDetails("intro_video_url", event.target.value)} className={INPUT_CLASS} placeholder="YouTube or Drive link" />
+                  </div>
+                </>
+              ) : null}
+
+              {/* --- Step Navigation Footer --- */}
+              <div className="mt-12 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-8 md:col-span-2">
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    disabled={stepIndex === 0}
+                    onClick={() => setStepIndex((current) => Math.max(0, current - 1))}
+                    className="inline-flex h-12 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-6 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveDraft()}
+                    disabled={savingDraft || submitting || roleApproved || rolePending}
+                    className="inline-flex h-12 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-6 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    {savingDraft ? "Saving..." : "Save Progress"}
+                  </button>
                 </div>
-                {form.details.sample_evaluation ? (
-                  <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700">
-                    {form.details.sample_evaluation.url ? <a href={form.details.sample_evaluation.url} target="_blank" rel="noreferrer" className="font-semibold hover:underline">{form.details.sample_evaluation.file_name}</a> : <span className="font-semibold">{form.details.sample_evaluation.file_name}</span>}
-                    <button type="button" onClick={() => updateDetails("sample_evaluation", null)} className="text-slate-400 hover:text-rose-600">Remove</button>
-                  </div>
-                ) : null}
+                
+                {stepIndex < stepLabels.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setStepIndex((current) => Math.min(stepLabels.length - 1, current + 1))}
+                    className="inline-flex h-12 items-center gap-2 rounded-2xl bg-blue-600 px-8 text-sm font-black text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 hover:shadow-xl active:scale-95"
+                  >
+                    Next Step
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={submitting || roleApproved}
+                    onClick={() => void submitApplication()}
+                    className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-900 px-10 text-sm font-black text-white shadow-xl transition hover:bg-black hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
+                  >
+                    {submitting ? "Submitting..." : "Complete Application"}
+                  </button>
+                )}
               </div>
-              <div className="md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700">Introduction video link</label>
-                <input value={form.details.intro_video_url || ""} onChange={(event) => updateDetails("intro_video_url", event.target.value)} className={INPUT_CLASS} placeholder="Short video URL explaining your evaluation approach" />
-              </div>
-              <div className="md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700">Additional note for reviewers</label>
-                <textarea value={form.about} onChange={(event) => setForm((current) => ({ ...current, about: event.target.value }))} className={TEXTAREA_CLASS} placeholder="Anything the moderator should know about your mentoring style, schedule, or review standards." />
-              </div>
-            </>
-          ) : null}
-
-        </div>
-
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
-          <div className="text-xs text-slate-500">
-            Step {stepIndex + 1} of {stepLabels.length}. Completed: {completedSteps.length}/{stepLabels.length}.
+            </div>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setStepIndex((current) => Math.max(0, current - 1))}
-              disabled={stepIndex === 0}
-              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-40"
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              onClick={() => void saveDraft()}
-              disabled={savingDraft || submitting || roleApproved || rolePending}
-              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-40"
-            >
-              {rolePending ? "Pending under review" : savingDraft ? "Saving draft..." : selectedRoleApplication?.status === "draft" ? "Update draft" : "Save draft"}
-            </button>
-            {stepIndex < stepLabels.length - 1 ? (
-              <button
-                type="button"
-                onClick={() => setStepIndex((current) => Math.min(stepLabels.length - 1, current + 1))}
-                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
-              >
-                Next step
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={submitting || roleApproved}
-                onClick={() => void submitApplication()}
-                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                {roleApproved
-                  ? `${roleConfig.label} already approved`
-                  : submitting
-                    ? "Submitting..."
-                    : selectedRoleApplication?.status === "pending"
-                      ? "Update pending request"
-                      : selectedRoleApplication?.status === "rejected"
-                        ? "Resubmit for review"
-                        : "Submit for review"}
-              </button>
-            )}
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 }

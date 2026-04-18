@@ -116,7 +116,9 @@ export default function DiscussionRoomView({
   }, [supabase]);
 
   const isAgoraRoom = Boolean(
-    context?.call_provider === "zoom_video_sdk" && context.agora_app_id && context.agora_channel,
+    (context?.call_provider === "agora" || context?.call_provider === "zoom_video_sdk") &&
+    context.agora_app_id &&
+    context.agora_channel,
   );
   const participantRole = context?.participant_role || (context?.sdk_role_type === 1 ? "host" : "listener");
   const isHost = participantRole === "host";

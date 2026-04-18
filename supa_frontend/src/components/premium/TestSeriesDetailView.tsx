@@ -111,8 +111,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
   const [expandedDiscussionKey, setExpandedDiscussionKey] = useState<string | null>(null);
   const autoBuyAttemptedRef = useRef(false);
 
-  const currentProfileId = profileId ? String(profileId) : "";
-  const isSeriesOwner = Boolean(currentProfileId && series?.provider_user_id === currentProfileId);
+  const isSeriesOwner = series?.creator_id === profileId;
   const canOpenManageView = Boolean(
     isAuthenticated
     && (
@@ -138,8 +137,7 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
       setSeries({
         ...seriesData,
         title: seriesData.name, // Adapter for 'name' -> 'title'
-        provider_user_id: seriesData.creator_id.toString(), // Adapter
-      } as any);
+      });
 
       // 2. Fetch Units and Steps
       const { data: unitsData, error: unitsError } = await supabase
@@ -318,9 +316,9 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
     try {
       const requiresOnlinePayment = !seriesIsFree && Number(series.price || 0) > 0;
       if (requiresOnlinePayment) {
-        const orderResponse = await premiumApi.post<TestSeriesPaymentOrder>(`/programs/${seriesId}/payment/order`, {
-          access_source: "self_service",
-          payment_method: "razorpay",
+        const orderResponse = await premiumApi.post<any>("/payments/create-order", {
+          item_type: "test_series",
+          item_id: seriesId,
         });
         const order = orderResponse.data;
         await loadRazorpayCheckout();
@@ -344,10 +342,11 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
           },
           handler: async (response: RazorpaySuccessResponse) => {
             try {
-              await premiumApi.post(`/programs/${seriesId}/payment/verify`, {
-                ...response,
-                access_source: "self_service",
-                payment_method: "razorpay",
+              await premiumApi.post("/payments/verify", {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                payment_record_id: order.payment_record_id,
               });
               toast.success("Series unlocked successfully");
               await loadBase();
@@ -372,7 +371,18 @@ export default function TestSeriesDetailView({ seriesId }: TestSeriesDetailViewP
         return;
       }
 
-      await premiumApi.post(`/programs/${seriesId}/enroll`, { access_source: "self_service" });
+      const supabase = createClient();
+      const { error: enrollError } = await supabase
+        .from("user_content_access")
+        .insert({
+          user_id: profileId,
+          access_type: "test_series",
+          test_series_id: seriesId,
+          is_active: true,
+          granted_at: new Date().toISOString(),
+        });
+
+      if (enrollError) throw enrollError;
       toast.success("Enrollment completed");
       await loadBase();
       if (typeof window !== "undefined" && isSafeMobileReturnUrl(returnToUrl)) {

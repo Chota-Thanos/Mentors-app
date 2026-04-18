@@ -23,8 +23,9 @@ import HistoryBackButton from "@/components/ui/HistoryBackButton";
 import RoleWorkspaceSidebar from "@/components/layouts/RoleWorkspaceSidebar";
 import { getQuizMasterWorkspaceSections } from "@/components/layouts/roleWorkspaceLinks";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { isAdminLike, isProviderLike } from "@/lib/accessControl";
-import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import type { TestSeries, TestSeriesEnrollment } from "@/types/premium";
 
 function toError(error: unknown): string {
@@ -115,13 +116,13 @@ function StatCard({
 
 export default function PrelimsSeriesPurchasesView({ seriesId }: { seriesId: number }) {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
+  const { profileId } = useProfile();
   const adminLike = useMemo(() => isAdminLike(user), [user]);
   const providerLike = useMemo(() => isProviderLike(user), [user]);
-  const currentUserId = String(user?.id || "").trim();
 
   const workspaceSections = useMemo(
-    () => getQuizMasterWorkspaceSections(currentUserId || undefined),
-    [currentUserId],
+    () => getQuizMasterWorkspaceSections(user?.id || undefined),
+    [user?.id],
   );
 
   const [busy, setBusy] = useState(true);
@@ -136,11 +137,19 @@ export default function PrelimsSeriesPurchasesView({ seriesId }: { seriesId: num
   const loadData = async () => {
     setBusy(true);
     try {
+      const supabase = createClient();
       const [seriesRes, enrollmentsRes] = await Promise.all([
-        premiumApi.get<TestSeries>(`/programs/${seriesId}`),
-        premiumApi.get<TestSeriesEnrollment[]>(`/programs/${seriesId}/enrollments`),
+        supabase.from("test_series").select("*").eq("id", seriesId).single(),
+        supabase.from("test_series_enrollments").select("*").eq("series_id", seriesId),
       ]);
-      setSeries(seriesRes.data);
+      
+      if (seriesRes.error) throw seriesRes.error;
+      
+      setSeries({
+        ...seriesRes.data,
+        title: seriesRes.data.name,
+      });
+      
       setEnrollments(Array.isArray(enrollmentsRes.data) ? enrollmentsRes.data : []);
     } catch (error: unknown) {
       toast.error("Failed to load purchases", { description: toError(error) });
@@ -164,9 +173,9 @@ export default function PrelimsSeriesPurchasesView({ seriesId }: { seriesId: num
   const canAccess = useMemo(() => {
     if (!series) return false;
     if (adminLike) return true;
-    if (!currentUserId) return false;
-    return providerLike && series.provider_user_id === currentUserId;
-  }, [series, adminLike, providerLike, currentUserId]);
+    if (!profileId) return false;
+    return providerLike && series.creator_id === profileId;
+  }, [series, adminLike, providerLike, profileId]);
 
   const stats = useMemo(() => {
     const total = enrollments.length;

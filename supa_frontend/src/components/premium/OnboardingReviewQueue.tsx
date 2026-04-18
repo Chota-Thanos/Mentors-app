@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { isAdminLike, isModeratorLike } from "@/lib/accessControl";
 import { createClient } from "@/lib/supabase/client";
 import { toNullableRichText } from "@/lib/richText";
@@ -20,8 +21,6 @@ import type {
 } from "@/types/premium";
 
 type StatusFilter = ProfessionalOnboardingStatus | "all";
-
-};
 
 function AssetChips({ assets }: { assets: ProfessionalOnboardingAsset[] }) {
   if (!assets.length) return <p className="text-xs text-slate-500">No files attached.</p>;
@@ -154,6 +153,7 @@ function ApplicationDetails({ row }: { row: ProfessionalOnboardingApplication })
 
 export default function OnboardingReviewQueue() {
   const { user, loading, isAuthenticated } = useAuth();
+  const { profileId } = useProfile();
   const canReview = useMemo(() => isAdminLike(user) || isModeratorLike(user), [user]);
   const [busy, setBusy] = useState(true);
   const [rows, setRows] = useState<ProfessionalOnboardingApplication[]>([]);
@@ -170,7 +170,8 @@ export default function OnboardingReviewQueue() {
     setBusy(true);
     try {
       const supabase = createClient();
-      let query = supabase.from("creator_applications").select("*, profiles(*)");
+      // Explicit join to resolve ambiguity between user_id and reviewed_by foreign keys
+      let query = supabase.from("creator_applications").select("*, profiles:profiles!creator_applications_user_id_fkey(*)");
       
       if (statusFilter !== "all") {
         query = query.eq("status", statusFilter);
@@ -201,9 +202,11 @@ export default function OnboardingReviewQueue() {
       }) as any[];
       
       setRows(mapped);
-    } catch (error: unknown) {
+    } catch (error: any) {
+      console.error("Onboarding queue fetch error:", error);
       setRows([]);
-      toast.error("Failed to load onboarding queue", { description: String(error) });
+      const msg = error?.message || String(error);
+      toast.error("Failed to load onboarding queue", { description: msg });
     } finally {
       setBusy(false);
     }
@@ -215,29 +218,45 @@ export default function OnboardingReviewQueue() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, isAuthenticated, canReview, statusFilter]);
 
-  const reviewApplication = async (applicationId: number, action: "approve" | "reject") => {
-    if (!user?.id) return;
+  const reviewApplication = async (applicationId: number, action: "approve" | "reject" | "request_changes") => {
+    if (!isAuthenticated || !profileId) return;
     setProcessingId(applicationId);
     try {
       const supabase = createClient();
-      const finalStatus = action === "approve" ? "approved" : "rejected";
-      const { error } = await supabase.from("creator_applications").update({
-        status: finalStatus,
-        reviewer_note: toNullableRichText(noteById[String(applicationId)] || ""),
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString()
-      }).eq("id", applicationId);
-      if (error) throw error;
-      
       if (action === "approve") {
-        const row = rows.find(r => r.id === applicationId);
-        if (row?.user_id && row?.desired_role) {
-          // Sync role to user profiles using RPC or just regular update since admin is here
-          await supabase.from("profiles").update({ role: row.desired_role }).eq("id", row.user_id);
+        const { data: rpcData, error: rpcError } = await supabase.rpc("approve_expert_application", {
+          target_app_id: applicationId,
+          target_reviewer_note: noteById[String(applicationId)] || ""
+        });
+
+        if (rpcError) {
+          console.error("Expert approval RPC failed:", rpcError);
+          toast.error(`Approval failed: ${rpcError.message}`);
+          return;
         }
+
+        toast.success(`Application approved! User role upgraded to ${rpcData?.new_role || "expert"}.`);
+      } else {
+        // Standard updates for rejection or change requests
+        const finalStatus = action === "request_changes" ? "rejected" : "rejected"; // request_changes logic remains same for now
+        const { error } = await supabase.from("creator_applications").update({
+          status: action === "request_changes" ? "pending" : "rejected", // Adjust based on flow
+          reviewer_note: toNullableRichText(noteById[String(applicationId)] || ""),
+          reviewed_by: profileId,
+          reviewed_at: new Date().toISOString()
+        }).eq("id", applicationId);
+
+        if (error) throw error;
+        toast.success(action === "request_changes" ? "Changes requested" : "Application rejected");
       }
 
-      toast.success(action === "approve" ? "Application approved" : "Application rejected");
+      toast.success(
+        action === "approve"
+          ? "Application approved"
+          : action === "request_changes"
+            ? "Changes requested from applicant"
+            : "Application rejected",
+      );
       setNoteById((prev) => ({ ...prev, [String(applicationId)]: "" }));
       await loadRows();
     } catch (error: unknown) {
@@ -327,10 +346,18 @@ export default function OnboardingReviewQueue() {
                     <button
                       type="button"
                       disabled={processingId === row.id}
+                      onClick={() => void reviewApplication(row.id, "request_changes")}
+                      className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 disabled:opacity-60"
+                    >
+                      Request Info
+                    </button>
+                    <button
+                      type="button"
+                      disabled={processingId === row.id}
                       onClick={() => void reviewApplication(row.id, "reject")}
                       className="rounded-md border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 disabled:opacity-60"
                     >
-                      Reject
+                      Hard Reject
                     </button>
                   </div>
                 </div>
@@ -338,10 +365,22 @@ export default function OnboardingReviewQueue() {
                 <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
                   <p>Reviewed by: {row.reviewer_user_id || "n/a"}</p>
                   <p>Reviewed at: {row.reviewed_at ? new Date(row.reviewed_at).toLocaleString() : "n/a"}</p>
+                  {row.status === "approved" && (
+                    <div className="mt-2 border-t border-slate-200 pt-2">
+                      <button
+                        type="button"
+                        disabled={processingId === row.id}
+                        onClick={() => void reviewApplication(row.id, "approve")}
+                        className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                      >
+                        {processingId === row.id ? "Syncing..." : "Sync Profile Role"}
+                      </button>
+                    </div>
+                  )}
                   {row.reviewer_note ? (
-                    <div className="mt-2">
-                      <p className="font-semibold uppercase tracking-wide text-slate-500">Note</p>
-                      <RichTextContent value={row.reviewer_note} className="mt-1 text-xs text-slate-700 [&_p]:my-1" />
+                    <div className="mt-2 border-t border-slate-100 pt-2">
+                      <p className="font-semibold uppercase tracking-wide text-slate-500 text-[10px]">Note</p>
+                      <RichTextContent value={row.reviewer_note} className="mt-1 text-xs text-slate-700" />
                     </div>
                   ) : null}
                 </div>

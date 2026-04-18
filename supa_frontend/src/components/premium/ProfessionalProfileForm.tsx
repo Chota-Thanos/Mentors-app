@@ -14,7 +14,7 @@ import {
   isModeratorLike,
   isProviderLike,
 } from "@/lib/accessControl";
-import { premiumApi } from "@/lib/premiumApi";
+import { createClient } from "@/lib/supabase/client";
 import { toNullableRichText } from "@/lib/richText";
 import { toDisplayRoleLabel } from "@/lib/roleLabels";
 import FormFieldShell from "@/components/ui/FormFieldShell";
@@ -168,9 +168,14 @@ export default function ProfessionalProfileForm() {
         return;
       }
       try {
-        const response = await premiumApi.get<PremiumExam[]>("/exams", { params: { active_only: true } });
-        if (!active) return;
-        setAvailableExams(Array.isArray(response.data) ? response.data : []);
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from("exams")
+          .select("id, name, is_active")
+          .eq("is_active", true);
+
+        if (error) throw error;
+        if (active) setAvailableExams(data || []);
       } catch (error: unknown) {
         if (active) {
           toast.error("Failed to load exams", { description: toError(error) });
@@ -198,10 +203,26 @@ export default function ProfessionalProfileForm() {
       }
       if (active) setBusy(true);
       try {
-        const response = await premiumApi.get<ProfessionalProfile>("/profiles/me");
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from("professional_profiles")
+          .select("*")
+          .eq("user_id", user?.id)
+          .single();
+
+        if (error && error.code !== "PGRST116") throw error;
         if (!active) return;
-        const profile = response.data as ProfessionalProfile & { professional_role?: string };
-        const normalizedRole = normalizeEditableRole(profile.professional_role || profile.role, defaultProfileRole);
+
+        if (!data) {
+          // No profile yet
+          setRole(defaultProfileRole);
+          setDisplayName(String(userEmail).split("@")[0] || "");
+          setDefaultCallProvider("zoom_video_sdk");
+          return;
+        }
+
+        const profile = data as any;
+        const normalizedRole = normalizeEditableRole(profile.role, defaultProfileRole);
         setRole(normalizedRole);
         setDisplayName(profile.display_name || "");
         setHeadline(profile.headline || "");
@@ -301,7 +322,7 @@ export default function ProfessionalProfileForm() {
     }
     setSaving(true);
     try {
-        const payload: ProfessionalProfilePayload = {
+      const payload: ProfessionalProfilePayload = {
         role,
         display_name: displayName.trim(),
         headline: headline.trim() || null,
@@ -337,7 +358,16 @@ export default function ProfessionalProfileForm() {
           sessions_completed: isMentorProfile && sessionsCompleted.trim() ? Number(sessionsCompleted) : null,
         },
       };
-      await premiumApi.put("/profiles/me", payload);
+      const supabase = createClient();
+      const { error: saveError } = await supabase
+        .from("professional_profiles")
+        .upsert({
+          ...payload,
+          user_id: user?.id,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "user_id" });
+
+      if (saveError) throw saveError;
       profilesApi.clearCache();
       toast.success("Professional profile saved");
     } catch (error: unknown) {
@@ -373,12 +403,11 @@ export default function ProfessionalProfileForm() {
   const inputClass = "w-full rounded-[18px] border border-[#dbcdf3] bg-white/95 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#4256d0] focus:ring-4 focus:ring-[#e1dcff]";
   const textareaClass = `${inputClass} min-h-[120px]`;
   const pillClass = (selected: boolean, tone: "indigo" | "mint" = "indigo") =>
-    `rounded-full border px-4 py-2 text-sm font-semibold transition ${
-      selected
-        ? tone === "mint"
-          ? "border-[#8fe3d5] bg-[#8feee0] text-[#0f6a60]"
-          : "border-[#3f53cd] bg-[#4459cf] text-white shadow-[0_12px_22px_-16px_rgba(68,89,207,0.8)]"
-        : "border-[#d9c9f4] bg-[#efe2ff] text-[#6b52a6]"
+    `rounded-full border px-4 py-2 text-sm font-semibold transition ${selected
+      ? tone === "mint"
+        ? "border-[#8fe3d5] bg-[#8feee0] text-[#0f6a60]"
+        : "border-[#3f53cd] bg-[#4459cf] text-white shadow-[0_12px_22px_-16px_rgba(68,89,207,0.8)]"
+      : "border-[#d9c9f4] bg-[#efe2ff] text-[#6b52a6]"
     }`;
 
   return (

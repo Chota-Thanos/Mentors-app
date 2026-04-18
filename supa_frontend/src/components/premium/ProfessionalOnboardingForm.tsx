@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { createClient } from "@/lib/supabase/client";
 import { toNullableRichText } from "@/lib/richText";
 import { toDisplayRoleLabel } from "@/lib/roleLabels";
@@ -64,7 +65,10 @@ function applicationStatusHint(application: ProfessionalOnboardingApplication): 
 }
 
 export default function ProfessionalOnboardingForm() {
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const { profileId, loading: profileLoading } = useProfile();
+  
+  const loading = authLoading || profileLoading;
   const [busy, setBusy] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [applications, setApplications] = useState<ProfessionalOnboardingApplication[]>([]);
@@ -93,7 +97,7 @@ export default function ProfessionalOnboardingForm() {
       const { data, error } = await supabase
         .from("creator_applications")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", profileId)
         .order("created_at", { ascending: false });
         
       if (error) throw error;
@@ -166,7 +170,7 @@ export default function ProfessionalOnboardingForm() {
     try {
       const supabase = createClient();
       const payload = {
-        user_id: user.id,
+        user_id: profileId,
         applied_roles: [desiredRole],
         full_name: safeName,
         bio: toNullableRichText(about) || null,

@@ -13,6 +13,8 @@ import HistoryBackButton from "@/components/ui/HistoryBackButton";
 import RichTextField from "@/components/ui/RichTextField";
 import { useAuth } from "@/context/AuthContext";
 import { isAdminLike, isMainsMentorLike, isQuizMasterLike } from "@/lib/accessControl";
+import { useProfile } from "@/context/ProfileContext";
+import { createClient } from "@/lib/supabase/client";
 import { premiumApi } from "@/lib/premiumApi";
 import { toNullableRichText } from "@/lib/richText";
 import type { PremiumExam, TestSeries, TestSeriesCreatePayload } from "@/types/premium";
@@ -69,6 +71,7 @@ function BuilderBlueprintCard({
 export default function CreateTestSeriesPage() {
     const router = useRouter();
     const { user, loading, isAuthenticated } = useAuth();
+    const { profileId } = useProfile();
     const currentUserId = String(user?.id || "").trim();
 
     const quizMasterLike = useMemo(() => isQuizMasterLike(user), [user]);
@@ -215,14 +218,27 @@ export default function CreateTestSeriesPage() {
         }
         setSavingSeries(true);
         try {
-            const payload: TestSeriesCreatePayload = {
-                ...seriesForm,
-                title,
-                description: toNullableRichText(seriesForm.description || ""),
-                exam_ids: selectedExamIds,
-            };
-            const response = await premiumApi.post<TestSeries>("/programs", payload);
-            const createdSeriesId = Number(response.data?.id || 0);
+            const supabase = createClient();
+            const { data, error } = await supabase
+                .from("test_series")
+                .insert({
+                    name: title,
+                    description: toNullableRichText(seriesForm.description || ""),
+                    series_kind: seriesForm.series_kind,
+                    access_type: seriesForm.access_type,
+                    cover_image_url: seriesForm.cover_image_url || null,
+                    price: seriesForm.price || 0,
+                    is_public: !!seriesForm.is_public,
+                    is_active: true,
+                    creator_id: profileId,
+                    exam_ids: selectedExamIds,
+                })
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            const createdSeriesId = Number(data?.id || 0);
             toast.success("Programs created successfully!");
             if (Number.isFinite(createdSeriesId) && createdSeriesId > 0) {
                 router.push(`/programs/${createdSeriesId}/manage`);
