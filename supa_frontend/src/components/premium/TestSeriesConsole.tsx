@@ -44,7 +44,7 @@ import type {
   TestSeries,
   TestSeriesCreatePayload,
   TestSeriesTest,
-  TestSeriesUpdatePayload,
+  UserMainsPerformanceQuestionRow,
   UserMainsPerformanceReport,
 } from "@/types/premium";
 
@@ -67,6 +67,132 @@ const emptySeriesForm: TestSeriesCreatePayload = {
   is_public: false,
   is_active: true,
   meta: {},
+};
+
+type SeriesDbRow = {
+  id?: number | string;
+  name?: string | null;
+  title?: string | null;
+  description?: string | null;
+  cover_image_url?: string | null;
+  series_kind?: string | null;
+  access_type?: string | null;
+  is_paid?: boolean | null;
+  is_subscription?: boolean | null;
+  price?: number | string | null;
+  is_public?: boolean | null;
+  is_active?: boolean | null;
+  creator_id?: number | string | null;
+  meta?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  test_count?: number | string | null;
+};
+
+type SeriesExamLinkRow = {
+  test_series_id?: number | string;
+  exam_id?: number | string;
+};
+
+type ProgramUnitCollectionRow = {
+  id?: number | string;
+  name?: string | null;
+  description?: string | null;
+  collection_type?: string | null;
+  image_url?: string | null;
+  is_paid?: boolean | null;
+  is_public?: boolean | null;
+  is_subscription?: boolean | null;
+  price?: number | string | null;
+  is_finalized?: boolean | null;
+  is_active?: boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type ProgramUnitStepRow = {
+  id?: number | string;
+  unit_id?: number | string | null;
+  step_type?: string | null;
+  title?: string | null;
+  description?: string | null;
+  collection_id?: number | string | null;
+  display_order?: number | string | null;
+  is_active?: boolean | null;
+  meta?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  collection?: ProgramUnitCollectionRow | null;
+};
+
+type ProgramUnitRow = {
+  id?: number | string;
+  series_id?: number | string | null;
+  title?: string | null;
+  description?: string | null;
+  display_order?: number | string | null;
+  is_active?: boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  steps?: ProgramUnitStepRow[] | null;
+};
+
+type MainsSubmissionRow = {
+  id?: number | string;
+  series_id?: number | string | null;
+  unit_step_id?: number | string | null;
+  collection_id?: number | string | null;
+  test_collection_id?: number | string | null;
+  status?: string | null;
+  total_marks?: number | string | null;
+  submitted_at?: string | null;
+  checked_copy_pdf_url?: string | null;
+  unit_step?: {
+    title?: string | null;
+    collection_id?: number | string | null;
+  } | null;
+};
+
+const normalizeSeriesKindForUi = (value: unknown): TestSeries["series_kind"] => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "prelims" || raw === "quiz") return "quiz";
+  if (raw === "mains" || raw === "hybrid") return raw as TestSeries["series_kind"];
+  return "quiz";
+};
+
+const normalizeAccessTypeForUi = (row: SeriesDbRow): TestSeries["access_type"] => {
+  const rawAccessType = String(row.access_type || "").trim().toLowerCase();
+  if (rawAccessType === "free" || rawAccessType === "subscription" || rawAccessType === "paid") {
+    return rawAccessType as TestSeries["access_type"];
+  }
+  if (row.is_paid) return "paid";
+  if (row.is_subscription) return "subscription";
+  return "free";
+};
+
+const normalizeSeriesRow = (row: SeriesDbRow, examIds: number[]): TestSeries => ({
+  id: Number(row.id || 0),
+  title: String(row.name || row.title || ""),
+  description: row.description ?? null,
+  cover_image_url: row.cover_image_url ?? null,
+  creator_id: Number(row.creator_id || 0),
+  series_kind: normalizeSeriesKindForUi(row.series_kind),
+  access_type: normalizeAccessTypeForUi(row),
+  price: Number(row.price || 0),
+  is_public: Boolean(row.is_public),
+  is_active: Boolean(row.is_active),
+  meta: row.meta || {},
+  exam_ids: examIds,
+  test_count: Number(row.test_count || 0),
+  created_at: String(row.created_at || new Date().toISOString()),
+  updated_at: row.updated_at ?? null,
+});
+
+const normalizeSeriesKindForDb = (value: unknown): "prelims" | "mains" | "hybrid" => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "quiz" || raw === "prelims") return "prelims";
+  if (raw === "mains" || raw === "hybrid") return raw as "mains" | "hybrid";
+  return "prelims";
 };
 
 export default function TestSeriesConsole() {
@@ -159,32 +285,47 @@ export default function TestSeriesConsole() {
     setSeriesLoading(true);
     try {
       const supabase = createClient();
-      
-      // 1. Fetch programs
-      let query = supabase.from("test_series").select("*");
-      
+      let query = supabase
+        .from("test_series")
+        .select("id, name, description, cover_image_url, series_kind, is_paid, is_public, is_subscription, price, is_active, creator_id, created_at, updated_at");
+
       if (mode === "provider") {
         if (!adminLike && !moderatorLike) {
           // Quiz Masters only see their own series
           query = query.eq("creator_id", profileId);
         }
-        // Operators see everything else as well if adminLike/moderatorLike
       } else {
-        // Public explore mode
         query = query.eq("is_public", true).eq("is_active", true);
       }
-      
+
       const { data, error } = await query.order("created_at", { ascending: false });
       if (error) throw error;
-      
-      const rows = (data || []).map(row => ({
-        ...row,
-        test_count: 0 // Will be populated by loadSeriesTests or computed
-      })) as TestSeries[];
+
+      const seriesRowsRaw = Array.isArray(data) ? (data as SeriesDbRow[]) : [];
+      const seriesIds = seriesRowsRaw
+        .map((row) => Number(row.id || 0))
+        .filter((id: number) => Number.isFinite(id) && id > 0);
+      const examLinks = seriesIds.length > 0
+        ? await supabase
+          .from("test_series_exams")
+          .select("test_series_id, exam_id")
+          .in("test_series_id", seriesIds)
+        : { data: [] as SeriesExamLinkRow[] };
+      const examMap = new Map<number, number[]>();
+      for (const link of (examLinks.data || []) as SeriesExamLinkRow[]) {
+        const seriesId = Number(link.test_series_id || 0);
+        const examId = Number(link.exam_id || 0);
+        if (!Number.isFinite(seriesId) || seriesId <= 0 || !Number.isFinite(examId) || examId <= 0) continue;
+        const current = examMap.get(seriesId) || [];
+        current.push(examId);
+        examMap.set(seriesId, current);
+      }
+
+      const rows = seriesRowsRaw.map((row) => normalizeSeriesRow(row, examMap.get(Number(row.id || 0)) || []));
       
       const scopedRows = rows.filter((row) => {
         const rawSeriesKind = String(row.series_kind || "").trim().toLowerCase();
-        const seriesKind = rawSeriesKind === "prelims" ? "quiz" : rawSeriesKind;
+        const seriesKind = rawSeriesKind === "prelims" || rawSeriesKind === "quiz" ? "quiz" : rawSeriesKind;
         if (canBuildPrelimsSeries && !canBuildMainsSeries) return seriesKind !== "mains";
         if (canBuildMainsSeries && !canBuildPrelimsSeries) return seriesKind !== "quiz";
         return true;
@@ -231,17 +372,81 @@ export default function TestSeriesConsole() {
   const loadSeriesTests = async (seriesId: number) => {
     try {
       const supabase = createClient();
-      let query = supabase.from("test_series_tests").select("*").eq("series_id", seriesId);
-      
-      if (mode !== "provider") {
-        query = query.eq("status", "published");
-      }
-      
-      const { data, error } = await query.order("ordering_index");
+      const { data, error } = await supabase
+        .from("program_units")
+        .select(`
+          id,
+          series_id,
+          title,
+          description,
+          display_order,
+          is_active,
+          created_at,
+          updated_at,
+          steps:program_unit_steps (
+            id,
+            unit_id,
+            step_type,
+            title,
+            description,
+            collection_id,
+            display_order,
+            is_active,
+            meta,
+            created_at,
+            updated_at,
+            collection:premium_collections (
+              id,
+              name,
+              description,
+              collection_type,
+              image_url,
+              is_paid,
+              is_public,
+              is_subscription,
+              price,
+              is_finalized,
+              is_active,
+              created_at,
+              updated_at
+            )
+          )
+        `)
+        .eq("series_id", seriesId)
+        .order("display_order", { ascending: true });
       if (error) throw error;
-      
-      const rows = Array.isArray(data) ? data : [];
+
+      const rows: TestSeriesTest[] = [];
+      for (const unit of (Array.isArray(data) ? data : []) as ProgramUnitRow[]) {
+        const unitOrder = Number(unit.display_order || 0);
+        for (const step of (Array.isArray(unit.steps) ? unit.steps : []) as ProgramUnitStepRow[]) {
+          if (step.step_type !== "test" || !step.collection) continue;
+          const collection = step.collection;
+          rows.push({
+            id: Number(collection.id || 0),
+            series_id: seriesId,
+            title: String(step.title || collection.name || "Test"),
+            description: step.description || collection.description || null,
+            test_kind: String(collection.collection_type || "").toLowerCase() === "mains" ? "mains" : "prelims",
+            test_label: String(collection.collection_type || "prelims").toUpperCase(),
+            thumbnail_url: collection.image_url || null,
+            is_public: Boolean(collection.is_public),
+            is_premium: Boolean(collection.is_paid || collection.is_subscription),
+            price: Number(collection.price || 0),
+            is_finalized: Boolean(collection.is_finalized),
+            is_active: Boolean(step.is_active && collection.is_active),
+            series_order: unitOrder * 1000 + Number(step.display_order || 0),
+            question_count: 0,
+            meta: step.meta || {},
+            exam_ids: [],
+            created_at: String(step.created_at || collection.created_at || new Date().toISOString()),
+            updated_at: step.updated_at ?? null,
+          });
+        }
+      }
+      rows.sort((left, right) => left.series_order - right.series_order);
       setSeriesTestsById((prev) => ({ ...prev, [String(seriesId)]: rows }));
+      setSeriesRows((prev) => prev.map((row) => (row.id === seriesId ? { ...row, test_count: rows.length } : row)));
     } catch (error: unknown) {
       console.error("Failed to load tests:", error);
       setSeriesTestsById((prev) => ({ ...prev, [String(seriesId)]: [] }));
@@ -269,7 +474,7 @@ export default function TestSeriesConsole() {
         series_count: seriesRes.count || 0,
         test_count: seriesRows.reduce((acc, curr) => acc + (curr.test_count || 0), 0),
         active_enrollments: enrollmentsRes.count || 0,
-        pending_copy_checks: 0, // Placeholder - need to load from mains_copy_submissions
+        pending_copy_checks: 0, // Placeholder - can be loaded from mains_test_copy_submissions if needed
         mentorship_pending_requests: mentorshipRes.count || 0,
         upcoming_slots: slotsRes.count || 0
       });
@@ -291,11 +496,11 @@ export default function TestSeriesConsole() {
       const [seriesRes, activeSeriesRes, testsRes, activeTestsRes, enrollmentsRes, copiesRes, pendingCopiesRes, mentorshipRes, pendingMentorshipRes] = await Promise.all([
         supabase.from("test_series").select("id", { count: "exact", head: true }),
         supabase.from("test_series").select("id", { count: "exact", head: true }).eq("is_active", true),
-        supabase.from("test_series_tests").select("id", { count: "exact", head: true }),
-        supabase.from("test_series_tests").select("id", { count: "exact", head: true }).eq("status", "published"),
+        supabase.from("program_unit_steps").select("id", { count: "exact", head: true }).eq("step_type", "test"),
+        supabase.from("program_unit_steps").select("id", { count: "exact", head: true }).eq("step_type", "test").eq("is_active", true),
         supabase.from("test_series_enrollments").select("id", { count: "exact", head: true }),
-        supabase.from("mains_copy_submissions").select("id", { count: "exact", head: true }),
-        supabase.from("mains_copy_submissions").select("id", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("mains_test_copy_submissions").select("id", { count: "exact", head: true }),
+        supabase.from("mains_test_copy_submissions").select("id", { count: "exact", head: true }).in("status", ["submitted", "under_review"]),
         supabase.from("mentorship_requests").select("id", { count: "exact", head: true }),
         supabase.from("mentorship_requests").select("id", { count: "exact", head: true }).eq("status", "requested"),
       ]);
@@ -386,37 +591,43 @@ export default function TestSeriesConsole() {
     try {
       const supabase = createClient();
       const { data, error } = await supabase
-        .from("mains_copy_submissions")
+        .from("mains_test_copy_submissions")
         .select(`
-          id,
-          test_collection_id,
-          status,
-          total_marks,
-          submitted_at,
-          test:test_series_tests!test_collection_id (
-            title
+          *,
+          unit_step:program_unit_steps!unit_step_id (
+            id,
+            title,
+            collection_id
           )
         `)
         .eq("user_id", profileId);
       
       if (error) throw error;
-      
-      const checked = (data || []).filter(s => s.status === "checked" || s.status === "evaluated");
-      const totalMarks = checked.reduce((acc, s) => acc + (s.total_marks || 0), 0);
+
+      const submissions = (Array.isArray(data) ? (data as MainsSubmissionRow[]) : []).map((row) => ({
+        submission: normalizeMainsCopySubmission({
+          ...row,
+          collection_id: row.unit_step?.collection_id ?? row.collection_id ?? row.test_collection_id ?? null,
+        }),
+        testTitle: String(row.unit_step?.title || "Test"),
+        testCollectionId: Number(row.unit_step?.collection_id || row.collection_id || row.test_collection_id || 0),
+      }));
+      const checked = submissions.filter((row) => row.submission.status === "checked");
+      const totalMarks = checked.reduce((acc, row) => acc + Number(row.submission.total_marks || 0), 0);
       
       setPerformanceReport({
-        total_submissions: data?.length || 0,
+        total_submissions: submissions.length,
         checked_submissions: checked.length,
         average_provider_marks: checked.length > 0 ? totalMarks / checked.length : 0,
         average_ai_score: 0,
-        questions: checked.map(s => ({
-          submission_id: Number(s.id),
-          test_collection_id: Number(s.test_collection_id),
-          test_title: (s as any).test?.title || "Test",
-          marks_awarded: Number(s.total_marks || 0),
+        questions: checked.map((row): UserMainsPerformanceQuestionRow => ({
+          submission_id: Number(row.submission.id),
+          test_collection_id: Number(row.testCollectionId),
+          test_title: row.testTitle,
+          marks_awarded: Number(row.submission.total_marks || 0),
           max_marks: 0,
-          submitted_at: s.submitted_at,
-        })) as any,
+          submitted_at: row.submission.submitted_at,
+        })),
       });
     } catch (error: unknown) {
       setPerformanceReport(null);
@@ -486,37 +697,51 @@ export default function TestSeriesConsole() {
     }
     setSavingSeries(true);
     try {
+      const supabase = createClient();
+      const selectedAccessType = String(seriesForm.access_type || "subscription").trim().toLowerCase();
+      const seriesPrice = selectedAccessType === "free" ? 0 : Number(seriesForm.price || 0);
+      const basePayload = {
+        name: title,
+        description: toNullableRichText(seriesForm.description || ""),
+        cover_image_url: seriesForm.cover_image_url || null,
+        series_kind: normalizeSeriesKindForDb(selectedKind),
+        is_paid: selectedAccessType === "paid",
+        is_subscription: selectedAccessType === "subscription",
+        price: seriesPrice,
+        is_public: !!seriesForm.is_public,
+        is_active: !!seriesForm.is_active,
+        creator_id: profileId,
+      };
+
       if (editingSeriesId) {
-        const payload: TestSeriesUpdatePayload = {
-          ...seriesForm,
-          title,
-          description: toNullableRichText(seriesForm.description || ""),
-          exam_ids: Array.isArray(seriesForm.exam_ids) ? seriesForm.exam_ids : [],
-        };
-        const supabase = createClient();
         const { error: updateError } = await supabase
           .from("test_series")
-          .update(payload)
+          .update(basePayload)
           .eq("id", editingSeriesId);
         if (updateError) throw updateError;
+        const currentExamIds = Array.isArray(seriesForm.exam_ids) ? seriesForm.exam_ids : [];
+        await supabase.from("test_series_exams").delete().eq("test_series_id", editingSeriesId);
+        if (currentExamIds.length > 0) {
+          const { error: examLinkError } = await supabase.from("test_series_exams").insert(
+            currentExamIds.map((exam_id) => ({ test_series_id: editingSeriesId, exam_id })),
+          );
+          if (examLinkError) throw examLinkError;
+        }
         toast.success("Series updated");
       } else {
-        const payload: TestSeriesCreatePayload = {
-          ...seriesForm,
-          title,
-          description: toNullableRichText(seriesForm.description || ""),
-          exam_ids: Array.isArray(seriesForm.exam_ids) ? seriesForm.exam_ids : [],
-        };
-        const supabase = createClient();
         const { data: createData, error: createError } = await supabase
           .from("test_series")
-          .insert({
-            ...payload,
-            creator_id: profileId,
-          })
+          .insert(basePayload)
           .select()
           .single();
         if (createError) throw createError;
+        const currentExamIds = Array.isArray(seriesForm.exam_ids) ? seriesForm.exam_ids : [];
+        if (Number(createData?.id || 0) > 0 && currentExamIds.length > 0) {
+          const { error: examLinkError } = await supabase.from("test_series_exams").insert(
+            currentExamIds.map((exam_id) => ({ test_series_id: Number(createData.id), exam_id })),
+          );
+          if (examLinkError) throw examLinkError;
+        }
         if (createData?.id) {
           setSelectedSeriesId(createData.id);
         }
@@ -559,23 +784,36 @@ export default function TestSeriesConsole() {
     }
   };
 
-  const loadCopySubmissions = async (testId: number) => {
+  const loadCopySubmissions = async (seriesId: number, testCollectionId: number) => {
     try {
       const supabase = createClient();
       const { data, error } = await supabase
-        .from("mains_copy_submissions")
-        .select("*")
-        .eq("test_collection_id", testId)
+        .from("mains_test_copy_submissions")
+        .select(`
+          *,
+          unit_step:program_unit_steps!unit_step_id (
+            id,
+            title,
+            collection_id
+          )
+        `)
+        .eq("series_id", seriesId)
         .order("submitted_at", { ascending: false });
       
       if (error) throw error;
+      const rows = (Array.isArray(data) ? (data as MainsSubmissionRow[]) : [])
+        .filter((row) => Number(row.unit_step?.collection_id || row.collection_id || row.test_collection_id || 0) === testCollectionId)
+        .map((row) => normalizeMainsCopySubmission({
+          ...row,
+          collection_id: row.unit_step?.collection_id ?? row.collection_id ?? row.test_collection_id ?? null,
+        }));
       setCopySubmissionsByTest((prev) => ({
         ...prev,
-        [String(testId)]: (data || []).map(normalizeMainsCopySubmission),
+        [String(testCollectionId)]: rows,
       }));
     } catch (error: unknown) {
       toast.error("Failed to load submissions", { description: toError(error) });
-      setCopySubmissionsByTest((prev) => ({ ...prev, [String(testId)]: [] }));
+      setCopySubmissionsByTest((prev) => ({ ...prev, [String(testCollectionId)]: [] }));
     }
   };
 
@@ -984,7 +1222,7 @@ export default function TestSeriesConsole() {
                             <div className="mt-2 space-y-2">
                               <p className="text-xs text-[#636b86] dark:text-gray-300">Use the main test page to submit a full answer PDF or question-wise answer photos. That same page now runs the full evaluation and mentorship flow.</p>
                               <div className="flex flex-wrap gap-2">
-                                <button type="button" onClick={() => void loadCopySubmissions(test.id)} className="rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2 py-1 text-xs">Refresh Submissions</button>
+                                <button type="button" onClick={() => void loadCopySubmissions(series.id, test.id)} className="rounded border border-[#c9d6fb] dark:border-[#2a3c6b] bg-white dark:bg-[#0b1120] px-2 py-1 text-xs">Refresh Submissions</button>
                               </div>
                               {submissions.map((submission) => (
                                 <div key={submission.id} className="rounded border border-[#dce3fb] dark:border-[#1e2a4a] bg-white dark:bg-[#0b1120] px-2 py-1 text-xs">

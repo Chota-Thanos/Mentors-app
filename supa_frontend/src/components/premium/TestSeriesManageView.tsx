@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowUpRight, BookOpen, CalendarDays, ClipboardCheck, FileQuestion, FileText, LayoutList, LineChart, Loader2, MessageSquareWarning, PencilLine, PlayCircle, Plus, RefreshCcw, Trash2, Users, Video } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,7 +29,6 @@ import type {
   TestSeriesEnrollment,
   TestSeriesProgramItem,
   TestSeriesProgramItemCreatePayload,
-  TestSeriesProgramItemUpdatePayload,
   TestSeriesTest,
   TestSeriesTestCreatePayload,
   TestSeriesUpdatePayload,
@@ -168,6 +168,8 @@ const emptyProgramItemForm: TestSeriesProgramItemCreatePayload = {
 };
 
 export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading, isAuthenticated } = useAuth();
   const { profileId } = useProfile();
   const providerLike = useMemo(() => isProviderLike(user), [user]);
@@ -215,6 +217,10 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
   const [programItemModalOpen, setProgramItemModalOpen] = useState(false);
   const [savingTest, setSavingTest] = useState(false);
   const [savingProgramItem, setSavingProgramItem] = useState(false);
+
+  const manageHref = `/programs/${seriesId}/manage`;
+  const createTestHref = `${manageHref}?modal=test`;
+  const createProgramItemHref = `${manageHref}?modal=resource`;
 
   const canEditSeriesStructure = useMemo(() => {
     if (!series) return false;
@@ -329,19 +335,6 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
       }),
     [orderedTests, programItems],
   );
-
-  const loadTestSubmissions = async (testId: number): Promise<MainsCopySubmission[]> => {
-    try {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("mains_test_copy_submissions")
-        .select("*")
-        .eq("collection_id", testId);
-      return (data || []).map(row => ({ ...row, user_id: String(row.user_id) })) as any;
-    } catch {
-      return [];
-    }
-  };
 
   const loadPage = async () => {
     setBusy(true);
@@ -692,6 +685,29 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
     [testForm.exam_ids],
   );
 
+  const modalAction = searchParams.get("modal") || "";
+
+  useEffect(() => {
+    if (modalAction === "test" && canUseTestBuilder) {
+      setEditingTestId(null);
+      setTestForm({
+        ...emptyTestForm,
+        test_kind: allowedTestKindOptions[0]?.value || "prelims",
+        exam_ids: Array.isArray(series?.exam_ids) ? series.exam_ids : [],
+      });
+      setTestModalOpen(true);
+      return;
+    }
+    if (modalAction === "resource") {
+      setEditingProgramItemId(null);
+      setProgramItemForm(emptyProgramItemForm);
+      setProgramItemModalOpen(true);
+      return;
+    }
+    setTestModalOpen(false);
+    setProgramItemModalOpen(false);
+  }, [allowedTestKindOptions, canUseTestBuilder, modalAction, series?.exam_ids]);
+
   const toggleMentorId = (mentorId: string) => {
     const current = parseMentorIds(mentorUserIdsText);
     const next = current.includes(mentorId)
@@ -855,7 +871,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
       toast.success(editingTestId ? "Test updated" : "Test created");
       setEditingTestId(null);
       setTestForm(emptyTestForm);
-      setTestModalOpen(false);
+      closeTestModal();
       await loadPage();
     } catch (error: unknown) {
       toast.error("Failed to save test", { description: toError(error) });
@@ -908,7 +924,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
       }
       setEditingProgramItemId(null);
       setProgramItemForm(emptyProgramItemForm);
-      setProgramItemModalOpen(false);
+      closeProgramItemModal();
       await loadPage();
     } catch (error: unknown) {
       toast.error("Failed to save program item", { description: toError(error) });
@@ -934,25 +950,19 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
     });
   };
 
-  const openCreateTestModal = () => {
-    setEditingTestId(null);
-    setTestForm({
-      ...emptyTestForm,
-      test_kind: allowedTestKindOptions[0]?.value || "prelims",
-      exam_ids: Array.isArray(series?.exam_ids) ? series.exam_ids : [],
-    });
-    setTestModalOpen(true);
-  };
-
   const openEditTestModal = (test: TestSeriesTest) => {
     editTest(test);
     setTestModalOpen(true);
   };
 
-  const openCreateProgramItemModal = () => {
-    setEditingProgramItemId(null);
-    setProgramItemForm(emptyProgramItemForm);
-    setProgramItemModalOpen(true);
+  const closeTestModal = () => {
+    setTestModalOpen(false);
+    router.replace(manageHref);
+  };
+
+  const closeProgramItemModal = () => {
+    setProgramItemModalOpen(false);
+    router.replace(manageHref);
   };
 
   const openEditProgramItemModal = (item: TestSeriesProgramItem) => {
@@ -1062,7 +1072,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
             <div className="flex w-full max-w-lg max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl">
               <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
                 <h3 className="text-xl font-black tracking-tight text-slate-900">{editingTestId ? "Edit Test" : "Create New Test"}</h3>
-                <button type="button" onClick={() => setTestModalOpen(false)} className="rounded-full bg-slate-100 p-2 text-slate-500 hover:bg-slate-200">
+                <button type="button" onClick={closeTestModal} className="rounded-full bg-slate-100 p-2 text-slate-500 hover:bg-slate-200">
                   <Plus className="h-5 w-5 rotate-45" />
                 </button>
               </div>
@@ -1152,7 +1162,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
                 />
               </div>
               <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-100 bg-slate-50/50 px-6 py-4">
-                <button type="button" onClick={() => setTestModalOpen(false)} className="rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                <button type="button" onClick={closeTestModal} className="rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                   Cancel
                 </button>
                 <button type="button" onClick={() => void saveTest()} disabled={savingTest} className="inline-flex items-center gap-2 rounded-2xl bg-indigo-950 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-900 disabled:opacity-70">
@@ -1171,7 +1181,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
             <div className="flex w-full max-w-lg max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl">
                 <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
                     <h3 className="text-xl font-black tracking-tight text-slate-900">{editingProgramItemId ? "Edit Resource" : "Add PDF / Lecture"}</h3>
-                    <button type="button" onClick={() => setProgramItemModalOpen(false)} className="rounded-full bg-slate-100 p-2 text-slate-500 hover:bg-slate-200">
+                    <button type="button" onClick={closeProgramItemModal} className="rounded-full bg-slate-100 p-2 text-slate-500 hover:bg-slate-200">
                         <Plus className="h-5 w-5 rotate-45" />
                     </button>
                 </div>
@@ -1249,7 +1259,7 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
                     </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-100 bg-slate-50/50 px-6 py-4">
-                    <button type="button" onClick={() => setProgramItemModalOpen(false)} className="rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+                    <button type="button" onClick={closeProgramItemModal} className="rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
                     <button type="button" onClick={() => void saveProgramItem()} disabled={savingProgramItem} className="inline-flex items-center gap-2 rounded-2xl bg-indigo-950 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-900 disabled:opacity-70">
                         {savingProgramItem ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                         {editingProgramItemId ? "Update Resource" : "Create Resource"}
@@ -1338,23 +1348,33 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
                 Edit Program {seriesSetupStep === 1 ? "(Active)" : ""}
               </button>
               <div className="h-8 w-px bg-slate-200" />
-              <button
-                type="button"
-                onClick={openCreateTestModal}
-                disabled={!canUseTestBuilder}
-                className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-indigo-500 hover:shadow-md hover:shadow-indigo-500/20 disabled:translate-y-0 disabled:opacity-60"
-              >
-                <Plus className="h-4 w-4" />
-                Add Test
-              </button>
-              <button
-                type="button"
-                onClick={openCreateProgramItemModal}
+              {canUseTestBuilder ? (
+                <Link
+                  href={createTestHref}
+                  scroll={false}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-indigo-500 hover:shadow-md hover:shadow-indigo-500/20"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Test
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-all disabled:translate-y-0 disabled:opacity-60"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Test
+                </button>
+              )}
+              <Link
+                href={createProgramItemHref}
+                scroll={false}
                 className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-50"
               >
                 <Plus className="h-4 w-4" />
                 Add PDF / Lecture
-              </button>
+              </Link>
               <div className="flex-1" />
               <button
                 type="button"
@@ -1676,23 +1696,33 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
                     <p className="mt-4 text-lg font-bold text-slate-900">It&apos;s a blank canvas</p>
                     <p className="mt-2 text-sm text-slate-500 max-w-sm mx-auto">Start building your curriculum timeline by creating an outline of tests, materials, and lectures.</p>
                     <div className="mt-8 flex flex-wrap justify-center gap-3">
-                      <button
-                        type="button"
-                        onClick={openCreateTestModal}
-                        disabled={!canUseTestBuilder}
-                        className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 transition shadow-sm disabled:opacity-60"
-                      >
-                        <Plus className="h-4 w-4" />
-                        Add First Mock
-                      </button>
-                      <button
-                        type="button"
-                        onClick={openCreateProgramItemModal}
+                      {canUseTestBuilder ? (
+                        <Link
+                          href={createTestHref}
+                          scroll={false}
+                          className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 transition shadow-sm"
+                        >
+                          <Plus className="h-4 w-4" />
+                          Add First Mock
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition shadow-sm disabled:opacity-60"
+                        >
+                          <Plus className="h-4 w-4" />
+                          Add First Mock
+                        </button>
+                      )}
+                      <Link
+                        href={createProgramItemHref}
+                        scroll={false}
                         className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
                       >
                         <Plus className="h-4 w-4" />
                         Add Handout
-                      </button>
+                      </Link>
                     </div>
                   </div>
                 ) : null}
@@ -1964,12 +1994,26 @@ export default function TestSeriesManageView({ seriesId }: TestSeriesManageViewP
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" disabled={!canUseTestBuilder} onClick={openCreateTestModal} className="rounded-full bg-[#091a4a] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
-                    Add Test
-                  </button>
-                  <button type="button" onClick={openCreateProgramItemModal} className="rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700">
+                  {canUseTestBuilder ? (
+                    <Link
+                      href={createTestHref}
+                      scroll={false}
+                      className="rounded-full bg-[#091a4a] px-4 py-2.5 text-sm font-semibold text-white"
+                    >
+                      Add Test
+                    </Link>
+                  ) : (
+                    <button type="button" disabled className="rounded-full bg-[#091a4a] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+                      Add Test
+                    </button>
+                  )}
+                  <Link
+                    href={createProgramItemHref}
+                    scroll={false}
+                    className="rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700"
+                  >
                     Add PDF / Lecture
-                  </button>
+                  </Link>
                 </div>
               </div>
               <div className="mt-8 relative max-w-4xl">

@@ -17,7 +17,7 @@ import { useProfile } from "@/context/ProfileContext";
 import { createClient } from "@/lib/supabase/client";
 import { premiumApi } from "@/lib/premiumApi";
 import { toNullableRichText } from "@/lib/richText";
-import type { PremiumExam, TestSeries, TestSeriesCreatePayload } from "@/types/premium";
+import type { PremiumExam, TestSeriesCreatePayload } from "@/types/premium";
 
 const emptySeriesForm: TestSeriesCreatePayload = {
     title: "",
@@ -211,27 +211,33 @@ export default function CreateTestSeriesPage() {
             toast.error("Series title is required");
             return;
         }
-        const selectedKind = String(seriesForm.series_kind || "").trim().toLowerCase();
-        if (!seriesKindOptions.some((option) => option.value === selectedKind)) {
-            toast.error("Selected series kind is not allowed for your role.");
-            return;
-        }
-        setSavingSeries(true);
-        try {
+    const selectedKind = String(seriesForm.series_kind || "").trim().toLowerCase();
+    if (!seriesKindOptions.some((option) => option.value === selectedKind)) {
+        toast.error("Selected series kind is not allowed for your role.");
+        return;
+    }
+    const selectedAccessType = String(seriesForm.access_type || "subscription").trim().toLowerCase();
+    const dbSeriesKind =
+        selectedKind === "quiz" || selectedKind === "prelims"
+            ? "prelims"
+            : (selectedKind as "mains" | "hybrid");
+    const seriesPrice = selectedAccessType === "free" ? 0 : Number(seriesForm.price || 0);
+    setSavingSeries(true);
+    try {
             const supabase = createClient();
             const { data, error } = await supabase
                 .from("test_series")
                 .insert({
                     name: title,
                     description: toNullableRichText(seriesForm.description || ""),
-                    series_kind: seriesForm.series_kind,
-                    access_type: seriesForm.access_type,
+                    series_kind: dbSeriesKind,
+                    is_paid: selectedAccessType === "paid",
+                    is_subscription: selectedAccessType === "subscription",
                     cover_image_url: seriesForm.cover_image_url || null,
-                    price: seriesForm.price || 0,
+                    price: seriesPrice,
                     is_public: !!seriesForm.is_public,
                     is_active: true,
                     creator_id: profileId,
-                    exam_ids: selectedExamIds,
                 })
                 .select()
                 .single();
@@ -239,6 +245,15 @@ export default function CreateTestSeriesPage() {
             if (error) throw error;
 
             const createdSeriesId = Number(data?.id || 0);
+            if (Number.isFinite(createdSeriesId) && createdSeriesId > 0 && selectedExamIds.length > 0) {
+                const { error: examLinkError } = await supabase
+                    .from("test_series_exams")
+                    .insert(selectedExamIds.map((examId) => ({
+                        test_series_id: createdSeriesId,
+                        exam_id: examId,
+                    })));
+                if (examLinkError) throw examLinkError;
+            }
             toast.success("Programs created successfully!");
             if (Number.isFinite(createdSeriesId) && createdSeriesId > 0) {
                 router.push(`/programs/${createdSeriesId}/manage`);
