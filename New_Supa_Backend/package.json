@@ -1,0 +1,15 @@
+{
+  "name": "new_supa_backend",
+  "version": "1.0.0",
+  "description": "Complete Supabase PostgreSQL schema for the rebuilt Mentors-App platform. Run migrations in order inside the Supabase SQL Editor or via `supabase db push`.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "supabase": "^2.92.1"
+  }
+}
