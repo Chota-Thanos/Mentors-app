@@ -28,9 +28,17 @@ app = FastAPI(
 )
 
 # ── CORS ───────────────────────────────────────────────────────────────────────
+# FRONTEND_URL can be a single URL or a comma-separated list of allowed origins.
+# Trailing slashes are stripped — browsers send origins without them.
+_raw_origins = _settings.frontend_url or ""
+_allowed_origins: list[str] = [
+    o.strip().rstrip("/") for o in _raw_origins.split(",") if o.strip()
+]
+_allowed_origins += ["http://localhost:3000", "http://localhost:3001"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[_settings.frontend_url, "http://localhost:3000", "http://localhost:3001"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
