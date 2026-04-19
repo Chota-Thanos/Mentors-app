@@ -430,6 +430,9 @@ export default function ProfessionalPublicProfileView({
     return null;
   }, [detail, existingActiveRequest]);
 
+  // Derive layout mode from the resolved professional role
+  const isMentor = ["mentor", "mains_expert"].includes(detail?.profile?.role ?? "");
+
   if (loading) {
     return (
       <div className="flex flex-col gap-8 animate-pulse">
@@ -446,8 +449,8 @@ export default function ProfessionalPublicProfileView({
   if (!detail) {
     return (
       <div className="rounded-[32px] border border-slate-200 bg-white p-12 text-center shadow-sm">
-        <h1 className="text-2xl font-black tracking-tight text-slate-900">Mentor not found</h1>
-        <p className="mt-2 text-slate-600">This profile might be private or doesn't exist.</p>
+        <h1 className="text-2xl font-black tracking-tight text-slate-900">Profile not found</h1>
+        <p className="mt-2 text-slate-600">This profile might be private or doesn&apos;t exist.</p>
         <Link href="/mentors/discover" className="mt-6 inline-flex h-11 items-center justify-center rounded-full bg-[#173aa9] px-6 text-sm font-bold text-white shadow-lg">
           Back to Directory
         </Link>
@@ -458,7 +461,7 @@ export default function ProfessionalPublicProfileView({
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
       <div className="space-y-12">
-        {/* Hero Section */}
+        {/* ── Hero ── */}
         <section className="relative overflow-hidden rounded-[40px] border border-slate-100 bg-white p-6 shadow-sm md:p-10">
           <div className="flex flex-col gap-8 md:flex-row md:items-start">
             <div className="relative h-40 w-40 flex-shrink-0 overflow-hidden rounded-[32px] bg-slate-50 shadow-md md:h-52 md:w-52">
@@ -479,31 +482,31 @@ export default function ProfessionalPublicProfileView({
 
             <div className="flex-1 space-y-4">
               <div className="flex flex-wrap gap-2">
-                 <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">
-                    {detail.role_label}
-                 </span>
-                 {detail.profile.is_verified && (
-                   <span className="flex items-center gap-1 inline-flex rounded-full bg-[#eaf8f4] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#176a5c]">
-                      <Check className="h-3 w-3" /> Verified
-                   </span>
-                 )}
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                  {detail.role_label}
+                </span>
+                {detail.profile.is_verified && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[#eaf8f4] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#176a5c]">
+                    <Check className="h-3 w-3" /> Verified
+                  </span>
+                )}
               </div>
 
               <div>
                 <h1 className="text-4xl font-black tracking-tight text-slate-900">{detail.profile.display_name}</h1>
-                <p className="mt-2 text-xl font-medium text-slate-600">{detail.profile.headline || "Professional Mentor"}</p>
+                <p className="mt-2 text-xl font-medium text-slate-600">{detail.profile.headline || (isMentor ? "Mains Mentor" : "Quiz Creator")}</p>
               </div>
 
               <div className="flex flex-wrap items-center gap-6">
-                 <div className="flex items-center gap-2">
-                    <RatingStars rating={detail.review_summary.average_rating} />
-                    <span className="text-sm font-bold text-slate-900">{detail.review_summary.average_rating.toFixed(1)}</span>
-                    <span className="text-sm font-medium text-slate-400">({detail.review_summary.total_reviews} reviews)</span>
-                 </div>
-                 <div className="flex items-center gap-2 text-sm font-bold text-slate-600">
-                    <Clock3 className="h-4 w-4 text-[#173aa9]" />
-                    {detail.response_time_text}
-                 </div>
+                <div className="flex items-center gap-2">
+                  <RatingStars rating={detail.review_summary.average_rating} />
+                  <span className="text-sm font-bold text-slate-900">{detail.review_summary.average_rating.toFixed(1)}</span>
+                  <span className="text-sm font-medium text-slate-400">({detail.review_summary.total_reviews} reviews)</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm font-bold text-slate-600">
+                  <Clock3 className="h-4 w-4 text-[#173aa9]" />
+                  {detail.response_time_text}
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-2 pt-2">
@@ -517,40 +520,43 @@ export default function ProfessionalPublicProfileView({
           </div>
         </section>
 
-        {/* bio & Stats */}
+        {/* ── Bio & Stats ── */}
         <section className="grid gap-6 md:grid-cols-3">
-           <div className="md:col-span-2 space-y-4">
-              <h2 className="text-2xl font-black tracking-tight text-slate-900">About Mentor</h2>
-              <div className="rounded-[32px] bg-slate-50/50 p-8">
-                 <RichTextContent value={cleanBio(detail.profile.bio)} className="text-sm leading-8 text-slate-600" />
+          <div className="md:col-span-2 space-y-4">
+            <h2 className="text-2xl font-black tracking-tight text-slate-900">{isMentor ? "About Mentor" : "About Creator"}</h2>
+            <div className="rounded-[32px] bg-slate-50/50 p-8">
+              <RichTextContent value={cleanBio(detail.profile.bio)} className="text-sm leading-8 text-slate-600" />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h2 className="text-2xl font-black tracking-tight text-slate-900">Experience</h2>
+            <div className="space-y-3">
+              <div className="rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{isMentor ? "Preparation" : "Teaching"}</p>
+                <p className="mt-1 text-sm font-bold text-slate-900">{detail.profile.years_experience || 0}+ years guiding students</p>
               </div>
-           </div>
-           
-           <div className="space-y-4">
-              <h2 className="text-2xl font-black tracking-tight text-slate-900">Experience</h2>
-              <div className="space-y-3">
-                 <div className="rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Preparation</p>
-                    <p className="mt-1 text-sm font-bold text-slate-900">{detail.profile.years_experience || 0}+ years guiding students</p>
-                 </div>
-                 <div className="rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Focus Areas</p>
-                    <p className="mt-1 text-sm font-bold text-slate-900">{detail.exam_focus}</p>
-                 </div>
+              <div className="rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Focus Areas</p>
+                <p className="mt-1 text-sm font-bold text-slate-900">{detail.exam_focus}</p>
               </div>
-           </div>
+            </div>
+          </div>
         </section>
 
-        {/* Programs Section */}
+        {/* ── Programs Section ── */}
         {detail.provided_series.length > 0 && (
           <section className="space-y-6">
             <div className="flex items-end justify-between">
               <div>
-                <h2 className="text-3xl font-black tracking-tight text-slate-900">My Programs</h2>
-                <p className="mt-1 text-slate-500 font-medium text-sm">Targeted courses and test series created by {detail.profile.display_name}.</p>
+                <h2 className="text-3xl font-black tracking-tight text-slate-900">{isMentor ? "My Programs" : "Quiz Programs"}</h2>
+                <p className="mt-1 text-slate-500 font-medium text-sm">
+                  {isMentor
+                    ? `Targeted mains courses and test series by ${detail.profile.display_name}.`
+                    : `Prelims quiz series and practice sets by ${detail.profile.display_name}.`}
+                </p>
               </div>
             </div>
-
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {detail.provided_series.map((series) => (
                 <ProgramCard key={series.id} series={series} />
@@ -559,109 +565,173 @@ export default function ProfessionalPublicProfileView({
           </section>
         )}
 
-        {/* Reviews Section */}
+        {/* ── Reviews Section ── */}
         <section className="space-y-8">
-           <div className="flex items-center justify-between">
-              <h2 className="text-3xl font-black tracking-tight text-slate-900">Mentee Feedback</h2>
-              <div className="flex items-center gap-2">
-                 <span className="text-sm font-bold text-slate-400">{detail.review_summary.total_reviews} reviews collected</span>
-              </div>
-           </div>
+          <div className="flex items-center justify-between">
+            <h2 className="text-3xl font-black tracking-tight text-slate-900">{isMentor ? "Mentee Feedback" : "Student Feedback"}</h2>
+            <span className="text-sm font-bold text-slate-400">{detail.review_summary.total_reviews} reviews</span>
+          </div>
 
-           {detail.recent_reviews.length > 0 ? (
-             <div className="grid gap-6 md:grid-cols-2">
-                {detail.recent_reviews.map((review) => <ReviewCard key={review.id} review={review} />)}
-             </div>
-           ) : (
-             <div className="rounded-[32px] border border-dashed border-slate-200 bg-slate-50/30 p-12 text-center">
-                <p className="text-sm font-medium text-slate-400">No public reviews for this mentor yet.</p>
-             </div>
-           )}
+          {detail.recent_reviews.length > 0 ? (
+            <div className="grid gap-6 md:grid-cols-2">
+              {detail.recent_reviews.map((review) => <ReviewCard key={review.id} review={review} />)}
+            </div>
+          ) : (
+            <div className="rounded-[32px] border border-dashed border-slate-200 bg-slate-50/30 p-12 text-center">
+              <p className="text-sm font-medium text-slate-400">No public reviews yet.</p>
+            </div>
+          )}
         </section>
       </div>
 
-      {/* Sidebar - Mentorship Booking */}
+      {/* ── Sidebar ── */}
       <aside className="lg:sticky lg:top-24 lg:self-start space-y-6">
-        <section className="rounded-[32px] border border-slate-100 bg-white p-8 shadow-xl shadow-slate-200/50">
-           <h2 className="text-2xl font-black tracking-tight text-slate-900">Direct Services</h2>
-           <p className="mt-2 text-sm font-medium text-slate-500">Book standalone services and mentorship sessions.</p>
+        {isMentor ? (
+          /* ── Mentor sidebar: booking ── */
+          <>
+            <section className="rounded-[32px] border border-slate-100 bg-white p-8 shadow-xl shadow-slate-200/50">
+              <h2 className="text-2xl font-black tracking-tight text-slate-900">Direct Services</h2>
+              <p className="mt-2 text-sm font-medium text-slate-500">Book standalone services and mentorship sessions.</p>
 
-           <div className="mt-8 space-y-4">
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-50/50 border border-slate-100">
-                 <div className="space-y-0.5">
-                    <p className="text-sm font-bold text-slate-900">Mentorship Call</p>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">30-45 Minute Session</p>
-                 </div>
-                 <span className="text-sm font-black text-[#173aa9]">{mentorshipPriceLabel}</span>
-              </div>
-
-              {detail.copy_evaluation_enabled && (
+              <div className="mt-8 space-y-4">
                 <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-50/50 border border-slate-100">
                   <div className="space-y-0.5">
+                    <p className="text-sm font-bold text-slate-900">Mentorship Call</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">30–45 Minute Session</p>
+                  </div>
+                  <span className="text-sm font-black text-[#173aa9]">{mentorshipPriceLabel}</span>
+                </div>
+
+                {detail.copy_evaluation_enabled && (
+                  <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-50/50 border border-slate-100">
+                    <div className="space-y-0.5">
                       <p className="text-sm font-bold text-slate-900">Copy Evaluation</p>
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Deep Review + Call</p>
+                    </div>
+                    <span className="text-sm font-black text-[#173aa9]">{reviewBundlePriceLabel}</span>
                   </div>
-                  <span className="text-sm font-black text-[#173aa9]">{reviewBundlePriceLabel}</span>
+                )}
+              </div>
+
+              <div className="mt-8 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isAuthenticated) return showLoginModal();
+                    if (requestBlockedReason) return toast.error(requestBlockedReason);
+                    setIsModalOpen(true);
+                  }}
+                  disabled={ownProfile || (!!requestBlockedReason && !existingActiveRequest)}
+                  className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-2xl bg-slate-900 px-6 py-4 text-sm font-bold text-white transition-all hover:bg-[#173aa9] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="relative z-10">Contact Mentor</span>
+                  <ArrowRight className="h-4 w-4 relative z-10 transition-transform group-hover:translate-x-1" />
+                </button>
+
+                {existingActiveRequest && (
+                  <Link href={`/my-purchases/mentorship/${existingActiveRequest.id}`} className="flex w-full items-center justify-center rounded-2xl border-2 border-slate-100 bg-white px-6 py-3.5 text-sm font-bold text-slate-900 transition-colors hover:bg-slate-50">
+                    Continue Active Discussion
+                  </Link>
+                )}
+              </div>
+
+              <p className="mt-6 text-[10px] font-medium leading-5 text-slate-400 italic">
+                * Sending a request starts a private chat. No immediate payment required.
+              </p>
+            </section>
+
+            <section className="rounded-[32px] bg-gradient-to-br from-[#173aa9] to-[#1a237e] p-8 text-white">
+              <Trophy className="h-8 w-8 text-[#8df5e4] mb-4" />
+              <h3 className="text-xl font-black tracking-tight">Verified Expert</h3>
+              <p className="mt-2 text-sm font-medium text-[#bdc2ff]">This mentor has undergone verification to ensure quality and authenticity of credentials.</p>
+              <div className="mt-6 pt-6 border-t border-white/10 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#bdc2ff]">Mentorship</p>
+                  <p className="mt-1 text-lg font-black">{detail.sessions_completed || "New"} <span className="text-xs font-normal opacity-70">sessions</span></p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#bdc2ff]">Programs</p>
+                  <p className="mt-1 text-lg font-black">{detail.provided_series.length} <span className="text-xs font-normal opacity-70">created</span></p>
+                </div>
+              </div>
+            </section>
+          </>
+        ) : (
+          /* ── Quiz Master sidebar: programs + enroll CTA ── */
+          <>
+            <section className="rounded-[32px] border border-slate-100 bg-white p-8 shadow-xl shadow-slate-200/50">
+              <div className="flex items-center gap-3 mb-2">
+                <School className="h-6 w-6 text-[#173aa9]" />
+                <h2 className="text-2xl font-black tracking-tight text-slate-900">Quiz Programs</h2>
+              </div>
+              <p className="mt-1 text-sm font-medium text-slate-500">
+                Structured prelims quiz series for focused practice and ranking.
+              </p>
+
+              {detail.provided_series.length > 0 ? (
+                <div className="mt-6 space-y-3">
+                  {detail.provided_series.slice(0, 4).map((series) => (
+                    <Link key={series.id} href={`/programs/${series.id}`} className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/60 px-4 py-3 transition hover:border-[#173aa9]/30 hover:bg-[#f0f4ff]">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900 truncate">{series.title}</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{series.series_kind} · {series.access_type === "paid" ? `₹${series.price.toLocaleString()}` : "Free"}</p>
+                      </div>
+                      <ArrowRight className="h-4 w-4 flex-shrink-0 text-[#173aa9]" />
+                    </Link>
+                  ))}
+                  {detail.provided_series.length > 4 && (
+                    <p className="text-center text-xs font-semibold text-slate-400">+{detail.provided_series.length - 4} more programs below</p>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-6 rounded-2xl border border-dashed border-slate-200 p-6 text-center">
+                  <p className="text-sm font-medium text-slate-400">No public programs yet.</p>
                 </div>
               )}
-           </div>
 
-           <div className="mt-8 space-y-3">
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isAuthenticated) return showLoginModal();
-                  if (requestBlockedReason) return toast.error(requestBlockedReason);
-                  setIsModalOpen(true);
-                }}
-                disabled={ownProfile || (!!requestBlockedReason && !existingActiveRequest)}
-                className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-2xl bg-slate-900 px-6 py-4 text-sm font-bold text-white transition-all hover:bg-[#173aa9] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <span className="relative z-10">Contact Mentor</span>
-                <ArrowRight className="h-4 w-4 relative z-10 transition-transform group-hover:translate-x-1" />
-              </button>
-
-              {existingActiveRequest && (
-                <Link href={`/my-purchases/mentorship/${existingActiveRequest.id}`} className="flex w-full items-center justify-center rounded-2xl border-2 border-slate-100 bg-white px-6 py-3.5 text-sm font-bold text-slate-900 transition-colors hover:bg-slate-50">
-                   Continue Active Discussion
+              <div className="mt-6">
+                <Link
+                  href={`/mentors/discover`}
+                  className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-[#173aa9] px-6 py-4 text-sm font-bold text-white shadow-lg transition hover:bg-[#15328f]"
+                >
+                  <BookOpenCheck className="h-4 w-4" />
+                  Browse All Programs
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </Link>
-              )}
-           </div>
-
-           <p className="mt-6 text-[10px] font-medium leading-5 text-slate-400 italic">
-              * Sending a request starts a private chat to discuss your requirements. No immediate payment required.
-           </p>
-        </section>
-
-        {/* Stats card */}
-        <section className="rounded-[32px] bg-gradient-to-br from-[#173aa9] to-[#1a237e] p-8 text-white">
-           <Trophy className="h-8 w-8 text-[#8df5e4] mb-4" />
-           <h3 className="text-xl font-black tracking-tight">Verified Expert</h3>
-           <p className="mt-2 text-sm font-medium text-[#bdc2ff]">This mentor has undergone a verification process to ensure quality and authenticity of their credentials.</p>
-           
-           <div className="mt-6 pt-6 border-t border-white/10 grid grid-cols-2 gap-4">
-              <div>
-                 <p className="text-[10px] font-bold uppercase tracking-widest text-[#bdc2ff]">Mentorship</p>
-                 <p className="mt-1 text-lg font-black">{detail.sessions_completed || "New"} <span className="text-xs font-normal opacity-70">sessions</span></p>
               </div>
-              <div>
-                 <p className="text-[10px] font-bold uppercase tracking-widest text-[#bdc2ff]">Programs</p>
-                 <p className="mt-1 text-lg font-black">{detail.provided_series.length} <span className="text-xs font-normal opacity-70">created</span></p>
+            </section>
+
+            <section className="rounded-[32px] bg-gradient-to-br from-[#173aa9] to-[#1a237e] p-8 text-white">
+              <Users2 className="h-8 w-8 text-[#8df5e4] mb-4" />
+              <h3 className="text-xl font-black tracking-tight">Verified Creator</h3>
+              <p className="mt-2 text-sm font-medium text-[#bdc2ff]">This creator has been verified to produce high-quality prelims quiz content aligned to the UPSC syllabus.</p>
+              <div className="mt-6 pt-6 border-t border-white/10 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#bdc2ff]">Students</p>
+                  <p className="mt-1 text-lg font-black">{detail.students_mentored || "—"} <span className="text-xs font-normal opacity-70">enrolled</span></p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#bdc2ff]">Programs</p>
+                  <p className="mt-1 text-lg font-black">{detail.provided_series.length} <span className="text-xs font-normal opacity-70">published</span></p>
+                </div>
               </div>
-           </div>
-        </section>
+            </section>
+          </>
+        )}
       </aside>
 
-      <MentorshipRequestModal
-        open={isModalOpen}
-        onOpenChange={setIsModalOpen}
-        mentorId={detail.profile.id.toString()}
-        mentorName={detail.profile.display_name}
-        copyEvaluationEnabled={detail.copy_evaluation_enabled}
-        mentorshipPriceLabel={mentorshipPriceLabel}
-        reviewBundlePriceLabel={reviewBundlePriceLabel}
-        seriesId={seriesId}
-      />
+      {isMentor && (
+        <MentorshipRequestModal
+          open={isModalOpen}
+          onOpenChange={setIsModalOpen}
+          mentorId={detail.profile.id.toString()}
+          mentorName={detail.profile.display_name}
+          copyEvaluationEnabled={detail.copy_evaluation_enabled}
+          mentorshipPriceLabel={mentorshipPriceLabel}
+          reviewBundlePriceLabel={reviewBundlePriceLabel}
+          seriesId={seriesId}
+        />
+      )}
     </div>
   );
 }
